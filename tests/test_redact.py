@@ -182,6 +182,17 @@ def test_one_megabyte_benign_input_under_100ms():
     assert r.redact(text) == text  # benign 1MB comes back byte-identical
 
 
+def test_many_unclosed_pem_markers_do_not_redos():
+    # adversarial: thousands of BEGIN markers with no matching END. A naive
+    # lazy `.*?` body scans to end-of-string from every BEGIN — O(n^2). The
+    # tempered body keeps it linear. This is the case the benign 1MB test
+    # cannot exercise, so it is pinned separately.
+    text = "-----BEGIN RSA PRIVATE KEY-----\nnope\n" * 20_000  # ~700 KB, no END
+    r = Redactor()
+    best = min(_timed(r, text) for _ in range(3))
+    assert best < 0.2, f"pathological PEM redact took {best:.3f}s (ReDoS)"
+
+
 def _timed(r: Redactor, text: str) -> float:
     start = time.perf_counter()
     r.redact(text)

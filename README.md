@@ -91,9 +91,14 @@ introspection). Optional per-role routing: let a 70B plan while a 7B executes, o
 ## Quickstart
 
 > ⚠️ **Pre-TUI stage** — the interactive TUI ships in phase 7. What works today: install,
-> `doctor`, the safety kernel, the envelope ladders, and the complete provider layer —
-> streaming OpenAI-compatible client, Ollama introspection, role routing, and endpoint
-> capability detection — all proof-tested against a real HTTP server.
+> `doctor`, the full safety kernel (mode/command policy, path jail, secret redaction,
+> injection guard, git-snapshot undo, approvals), the complete tool suite (read/write/edit
+> with a fuzzy patcher, cross-platform shell, search, gated network fetch), the envelope
+> ladders, and the complete provider layer — streaming OpenAI-compatible client, Ollama
+> introspection, role routing, capability detection. An agent using these can already
+> write, read, edit, and run code, undo its changes byte-exactly, and be stopped at every
+> safety boundary — all proof-tested end-to-end against real files, real subprocesses, and
+> real git.
 
 ```bash
 # install (Python 3.11+)
@@ -135,7 +140,8 @@ probes, and real-socket proof tests — evidence, not claims.
 | 0 | Scaffold, safety kernel, envelope ladders, CI | ✅ shipped |
 | 1 | Foundation: config hardening, session state, append-only audit trail, mock failure injection | ✅ shipped · 2026-07-15 |
 | 2 | Providers: streaming OpenAI-compat client (fragment-safe tool calls, retries, key redaction), Ollama extras, registry + role routing, capability detection | ✅ shipped · 2026-07-15 · 195 tests, 7 validator findings fixed, real-server proofs |
-| 3–4 | Tool suite, sandbox, approvals, undo | 📋 specced |
+| 3 | Tool suite: read/list/glob/grep, fuzzy patcher + jailed atomic writes, cross-platform shell (process-tree kill), gated network fetch, registry assembly | ✅ shipped · 2026-07-15 |
+| 4 | Safety kernel: path jail, command policy, approval broker, secret redaction, git-snapshot undo, injection guard | ✅ shipped · 2026-07-15 · 753 tests, ReDoS blocker fixed, real-fs/git/subprocess proofs |
 | 5–6 | Turn engine, capability probes, adapters | 📋 specced |
 | 7–8 | Textual TUI, slash commands | 📋 specced |
 | 9–11 | Workflows, memory/handoff, v0.1 release | 📋 specced |

@@ -78,14 +78,18 @@ NON_SECRET_ENV_KEYS: frozenset[str] = frozenset(
 #: becomes its replacement token ``[redacted:<label>]``. Every pattern is a
 #: literal prefix + character-class quantifiers, so matching is linear. The
 #: PEM pattern goes first so a whole block collapses into one token before
-#: the narrower token patterns can nibble at its base64 body; its lazy body
-#: scan costs one O(n) forward pass per BEGIN marker, nothing worse.
+#: the narrower token patterns can nibble at its base64 body. Its body uses a
+#: TEMPERED lazy token — ``(?:(?!-----BEGIN )[\s\S])*?`` — so the scan for a
+#: closing END can never run past the next BEGIN. Without the tempering, many
+#: unclosed BEGIN markers make each one launch its own scan to end-of-string,
+#: an O(n^2) ReDoS on attacker-controlled tool output; tempered, each char is
+#: visited O(1) and matching stays strictly linear (pinned by test_redact).
 KEY_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "private-key",
         re.compile(
             r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
-            r".*?"
+            r"(?:(?!-----BEGIN )[\s\S])*?"
             r"-----END [A-Z ]*PRIVATE KEY-----",
             re.DOTALL,
         ),
