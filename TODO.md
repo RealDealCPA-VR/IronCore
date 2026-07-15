@@ -206,7 +206,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** deterministic given state; never exceeds budget (property test over random
     states); anchor present exactly per cadence. **Verify:** `uv run --extra dev pytest tests/test_composer.py -q`
 
-- [~] **IC-502 · Turn state machine** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-502 · Turn state machine** *(done: fable-session, 2026-07-16 — full COMPOSE→CALL→PARSE→GATE→EXECUTE→OBSERVE→VERIFY→DONE loop, native+ironcall protocols, gate=decide→command-policy→jail-read(SAFETY-T4)→injection-downgrade, snapshot-per-mutating-turn, evidence-based stop_reason, 4 collaborator seams in protocols.py; 14 event-sequence tests)*
   - **Depends:** IC-501, IC-403, IC-304, IC-104 · **Spec:** SPEC §5, CONTRACTS §4
   - **Files:** `ironcore/core/engine.py`, `tests/test_engine.py` (new)
   - **Build:** implement `run_turn`: COMPOSE→CALL→PARSE→GATE→EXECUTE→OBSERVE loop→DONE
@@ -263,7 +263,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** full run against MockProvider produces a saved profile + card; one probe
     crashing doesn't sink the run. **Verify:** `uv run --extra dev pytest tests/test_probe_runner.py -q`
 
-- [~] **IC-602 · CTX-HONESTY + RETENTION probes** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-602 · CTX-HONESTY + RETENTION probes** *(done: fable-session, 2026-07-16 — needle-at-depth honest_context (contiguous-passing-prefix), constraint-retention→instruction_retention+coherence_horizon, mechanical scoring, graceful degrade; 17 tests)*
   - **Depends:** IC-601 · **Spec:** MODELS §2
   - **Files:** `ironcore/envelope/probe_ctx.py` (new), `tests/test_probe_ctx.py` (new)
   - **Build:** needle-at-depth ladder (4k→advertised, depths 25/50/75/90%); constraint-
@@ -272,7 +272,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockProvider scripted "forgets past 8k" yields honest_context 8k; retention
     math verified against hand-computed fixtures. **Verify:** `uv run --extra dev pytest tests/test_probe_ctx.py -q`
 
-- [~] **IC-603 · TOOL-FORM + JSON-STRICT probes** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-603 · TOOL-FORM + JSON-STRICT probes** *(done: fable-session, 2026-07-16 — 10-trial per-protocol scoring (native/strict_json/ironcall via parse) + schema-conforming JSON under distractors→json_adherence; 18 tests)*
   - **Depends:** IC-601, IC-606 · **Spec:** MODELS §2
   - **Files:** `ironcore/envelope/probe_tools.py` (new), `tests/test_probe_tools.py` (new)
   - **Build:** 10 trials per protocol (native/strict_json/ironcall) with exact-match scoring
@@ -281,7 +281,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scoring is mechanical + deterministic on scripted outputs; per-protocol scores
     land in profile. **Verify:** `uv run --extra dev pytest tests/test_probe_tools.py -q`
 
-- [~] **IC-604 · EDIT-FORMAT + CODE-SMOKE probes** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-604 · EDIT-FORMAT + CODE-SMOKE probes** *(done: fable-session, 2026-07-16 — per-format apply-and-ast-parse scoring (no-op=fail) via IC-302 appliers + in-process code-smoke floor gate w/ isolated-globals exec; 22 tests)*
   - **Depends:** IC-601, IC-302 · **Spec:** MODELS §2
   - **Files:** `ironcore/envelope/probe_edits.py` (new), `tests/test_probe_edits.py` (new)
   - **Build:** per-format fixture edits scored by "IC-302 patcher applies AND result parses"
@@ -290,7 +290,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** deterministic on scripted outputs; whole-file no-op detected as failure.
     **Verify:** `uv run --extra dev pytest tests/test_probe_edits.py -q`
 
-- [~] **IC-605 · Adapter wiring into the engine** *(claimed: fable-session, 2026-07-16 — merged into IC-502)*
+- [x] **IC-605 · Adapter wiring into the engine** *(done: fable-session, 2026-07-16 — merged into IC-502: engine consumes profile.recommended_tool_protocol (native vs ironcall floor) + recommended_edit_format + anchor_cadence + resolve_sampling(kind,attempt))*
   - **Depends:** IC-502, IC-601 · **Spec:** SPEC §4.3, CONTRACTS §5
   - **Files:** `ironcore/core/engine.py`, `ironcore/core/composer.py`, `tests/test_adapter_wiring.py` (new)
   - **Build:** engine consumes `recommended_tool_protocol()` / `recommended_edit_format()` /
