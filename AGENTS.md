@@ -38,7 +38,10 @@ one-pass sized, and verification is evidence, not claims.
 2. Flip the task to `[?]` (or `[x]` if Verify is fully mechanical) with evidence.
 3. Append a handoff block to `HANDOFF.md` (format: `docs/PROTOCOLS.md` §2 — the
    sentinels matter, `ironcore/memory/handoff.py` parses them).
-4. Report: files changed, verify output, gotchas. Do **not** push unless explicitly asked.
+4. If your work completes a phase (or changes what "works today"), update README.md —
+   the roadmap table and the Quickstart status note — in the same change set. The README
+   must never claim less or more than what is actually shipped.
+5. Report: files changed, verify output, gotchas. Do **not** push unless explicitly asked.
 
 ## Never
 

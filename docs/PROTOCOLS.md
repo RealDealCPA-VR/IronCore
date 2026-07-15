@@ -123,5 +123,6 @@ no CONTRACTS.md interfaces. The orchestrator checks this before fan-out, not aft
 [ ] tests green, ruff clean (or the redness is documented as the handoff's Context)
 [ ] TODO.md reflects reality (claims, states, evidence)
 [ ] HANDOFF.md block appended
+[ ] README.md roadmap/status updated if anything shipped (it must always match reality)
 [ ] no secrets, no absolute local paths, no personal identifiers in anything committed
 ```

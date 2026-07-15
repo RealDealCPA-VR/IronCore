@@ -90,8 +90,10 @@ introspection). Optional per-role routing: let a 70B plan while a 7B executes, o
 
 ## Quickstart
 
-> ⚠️ **Scaffold stage** — the TUI ships in phase 7. What works today: install, `doctor`,
-> the safety kernel, the envelope ladders, and the full test suite.
+> ⚠️ **Pre-TUI stage** — the interactive TUI ships in phase 7. What works today: install,
+> `doctor`, the safety kernel, the envelope ladders, and the complete provider layer —
+> streaming OpenAI-compatible client, Ollama introspection, role routing, and endpoint
+> capability detection — all proof-tested against a real HTTP server.
 
 ```bash
 # install (Python 3.11+)
@@ -123,13 +125,16 @@ kernel. The TUI is a thin client over an event stream — the engine never print
 
 ## Project status & roadmap
 
-This repository is a **fully specified scaffold**: the architecture, contracts, and build plan
-are done; implementation proceeds in one-pass tasks designed for agent (or human) contributors.
+The architecture, contracts, and build plan are done; implementation proceeds in one-pass
+tasks designed for agent (or human) contributors. Every shipped phase is validated the same
+way: full offline test suite, an independent adversarial review with execution-verified
+probes, and real-socket proof tests — evidence, not claims.
 
 | Phase | What lands | Status |
 |---|---|---|
 | 0 | Scaffold, safety kernel, envelope ladders, CI | ✅ shipped |
-| 1–2 | Config, event bus, providers (streaming, Ollama) | 📋 specced |
+| 1 | Foundation: config hardening, session state, append-only audit trail, mock failure injection | ✅ shipped · 2026-07-15 |
+| 2 | Providers: streaming OpenAI-compat client (fragment-safe tool calls, retries, key redaction), Ollama extras, registry + role routing, capability detection | ✅ shipped · 2026-07-15 · 195 tests, 7 validator findings fixed, real-server proofs |
 | 3–4 | Tool suite, sandbox, approvals, undo | 📋 specced |
 | 5–6 | Turn engine, capability probes, adapters | 📋 specced |
 | 7–8 | Textual TUI, slash commands | 📋 specced |
