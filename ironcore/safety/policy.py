@@ -75,4 +75,53 @@ DENYLIST_SEED: tuple[str, ...] = (
     "curl | bash",
     "wget | sh",
     ":(){ :|:& };:",
+    # IC-402 additions. Matching happens on the *normalized* command line
+    # (casefolded, whitespace-collapsed, quotes stripped, shell wrappers
+    # unwrapped — ironcore/safety/commands.py), so entries are lowercase with
+    # single spaces. This tuple is NOT frozen (CONTRACTS §1) and may grow.
+    "rm -fr /",
+    "rm -fr ~",
+    "--no-preserve-root",
+    "wget | bash",
+    "rd /s /q c:\\",
+    "del /f /s /q c:\\",
+    "format c:",
+    "vssadmin delete shadows",
+    "reg delete hklm",
+)
+
+
+#: Seed risky-pattern list for the command policy engine (IC-402). Regex
+#: sources, compiled case-insensitively in ironcore/safety/commands.py and
+#: matched against the normalized command line. A hit escalates a base ALLOW
+#: to ASK (never loosens, never downgrades an ASK/DENY). NOT frozen
+#: (CONTRACTS §1): entries may be added, base entries are never removed.
+RISKY_PATTERN_SEED: tuple[str, ...] = (
+    # source publishing / remote mutation
+    r"\bgit\s+push\b",
+    r"\b(?:npm|pnpm|yarn)\s+publish\b",
+    r"\bpip3?\b[^|&;]*\bupload\b",
+    r"\btwine\s+upload\b",
+    r"\bcargo\s+publish\b",
+    # recursive / forced deletes
+    r"\brm\b(?=[^|&;]*\s-[a-z-]*r)(?=[^|&;]*\s-[a-z-]*f)",
+    r"\brm\b[^|&;]*--recursive",
+    r"\b(?:rd|rmdir)\b[^|&;]*/s\b",
+    r"\bdel\b[^|&;]*/[fsq]\b",
+    r"\bremove-item\b[^|&;]*-recurse",
+    # privilege escalation
+    r"\bsudo\b",
+    r"\brunas\b",
+    r"\bdoas\b",
+    # pipe-to-shell (remote code straight into an interpreter)
+    r"\b(?:curl|wget|iwr|invoke-webrequest)\b[^|]*\|\s*(?:\S*[\\/])?"
+    r"(?:sh|bash|zsh|dash|pwsh|powershell)\b",
+    r"\|\s*iex\b",
+    # obfuscated payloads
+    r"\b(?:powershell|pwsh)(?:\.exe)?\b[^|&;]*\s-e(?:nc[a-z]*)?\s",
+    # disk / filesystem destruction
+    r"\bmkfs\b",
+    r"\bformat\s+[a-z]:",
+    r"\bdiskpart\b",
+    r"\bdd\b[^|&;]*\bof=/dev/",
 )

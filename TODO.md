@@ -100,7 +100,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 3 — Tools
 
-- [ ] **IC-301 · Read-side tools: read_file / list_dir / glob / grep**
+- [x] **IC-301 · Read-side tools: read_file / list_dir / glob / grep** *(done: fable-session, 2026-07-15 — 4 READ tools, line-numbered reads w/ exact truncation counts, binary-safe grep, honest caps; 25 tests)*
   - **Depends:** — · **Spec:** SPEC §6.1–6.2
   - **Files:** `ironcore/tools/fs_read.py` (new), `tests/tools/test_fs_read.py` (new)
   - **Build:** READ-risk tools; line-numbered reads with offset/limit; honest `[truncated:
@@ -109,7 +109,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** truncation marks exact counts; binary files skipped not crashed; all outputs
     deterministic. **Verify:** `uv run --extra dev pytest tests/tools -q`
 
-- [ ] **IC-302 · Deterministic patcher + write-side tools**
+- [~] **IC-302 · Deterministic patcher + write-side tools** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-301 · **Spec:** SPEC §4.3, §6.1; MODELS §3
   - **Files:** `ironcore/tools/patch.py` (new), `ironcore/tools/fs_write.py` (new), `tests/tools/test_patch.py` (new)
   - **Build:** three appliers — unified diff (fuzzy line-anchor match ±3), search/replace
@@ -119,7 +119,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** table-driven fixtures per format incl. offset-drift, ambiguous-match,
     CRLF/LF preservation; nothing writes on failed apply. **Verify:** `uv run --extra dev pytest tests/tools -q`
 
-- [ ] **IC-303 · Shell tool (Windows + POSIX)**
+- [x] **IC-303 · Shell tool (Windows + POSIX)** *(done: fable-session, 2026-07-15 — EXEC tool, process-tree kill via killpg/taskkill, merged capped output, exact command in data for previews; 10 cross-OS tests)*
   - **Depends:** — · **Spec:** SPEC §6.1
   - **Files:** `ironcore/tools/shell.py` (new), `tests/tools/test_shell.py` (new)
   - **Build:** EXEC-risk; asyncio subprocess; cwd=workspace; timeout kills the process tree
@@ -128,7 +128,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** tests pass on Windows AND ubuntu CI (echo, exit-code, timeout-kill, big-output
     cap). **Verify:** `uv run --extra dev pytest tests/tools -q`
 
-- [ ] **IC-304 · Default toolset assembly**
+- [~] **IC-304 · Default toolset assembly** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-301, IC-302, IC-303 · **Spec:** SPEC §6.1
   - **Files:** `ironcore/tools/default.py` (new), `tests/tools/test_default.py` (new)
   - **Build:** `build_default_registry(settings, workspace)` — fs + shell always; fetch_url
@@ -138,7 +138,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 4 — Safety kernel completion
 
-- [ ] **IC-401 · Path jail**
+- [x] **IC-401 · Path jail** *(done: fable-session, 2026-07-15 — resolve_jailed/is_inside, blocks ../absolute/UNC/drive/symlink-escape via resolved-realpath containment; 16 tests, 25 escape attempts)*
   - **Depends:** — · **Spec:** SAFETY §2 T2, SPEC §7.3
   - **Files:** `ironcore/safety/jail.py` (new), `tests/test_jail.py` (new)
   - **Build:** `resolve_jailed(workspace, candidate) -> Path | JailViolation`; blocks `..`,
@@ -147,7 +147,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** adversarial table of ≥15 escape attempts all blocked on both OSes; legit
     nested paths pass. **Verify:** `uv run --extra dev pytest tests/test_jail.py -q`
 
-- [ ] **IC-402 · Command policy engine**
+- [x] **IC-402 · Command policy engine** *(done: fable-session, 2026-07-15 — normalize+unwrap shell wrappers, deny-list in ALL modes, risky-pattern ALLOW→ASK-in-AUTO, additive-only ceiling merge; policy.py DENYLIST/RISKY seeds extended; tests)*
   - **Depends:** — · **Spec:** SAFETY §2 T1/T8, SPEC §7.4, CONTRACTS §7
   - **Files:** `ironcore/safety/commands.py` (new), `ironcore/safety/policy.py`, `tests/test_command_policy.py` (new)
   - **Build:** normalize command line (quotes, `cmd /c`, `sh -c` unwrap); deny-list match in
@@ -157,7 +157,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** deny-list bypass attempts (quoting, prefixing) still caught; tighten-only
     property tested. **Verify:** `uv run --extra dev pytest tests/test_command_policy.py -q`
 
-- [ ] **IC-403 · Approval flow plumbing**
+- [x] **IC-403 · Approval flow plumbing** *(done: fable-session, 2026-07-15 — ApprovalBroker async request/answer, turn-scoped grants auto-expiring at turn end, timeout→deny fail-closed, audited; 11 tests)*
   - **Depends:** IC-102 · **Spec:** SPEC §3.1, SAFETY §4, CONTRACTS §4
   - **Files:** `ironcore/core/approvals.py` (new), `tests/test_approvals.py` (new)
   - **Build:** `ApprovalBroker`: engine awaits `request(preview) -> ApprovalAnswer`; front end
@@ -166,7 +166,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** async tests: grant, deny, timeout-deny, turn-scoped-grant expiry.
     **Verify:** `uv run --extra dev pytest tests/test_approvals.py -q`
 
-- [ ] **IC-404 · Secret redaction**
+- [x] **IC-404 · Secret redaction** *(done: fable-session, 2026-07-15 — Redactor.from_env + key-shaped patterns (sk-/ghp_/AKIA/Bearer/PEM), 3 choke-point fns, 1MB in ~5ms; 18 tests, 10 planted secrets all caught)*
   - **Depends:** — · **Spec:** SAFETY §6
   - **Files:** `ironcore/safety/redact.py` (new), `tests/test_redact.py` (new)
   - **Build:** `Redactor` built from env values (len≥8), `.env` values, key-shaped patterns
@@ -175,7 +175,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** fixture text with 10 planted secrets → zero survive; no catastrophic-regex
     blowup on 1MB input (<100ms). **Verify:** `uv run --extra dev pytest tests/test_redact.py -q`
 
-- [ ] **IC-405 · Git snapshot undo engine**
+- [x] **IC-405 · Git snapshot undo engine** *(done: fable-session, 2026-07-15 — shadow ref refs/ironcore/undo via private GIT_INDEX_FILE, non-git private-repo fallback, byte-exact undo/redo incl adds/deletes, transparent to user index/HEAD/branch; 9 tests)*
   - **Depends:** — · **Spec:** SAFETY §5, SPEC §7.6
   - **Files:** `ironcore/safety/snapshots.py` (new), `tests/test_snapshots.py` (new)
   - **Build:** shadow snapshots on `refs/ironcore/undo` (user repo) or a private repo under
@@ -184,7 +184,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** snapshot→mutate→undo→redo roundtrip byte-identical in git and non-git tmp
     workspaces; user's `git status` unchanged by snapshotting. **Verify:** `uv run --extra dev pytest tests/test_snapshots.py -q`
 
-- [ ] **IC-406 · Injection guard**
+- [x] **IC-406 · Injection guard** *(done: fable-session, 2026-07-15 — nonce-delimited wrap_untrusted, two-tier detect_injection (12/12 flagged, 0 benign FP), downgrade_for_flag tighten-only HOT/SUSPICIOUS→ASK in AUTO; 29 tests)*
   - **Depends:** — · **Spec:** SAFETY §2 T3, SPEC §7.5
   - **Files:** `ironcore/safety/injection.py` (new), `tests/test_injection.py` (new)
   - **Build:** `wrap_untrusted(text, source)` with delimiters + standing DATA-not-instructions

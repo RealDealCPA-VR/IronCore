@@ -80,3 +80,12 @@
 **Next:** Phase 3 (IC-301..304 tools) is unblocked; IC-403/502 write audit via the typed helpers; engine consumes ProviderTimeout distinction for budget-aware retry decisions.
 **Gotchas:** audit locking uses byte-0 msvcrt region locks on Windows (LK_LOCK retries ~10s then OSError — fine for tiny writes); OllamaProvider now ALWAYS chats under /v1 even for bare-root config; garbage config sections make env overrides inert for that section (fail-loud at validation, not silent-fix).
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-15T23:40:00+00:00 — wave1-phase3-4
+**Context:** Phases 3+4 wave 1 — 8 parallel one-pass agents: IC-401 jail, IC-402 command policy, IC-403 approvals, IC-404 redaction, IC-405 snapshots, IC-406 injection, IC-301 read tools, IC-303 shell.
+**Changed:** NEW ironcore/safety/{jail,commands,redact,snapshots,injection}.py, ironcore/core/approvals.py, ironcore/tools/{fs_read,shell}.py + their tests; policy.py DENYLIST_SEED extended + RISKY_PATTERN_SEED added (both non-frozen per CONTRACTS §1). safety/__init__.py and tools/__init__.py deliberately untouched (IC-304 owns tool re-exports) — consumers import submodules directly for now.
+**Verified:** uv run --extra dev pytest -> 671 passed; ruff clean.
+**Next:** IC-302 (write tools + patcher) consumes jail.resolve_jailed (use the RETURN value, real resolved path). IC-304 assembles fs_read + shell + write tools + a fetch tool into build_default_registry(settings, workspace). IC-502 engine: classify_command before EXEC, downgrade_for_flag(detect_injection(wrapped)) on next gate, redact_context before provider send, ApprovalBroker at GATE, snapshot() each mutating turn.
+**Gotchas:** jail — open the returned path, not the input (symlink/Win32 defenses void otherwise). command policy — classify_command composes the EXEC gate internally (don't also call decide); "format " seed matches `git log --format` (surface matched rule in transcript). redaction — pattern-only until boot calls set_default_redactor(from_env); redact composed text not fragments. snapshots — first snapshot() makes `?? .ironcore/` appear; undo() auto-banks dirty state; constructor raises if git missing (construct lazily). injection — preamble is once-per-session (engine adds to system prompt), downgrade takes base decision. shell — branch on data["timed_out"] not exit code.
+<!-- HANDOFF v1 END -->
