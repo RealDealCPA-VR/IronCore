@@ -58,7 +58,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 2 — Providers
 
-- [~] **IC-201 · OpenAI-compatible client (streaming, retries)** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-201 · OpenAI-compatible client (streaming, retries)** *(done: fable-session, 2026-07-15 — httpx client, backoff+jitter+Retry-After, ProviderError w/ key redaction, transport/sleep seams; 17 tests)*
   - **Depends:** IC-104 · **Spec:** SPEC §8.1, CONTRACTS §2, module docstring in `openai_compat.py`
   - **Files:** `ironcore/providers/openai_compat.py`, `tests/providers/test_openai_compat.py` (new)
   - **Build:** httpx.AsyncClient; SSE parse; retry/backoff+jitter on 429/5xx honoring
@@ -66,7 +66,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** httpx.MockTransport tests: happy stream, 429-then-success, timeout, key never
     in any error string. **Verify:** `uv run --extra dev pytest tests/providers -q`
 
-- [~] **IC-202 · Native tool-call parsing across chunk fragments** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-202 · Native tool-call parsing across chunk fragments** *(done: fable-session, 2026-07-15 — SSE parse, per-index fragment accumulation, flush-at-end, malformed→repairable error event; 11 tests)*
   - **Depends:** IC-201 · **Spec:** SPEC §8.1
   - **Files:** `ironcore/providers/openai_compat.py`, `tests/providers/test_toolcalls.py` (new)
   - **Build:** accumulate `tool_calls` deltas by index; emit `StreamEvent(kind="tool_call")`

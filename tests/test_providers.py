@@ -71,11 +71,10 @@ def test_mock_exhaustion_is_loud():
         asyncio.run(mock.complete([Message(role="user", content="hi")]))
 
 
-def test_openai_compat_is_an_honest_stub():
+def test_openai_compat_normalizes_base_url():
+    # full client behavior is pinned in tests/providers/ (IC-201/IC-202)
     provider = OpenAICompatProvider(base_url="http://localhost:11434/v1/")
     assert provider.base_url == "http://localhost:11434/v1"  # trailing slash stripped
-    with pytest.raises(NotImplementedError, match="IC-201"):
-        asyncio.run(provider.complete([]))
 
 
 # --- IC-104: failure injection ---------------------------------------------

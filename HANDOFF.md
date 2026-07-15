@@ -35,3 +35,12 @@
 **Next:** IC-201 must mirror the split: stream-mode transport failures = terminal non-repairable error EVENT; complete() raises ProviderError. Repairable convention: data has repairable+reason (+raw for malformed, +message for non-repairable).
 **Gotchas:** mock.py imports ProviderError from openai_compat — once IC-201 adds module-level httpx there, MockProvider consumers transitively import httpx (fine: httpx is a core dep). Fixture tool_call streams end with done data {"finish_reason": "tool_calls"} (test-pinned).
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-15T21:10:00+00:00 — agent-ic201-202
+**Context:** IC-201+IC-202 OpenAI-compatible provider (single owner, same file), phase-2 wave.
+**Changed:** ironcore/providers/openai_compat.py (full impl), tests/providers/test_openai_compat.py (17 tests), tests/providers/test_toolcalls.py (11 tests), tests/test_providers.py (honest-stub test replaced by base-url-normalization pin only).
+**Verified:** uv run --extra dev pytest -q -> 128 passed; ruff clean.
+**Next:** IC-203/204/205 — reuse self._send_with_retries(method, path, json_body=, retries=, stream=); Ollama /api/* lives at server ROOT, strip /v1 from base_url; registry can share one httpx transport via the transport= kwarg (aclose is idempotent).
+**Gotchas:** tool_call events flush at stream END only (on [DONE] or EOF), sorted by index; malformed accumulated JSON -> terminal repairable error event (no done after it); mid-stream transport death does NOT flush drafts; stream-mode connect failures yield error events while complete() raises ProviderError. Redaction is instance-level (_redact/_describe) — new subclass error paths must route through them.
+<!-- HANDOFF v1 END -->
