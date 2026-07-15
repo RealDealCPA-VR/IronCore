@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 from ironcore.core.composer import HISTORY_SHARE, estimate_tokens
 from ironcore.providers.base import Message, SamplingPolicy
 from ironcore.providers.openai_compat import ProviderError
+from ironcore.safety.redact import redact_context
 
 if TYPE_CHECKING:  # annotations only — avoid runtime coupling
     from ironcore.envelope.profile import CapabilityProfile
@@ -70,8 +71,13 @@ _SUMMARY_SYSTEM = (
 
 
 def _render_transcript(history: list[Message]) -> str:
-    """Flatten the history slice into a plain role-tagged transcript to summarize."""
-    return "\n\n".join(f"[{msg.role}] {msg.content}" for msg in history)
+    """Flatten the history slice into a plain role-tagged transcript to summarize.
+
+    Content is redacted here because ``compact`` sends this straight to the
+    provider — it does NOT pass through the composer, so this is the IC-404
+    secret choke point for the compaction path (SAFETY §6 / T4).
+    """
+    return "\n\n".join(f"[{msg.role}] {redact_context(msg.content)}" for msg in history)
 
 
 def _mechanical_digest(history: list[Message]) -> str:
@@ -94,7 +100,7 @@ def _mechanical_digest(history: list[Message]) -> str:
         lines.append("")
         lines.append(f"Recent tail (last {len(tail)} message(s), truncated):")
         for msg in tail:
-            snippet = " ".join(msg.content.split())[:_MECH_SNIPPET]
+            snippet = redact_context(" ".join(msg.content.split()))[:_MECH_SNIPPET]
             lines.append(f"- {msg.role}: {snippet}")
     return "\n".join(lines)
 

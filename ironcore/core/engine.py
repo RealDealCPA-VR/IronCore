@@ -194,6 +194,7 @@ class TurnEngine:
         did_mutate = False
         snapshotted = False
         verify_fed_back = False
+        compacted = False
         stop_reason = "done"
         usage_total: dict[str, int] = {}
         last_text = ""
@@ -206,15 +207,19 @@ class TurnEngine:
                     stop_reason = cap
                     break
 
-                # COMPACT (SPEC §11.2): under context pressure, distill older
-                # history into one handoff-grade summary + keep the recent tail.
-                if should_compact(self._conversation, profile=self.profile):
+                # COMPACT (SPEC §11.2): ONCE per turn, under context pressure,
+                # distill older history into one handoff-grade summary + the
+                # recent tail. The summarizer call counts against the budget so a
+                # compaction storm can't bypass runaway protection (SPEC §5.6/T5).
+                if not compacted and should_compact(self._conversation, profile=self.profile):
+                    compacted = True
                     summary = await compact(
                         self._conversation,
                         provider=self.provider,
                         model=self.settings.roles.summarizer or "",
                     )
                     self._conversation = [summary, *self._conversation[-_KEEP_RECENT:]]
+                    self.budget.record_call(0)
 
                 text_protocol = protocol == "text_protocol"
                 messages = compose(
@@ -311,8 +316,9 @@ class TurnEngine:
                     # stop_reason stays evidence-based; a failing verify is
                     # reported, never silently swallowed (SAFETY T7).
                     if did_mutate:
+                        # verify after ANY mutation (WRITE or EXEC), SPEC §5.5
                         vr = await self.verifier.verify(
-                            self.workspace, self.settings, state, did_write
+                            self.workspace, self.settings, state, did_mutate
                         )
                         if not vr.ok:
                             yield TextDelta(turn_id=turn_id, text=f"\n[verify] {vr.summary}\n")
@@ -328,6 +334,10 @@ class TurnEngine:
                                     )
                                 )
                                 continue
+                            # fed back once and STILL failing: the engine must not
+                            # report success on unverified work (SAFETY T7, SPEC §5.5).
+                            stop_reason = "goal-unmet"
+                            break
                     stop_reason = "denied" if (any_denied and not any_executed) else "done"
                     break
 

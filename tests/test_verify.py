@@ -14,6 +14,7 @@ import sys
 
 from ironcore.config.settings import Settings
 from ironcore.core.engine import TurnEngine
+from ironcore.core.events import TurnCompleted
 from ironcore.core.state import SessionState
 from ironcore.core.verify import CommandVerifier
 from ironcore.envelope.profile import CapabilityProfile
@@ -212,3 +213,6 @@ def test_engine_surfaces_verify_failure(tmp_path):
     # prompt is in the conversation, and verify was surfaced on both stops
     assert any("Verification failed" in m.content for m in engine._conversation)
     assert text.count("[verify]") == 2
+    # SAFETY T7: the engine must NOT report success on still-failing verification
+    completed = [ev for ev in events if isinstance(ev, TurnCompleted)][-1]
+    assert completed.stop_reason == "goal-unmet"
