@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ironcore"
+version = "0.1.0"
+description = "A frontier-grade terminal coding agent for open-source models. The intelligence is in the loop, not just the weights."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "RealDealCPA" }]
+keywords = [
+  "ai",
+  "agent",
+  "cli",
+  "tui",
+  "coding-assistant",
+  "ollama",
+  "llama-cpp",
+  "vllm",
+  "open-source-models",
+]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Code Generators",
+]
+dependencies = [
+  "textual>=0.80",
+  "httpx>=0.27",
+  "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/RealDealCPA-VR/IronCore"
+Repository = "https://github.com/RealDealCPA-VR/IronCore"
+Issues = "https://github.com/RealDealCPA-VR/IronCore/issues"
+
+[project.scripts]
+ironcore = "ironcore.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ironcore"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
