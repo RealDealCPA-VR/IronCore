@@ -62,6 +62,12 @@ class ProviderError(RuntimeError):
     show the user (no secrets, no full request bodies)."""
 
 
+class ProviderTimeout(ProviderError):
+    """The failure that exhausted retries was a transport timeout. Distinct
+    so stream() can map it to reason "timeout" — keeping the real provider
+    and MockProvider.TimeoutFailure drop-in identical (CONTRACTS #2)."""
+
+
 def _wire_messages(messages: list[Message]) -> list[dict[str, Any]]:
     """Message list -> OpenAI chat schema. tool_calls carry their arguments
     as a JSON *string* on the wire; tool results carry tool_call_id/name."""
@@ -216,6 +222,7 @@ class OpenAICompatProvider(Provider):
         stream=True returns the response un-read — the caller must aclose()."""
         attempts = max(retries, 0) + 1
         failure = "no attempts made"
+        timed_out = False
         for attempt in range(attempts):
             retry_after: str | None = None
             try:
@@ -223,6 +230,7 @@ class OpenAICompatProvider(Provider):
                 response = await self._client.send(request, stream=stream)
             except _TRANSPORT_ERRORS as exc:
                 failure = self._describe(exc)
+                timed_out = isinstance(exc, httpx.TimeoutException)
             else:
                 if response.status_code < 400:
                     return response
@@ -230,12 +238,14 @@ class OpenAICompatProvider(Provider):
                 await response.aclose()
                 snippet = self._redact(" ".join(body.split())[:200])
                 failure = f"HTTP {response.status_code} from {path}: {snippet}"
+                timed_out = False
                 if response.status_code not in _RETRY_STATUSES:
                     raise ProviderError(failure)
                 retry_after = response.headers.get("Retry-After")
             if attempt + 1 < attempts:
                 await self._sleep(_backoff_delay(attempt, retry_after))
-        raise ProviderError(f"request failed after {attempts} attempt(s): {failure}")
+        error_type = ProviderTimeout if timed_out else ProviderError
+        raise error_type(f"request failed after {attempts} attempt(s): {failure}")
 
     # -------------------------------------------------------------- parsing
 
@@ -277,8 +287,11 @@ class OpenAICompatProvider(Provider):
             arguments, ok = _parse_arguments(function.get("arguments"))
             if not ok:
                 # repairable data, not an exception: mirror MockProvider.complete()
-                # — the raw fragment rides back in content for the repair loop
-                content += function.get("arguments") or ""
+                # — the raw fragment rides back in content for the repair loop.
+                # Non-string wire shapes (list/number) are re-serialized: content
+                # concatenation must never raise (CONTRACTS #2).
+                raw = function.get("arguments")
+                content += raw if isinstance(raw, str) else json.dumps(raw)
                 continue
             tool_calls.append(
                 ToolCall(
@@ -379,9 +392,10 @@ class OpenAICompatProvider(Provider):
             )
         except ProviderError as exc:
             # stream mode: transport failure is a terminal error EVENT, not a raise
+            reason = "timeout" if isinstance(exc, ProviderTimeout) else "provider_error"
             yield StreamEvent(
                 kind="error",
-                data={"repairable": False, "reason": "provider_error", "message": str(exc)},
+                data={"repairable": False, "reason": reason, "message": str(exc)},
             )
             return
         try:

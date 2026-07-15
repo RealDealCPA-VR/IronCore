@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ironcore.safety.modes import Mode  # config may import safety; safety imports stdlib only
 
@@ -87,7 +87,12 @@ class Settings(BaseModel):
                         raise ConfigError(f"malformed config file {path}: {exc}") from exc
 
         _apply_env(data, env)
-        settings = cls.model_validate(data)
+        try:
+            settings = cls.model_validate(data)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            where = ".".join(str(part) for part in first["loc"]) or "(top level)"
+            raise ConfigError(f"invalid config value at {where}: {first['msg']}") from None
         try:
             Mode(settings.safety.mode)
         except ValueError:
@@ -119,4 +124,7 @@ def _apply_env(data: dict[str, Any], env: dict[str, str]) -> None:
     }
     for var, (section, key) in mapping.items():
         if var in env and env[var]:
-            data.setdefault(section, {})[key] = env[var]
+            section_data = data.setdefault(section, {})
+            if not isinstance(section_data, dict):
+                continue  # garbage section in a file — validation reports it loudly
+            section_data[key] = env[var]

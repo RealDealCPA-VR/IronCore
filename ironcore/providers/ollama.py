@@ -110,6 +110,12 @@ class OllamaProvider(OpenAICompatProvider):
         keep_alive: str | None = "10m",
         **kwargs: Any,
     ) -> None:
+        # Ollama's OpenAI dialect lives under /v1. A bare root URL
+        # (http://host:11434) would make every chat call 404 while /api/*
+        # still works — a confusing half-broken provider. This subclass
+        # knows the server layout, so it completes the URL itself.
+        if not base_url.rstrip("/").endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
         super().__init__(base_url, api_key=api_key, model=model, **kwargs)
         self.keep_alive = keep_alive
 

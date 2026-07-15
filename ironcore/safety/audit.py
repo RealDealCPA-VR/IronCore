@@ -11,6 +11,10 @@ Rules this module enforces:
   preview hard-capped at ``PREVIEW_MAX`` characters.
 - Crash safety: one ``json.dumps`` per line + newline + flush; nothing is
   buffered across events, so a crash loses at most the in-flight line.
+- Concurrency safety: appends are serialized — a per-path thread lock for
+  writers in this process plus an OS advisory lock for other processes.
+  Windows "a"-mode appends are seek-to-EOF-then-write, NOT atomic; without
+  this, concurrent sessions silently lose whole records.
 - Stdlib only (safety package rule, docs/ARCHITECTURE.md §4).
 """
 
@@ -18,9 +22,48 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import IO
+
+try:  # Windows
+    import msvcrt
+
+    def _os_lock(fh: IO[str]) -> None:
+        # lock byte 0 as the file's agreed-upon mutex region; O_APPEND-style
+        # writes still land at EOF regardless of the seek dance
+        pos = fh.tell()
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+        fh.seek(pos)
+
+    def _os_unlock(fh: IO[str]) -> None:
+        pos = fh.tell()
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        fh.seek(pos)
+
+except ImportError:  # POSIX
+    import fcntl
+
+    def _os_lock(fh: IO[str]) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+    def _os_unlock(fh: IO[str]) -> None:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+#: per-path locks serializing appends within this process
+_APPEND_LOCKS: dict[str, threading.Lock] = {}
+_APPEND_LOCKS_GUARD = threading.Lock()
+
+
+def _lock_for(path: Path) -> threading.Lock:
+    key = str(path.resolve())
+    with _APPEND_LOCKS_GUARD:
+        return _APPEND_LOCKS.setdefault(key, threading.Lock())
 
 #: Hard cap on the human-readable args preview, in characters.
 PREVIEW_MAX = 120
@@ -100,10 +143,15 @@ class AuditWriter:
         line = json.dumps(record, ensure_ascii=False, default=str)
         path = self.path_for(stamp)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # crash safety: the whole line + newline in one write, flushed before close
-        with path.open("a", encoding="utf-8", newline="\n") as fh:
-            fh.write(line + "\n")
-            fh.flush()
+        # crash safety: the whole line + newline in one write, flushed before
+        # the locks release — serialized against every other writer
+        with _lock_for(path), path.open("a", encoding="utf-8", newline="\n") as fh:
+            _os_lock(fh)
+            try:
+                fh.write(line + "\n")
+                fh.flush()
+            finally:
+                _os_unlock(fh)
         return record
 
     def tool_call(

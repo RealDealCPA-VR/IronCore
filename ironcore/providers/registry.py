@@ -74,15 +74,23 @@ class ProviderRegistry:
         """The boot path (IC-502): default provider from ``settings.provider``."""
         return cls(settings, transport=transport)
 
+    def _ensure_open(self) -> None:
+        # handing out an already-closed provider fails far from the cause
+        # (httpx's "client has been closed" RuntimeError at request time)
+        if self._closed:
+            raise RuntimeError("ProviderRegistry is closed; build a new one from settings")
+
     @property
     def default(self) -> Provider:
         """The provider built from ``settings.provider`` -- every unset role."""
+        self._ensure_open()
         return self._default
 
     def for_role(self, role: str) -> Provider:
         """The provider for one of VALID_ROLES: the default unless
         ``settings.roles.<role>`` names a model, then the cached instance
         for that model at the same endpoint."""
+        self._ensure_open()
         if role not in VALID_ROLES:
             valid = ", ".join(VALID_ROLES)
             raise ValueError(f"unknown role {role!r}; valid roles: {valid}")

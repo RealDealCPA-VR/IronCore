@@ -30,7 +30,7 @@ from ironcore.providers.base import (
     StreamEvent,
     ToolCall,
 )
-from ironcore.providers.openai_compat import ProviderError
+from ironcore.providers.openai_compat import ProviderError, ProviderTimeout
 
 
 @dataclass
@@ -65,7 +65,8 @@ class Truncate:
 class TimeoutFailure:
     """The transport timed out, post-retries.
 
-    complete(): raises ProviderError(message). stream(): yields a terminal
+    complete(): raises ProviderTimeout(message) — the same ProviderError
+    subclass the real client raises. stream(): yields a terminal
     StreamEvent(kind="error", data={"repairable": False, "reason": "timeout",
     "message": message}) — the terminate-with-done-or-error contract holds
     even for transport failures.
@@ -193,7 +194,9 @@ class MockProvider(Provider):
                 message=Message(role="assistant", content=entry.content[: entry.after_chars]),
                 finish_reason="length",
             )
-        # TimeoutFailure | RaiseError
+        if isinstance(entry, TimeoutFailure):
+            raise ProviderTimeout(entry.message)  # same subclass the real client raises
+        # RaiseError
         raise ProviderError(entry.message)
 
     async def stream(  # type: ignore[override]
@@ -209,6 +212,8 @@ class MockProvider(Provider):
                 yield event
             for call in entry.message.tool_calls:
                 yield StreamEvent(kind="tool_call", tool_call=call)
+            if entry.usage:  # parity with the real provider's usage events
+                yield StreamEvent(kind="usage", data=dict(entry.usage))
             yield StreamEvent(kind="done", data={"finish_reason": entry.finish_reason})
         elif isinstance(entry, MalformedToolJSON):
             for event in _chunked(entry.text_prefix):
