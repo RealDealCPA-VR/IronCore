@@ -116,3 +116,12 @@
 **Next:** Phase 5 (turn engine IC-501..506) — IMPORTANT non-phase-3/4 note from the validator: READ tools deliberately don't jail (resolve absolute paths untouched); since READ is `allow` in every mode, IC-502 MUST add the engine-side "reads outside workspace ASK" gate (SAFETY T4) or read_file could slurp ~/.ssh/id_rsa.
 **Gotchas:** the redact perf guarantee is now pinned by a pathological many-BEGIN case, not just benign 1MB (that test masked the bug).
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-16T02:30:00+00:00 — wave1-phase5-6
+**Context:** Phases 5+6 wave 1 — 4 parallel standalone modules: IC-501 composer, IC-606 ironcall, IC-607 sampling, IC-601 probe runner.
+**Changed:** NEW ironcore/core/{composer,ironcall,sampling}.py, ironcore/envelope/runner.py + tests. No engine.py, no __init__ edits.
+**Verified:** uv run --extra dev pytest -> 836 passed; ruff clean.
+**Next:** IC-502 engine consumes all four. Probe interface for IC-602/603/604: Probe protocol {id,title,targets:Sequence[str],async run(provider)->ProbeResult{probe_id,scores:dict[dotted-path->float],notes,ok}}; run_probes merges dotted paths (tool_protocols.<name>/edit_formats.<name>/honest_context/json_adherence/instruction_retention/coherence_horizon), degrades reliability targets to 0.0 on raise/ok=False, context left at base. STAMP probed_at yourself (no datetime.now in module).
+**Gotchas:** composer — anchor is a SEPARATE system message (engine merges if provider only honors first system msg); working_set param is dict[relpath->text] MRU-first (distinct from state.working_set list); response headroom 15% reserved → set max_tokens from it; redact_context already applied to working-set+history (don't double-redact). ironcall — parse() returns AT MOST ONE call (text protocol = one call/turn; loop by feeding render_result back); IroncallParse.error is model-facing for repair, warning is dimmed-not-fatal. sampling — resolve_sampling(kind in tool|edit|plan|brainstorm, attempt) raises ValueError on other kinds; best_of budget duck-type = should_continue()|remaining()|callable.
+<!-- HANDOFF v1 END -->

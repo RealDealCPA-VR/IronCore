@@ -196,7 +196,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 5 — Turn engine
 
-- [ ] **IC-501 · Context composer**
+- [x] **IC-501 · Context composer** *(done: fable-session, 2026-07-16 — pure compose(): system+anchor(system msg)+MRU working-set+history+input, SPEC §4.3 budget shares vs honest_context, anchor per cadence/plan-active, redact_context on untrusted content; 20 tests)*
   - **Depends:** IC-102 · **Spec:** SPEC §5.2, §4.3; CONTRACTS §4
   - **Files:** `ironcore/core/composer.py` (new), `tests/test_composer.py` (new)
   - **Build:** pure function state→messages: per-envelope system template (native vs ironcall
@@ -206,7 +206,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** deterministic given state; never exceeds budget (property test over random
     states); anchor present exactly per cadence. **Verify:** `uv run --extra dev pytest tests/test_composer.py -q`
 
-- [ ] **IC-502 · Turn state machine**
+- [~] **IC-502 · Turn state machine** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-501, IC-403, IC-304, IC-104 · **Spec:** SPEC §5, CONTRACTS §4
   - **Files:** `ironcore/core/engine.py`, `tests/test_engine.py` (new)
   - **Build:** implement `run_turn`: COMPOSE→CALL→PARSE→GATE→EXECUTE→OBSERVE loop→DONE
@@ -215,7 +215,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockProvider-scripted sessions assert full event sequences: text-only turn,
     tool turn, ask→deny turn, deny-in-plan turn. **Verify:** `uv run --extra dev pytest tests/test_engine.py -q`
 
-- [ ] **IC-503 · Repair loops**
+- [~] **IC-503 · Repair loops** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.4
   - **Files:** `ironcore/core/repair.py` (new), `ironcore/core/engine.py`, `tests/test_repair.py` (new)
   - **Build:** on repairable parse/apply failure: re-ask once with mechanical error framed;
@@ -224,7 +224,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scripted malformed-then-fixed passes; malformed-twice ladders down; repair
     budget trips cleanly. **Verify:** `uv run --extra dev pytest tests/test_repair.py -q`
 
-- [ ] **IC-504 · Verification loop**
+- [~] **IC-504 · Verification loop** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.5, SAFETY §2 T7
   - **Files:** `ironcore/core/verify.py` (new), `ironcore/core/engine.py`, `tests/test_verify.py` (new)
   - **Build:** verify-command discovery (IRONCORE.md → /goal verify: → auto-detect pytest/
@@ -233,7 +233,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** failing-then-passing fixture converges; still-failing surfaces honestly with
     output; no-verify-command turns skip cleanly. **Verify:** `uv run --extra dev pytest tests/test_verify.py -q`
 
-- [ ] **IC-505 · Micro-stepping + compaction**
+- [~] **IC-505 · Micro-stepping + compaction** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.3, §11.2
   - **Files:** `ironcore/core/steps.py` (new), `ironcore/core/compact.py` (new), tests (new)
   - **Build:** plan holder (steps + cursor + evidence per done step) surfaced through the
@@ -243,7 +243,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** step cursor advances only on evidence; compaction output parses as Handoff;
     fallback path tested. **Verify:** `uv run --extra dev pytest tests/test_steps.py tests/test_compact.py -q`
 
-- [ ] **IC-506 · Budgets + runaway protection**
+- [~] **IC-506 · Budgets + runaway protection** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.6, SAFETY §2 T5
   - **Files:** `ironcore/core/budgets.py` (new), `ironcore/core/engine.py`, `tests/test_budgets.py` (new)
   - **Build:** per-turn/session caps (calls, tokens, wall-clock, repairs) from settings;
@@ -254,7 +254,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 6 — Envelope
 
-- [ ] **IC-601 · Probe runner + report card**
+- [x] **IC-601 · Probe runner + report card** *(done: fable-session, 2026-07-16 — Probe protocol (id/title/targets/async run→ProbeResult), run_probes dotted-path merge + degrade-on-failure-to-floor, probe_and_save, render_report_card; 12 tests)*
   - **Depends:** IC-201 · **Spec:** SPEC §4.1, MODELS §2
   - **Files:** `ironcore/envelope/runner.py` (new), `tests/test_probe_runner.py` (new)
   - **Build:** orchestrate PROBES against a Provider; partial failure → score 0 + note, never
@@ -263,7 +263,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** full run against MockProvider produces a saved profile + card; one probe
     crashing doesn't sink the run. **Verify:** `uv run --extra dev pytest tests/test_probe_runner.py -q`
 
-- [ ] **IC-602 · CTX-HONESTY + RETENTION probes**
+- [~] **IC-602 · CTX-HONESTY + RETENTION probes** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-601 · **Spec:** MODELS §2
   - **Files:** `ironcore/envelope/probe_ctx.py` (new), `tests/test_probe_ctx.py` (new)
   - **Build:** needle-at-depth ladder (4k→advertised, depths 25/50/75/90%); constraint-
@@ -272,7 +272,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockProvider scripted "forgets past 8k" yields honest_context 8k; retention
     math verified against hand-computed fixtures. **Verify:** `uv run --extra dev pytest tests/test_probe_ctx.py -q`
 
-- [ ] **IC-603 · TOOL-FORM + JSON-STRICT probes**
+- [~] **IC-603 · TOOL-FORM + JSON-STRICT probes** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-601, IC-606 · **Spec:** MODELS §2
   - **Files:** `ironcore/envelope/probe_tools.py` (new), `tests/test_probe_tools.py` (new)
   - **Build:** 10 trials per protocol (native/strict_json/ironcall) with exact-match scoring
@@ -281,7 +281,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scoring is mechanical + deterministic on scripted outputs; per-protocol scores
     land in profile. **Verify:** `uv run --extra dev pytest tests/test_probe_tools.py -q`
 
-- [ ] **IC-604 · EDIT-FORMAT + CODE-SMOKE probes**
+- [~] **IC-604 · EDIT-FORMAT + CODE-SMOKE probes** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-601, IC-302 · **Spec:** MODELS §2
   - **Files:** `ironcore/envelope/probe_edits.py` (new), `tests/test_probe_edits.py` (new)
   - **Build:** per-format fixture edits scored by "IC-302 patcher applies AND result parses"
@@ -290,7 +290,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** deterministic on scripted outputs; whole-file no-op detected as failure.
     **Verify:** `uv run --extra dev pytest tests/test_probe_edits.py -q`
 
-- [ ] **IC-605 · Adapter wiring into the engine**
+- [~] **IC-605 · Adapter wiring into the engine** *(claimed: fable-session, 2026-07-16 — merged into IC-502)*
   - **Depends:** IC-502, IC-601 · **Spec:** SPEC §4.3, CONTRACTS §5
   - **Files:** `ironcore/core/engine.py`, `ironcore/core/composer.py`, `tests/test_adapter_wiring.py` (new)
   - **Build:** engine consumes `recommended_tool_protocol()` / `recommended_edit_format()` /
@@ -299,7 +299,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** same scripted task runs in native mode and ironcall mode by swapping profile
     only. **Verify:** `uv run --extra dev pytest tests/test_adapter_wiring.py -q`
 
-- [ ] **IC-606 · IRONCALL text protocol**
+- [x] **IC-606 · IRONCALL text protocol** *(done: fable-session, 2026-07-16 — render_system_fragment (catalog+2 examples), parse()→IroncallParse (never raises, precise repair errors, first-of-multiple+warning), render_result; 31 tests)*
   - **Depends:** — · **Spec:** SPEC §6.3, CONTRACTS §10
   - **Files:** `ironcore/core/ironcall.py` (new), `tests/test_ironcall.py` (new)
   - **Build:** encoder (system-prompt fragment with 2 worked examples, tool docs renderer)
@@ -309,7 +309,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     name — all produce correct parse/err; roundtrip with ToolRegistry schemas.
     **Verify:** `uv run --extra dev pytest tests/test_ironcall.py -q`
 
-- [ ] **IC-607 · Sampling policies + best-of-n verifier harness**
+- [x] **IC-607 · Sampling policies + best-of-n verifier harness** *(done: fable-session, 2026-07-16 — resolve_sampling per-kind bands (tool/edit cold, brainstorm warm) + retry temp bump, best_of short-circuit + budget duck-type; 20 tests)*
   - **Depends:** IC-502 · **Spec:** MODELS §6
   - **Files:** `ironcore/core/sampling.py` (new), `tests/test_sampling.py` (new)
   - **Build:** per-envelope SamplingPolicy resolution (tool turns cold, retries +0.2);
