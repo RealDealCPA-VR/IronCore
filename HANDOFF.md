@@ -156,3 +156,14 @@
 **Next:** Phase 7 TUI (IC-701..706) — a THIN Textual client over the engine's core.events stream + ApprovalBroker.answer(); the engine already emits everything it needs. Deferred non-blockers: step-wise LADDER_DOWN, budget.summary()→state.budgets_spent, read-gate hardcodes arg name "path" (fine for all 4 current READ tools).
 **Gotchas:** compaction now counts as a provider call (budget) + fires once/turn; verify runs on any mutation and a persistent failure yields stop_reason "goal-unmet" (headless exit-code mapping per SPEC §9 should treat goal-unmet as non-zero). The verify feed-back-once consumes an extra completion per failing-verify turn — script engine tests accordingly.
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-16T07:00:00+00:00 — wave1-phase7-8
+**Context:** Phases 7+8 wave 1 — IC-1001 session store + IC-701..704 interactive Textual TUI.
+**Changed:** NEW ironcore/memory/sessions.py (SessionStore), ironcore/tui/{app.py, widgets/*, screens/approval.py}; cli.py TTY-gated TUI launch. + tests.
+**Verified:** uv run --extra dev pytest -> 1020 passed; ruff clean; ironcore --version/doctor OK.
+**Next (Wave 2, parallel — tui/ vs commands/, no collision):**
+  IC-705+706 (tui/): diff viewer widget → plug into ApprovalScreen #approval-preview (keyed on request.risk) + ToolCard; SessionPicker ModalScreen + cli.py --resume flag threading a session id into IronCoreApp.from_settings → TurnEngine(session=). App already installs engine.approvals.on_request at mount; ApprovalRequest.preview already carries the exact effect.
+  IC-801..807 (commands/): phase-8 handlers reading ctx.extra = {app, engine, registry, workspace, provider_registry, settings, schedule}. schedule(coro)->None runs a Textual worker + posts the coro's str result to the transcript (this is how async commands like /model list, /review, /goal-check return without blocking). Handlers stay SYNC returning str; long work via schedule(). Own commands/ + builtins.py.
+**Gotchas:** cli.py launches the TUI only when sys.stdout.isatty() (non-TTY prints the banner — keeps the suite from hanging). Approval modal maps y/n/a→ApprovalAnswer(approve once / deny / approve turn), Deny focused for exec/net. Session ids are caller-stamped (no datetime.now in the store) — TUI/commands must supply the timestamp+id. rehydrate returns (list[Message], tail_summary_str).
+<!-- HANDOFF v1 END -->

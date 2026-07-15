@@ -1,8 +1,11 @@
 """IronCore command-line entry point.
 
-The full Textual TUI ships in phase 7 (TODO.md IC-701..706). Until then
-the CLI provides --version, `doctor`, and an honest scaffold banner so the
-package is installable and verifiable end to end from day one.
+``ironcore`` with no subcommand launches the Textual TUI (phase 7,
+ironcore/tui/app.py) **when attached to an interactive terminal**. When stdout
+is not a TTY — piped, captured, or under CI — it prints the informational
+banner and exits 0 instead of trying to drive a full-screen app into a pipe.
+``--version`` and ``doctor`` remain the fast, import-light paths — the TUI (and
+Textual) are imported lazily inside ``main`` so those two never pay for it.
 """
 
 from __future__ import annotations
@@ -18,8 +21,8 @@ BANNER = r"""
   IronCore v{version}
   A frontier-grade terminal coding agent for open-source models.
 
-  The TUI is not built yet -- this is the scaffold release.
-  Start here:
+  Run `ironcore` in an interactive terminal to launch the TUI.
+  Reference:
     README.md        what this is and why
     docs/SPEC.md     the full specification
     TODO.md          the build plan (one-pass tasks)
@@ -121,6 +124,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "doctor":
         return cmd_doctor()
+    # No subcommand: launch the interactive TUI only when we own a real
+    # terminal. Non-TTY (pipes, CI, captured tests) gets the banner — driving a
+    # full-screen app into a pipe would hang. Imported lazily so --version and
+    # doctor stay import-light.
+    if sys.stdout.isatty():
+        from ironcore.tui.app import run_app
+
+        return run_app()
     print(BANNER.format(version=__version__))
     return 0
 

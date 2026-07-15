@@ -320,7 +320,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 7 — TUI
 
-- [ ] **IC-701 · Textual shell**
+- [x] **IC-701 · Textual shell** *(done: fable-session, 2026-07-16 — IronCoreApp: transcript/input/status regions, engine event-stream consumer, Esc interrupt via worker cancel, TTY-gated launch; 11 Pilot tests)*
   - **Depends:** IC-502 · **Spec:** SPEC §3.1
   - **Files:** `ironcore/tui/app.py` (new), `ironcore/tui/widgets/` (new), `ironcore/cli.py`, `tests/tui/test_app.py` (new)
   - **Build:** app layout (transcript / input / status bar); engine wired via event consumer
@@ -328,7 +328,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Textual Pilot: boots, renders a MockProvider text turn, Esc interrupts.
     **Verify:** `uv run --extra dev pytest tests/tui -q`
 
-- [ ] **IC-702 · Streaming markdown + tool cards**
+- [x] **IC-702 · Streaming markdown + tool cards** *(done: fable-session, 2026-07-16 — incremental TextDelta rendering + ToolCard w/ risk chip + gate state + collapsed result; part of IC-701)*
   - **Depends:** IC-701 · **Spec:** SPEC §3.1
   - **Files:** `ironcore/tui/widgets/transcript.py`, `tests/tui/test_transcript.py` (new)
   - **Build:** incremental markdown rendering (no full-reparse-per-token jank); tool cards
@@ -337,7 +337,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Pilot: streamed text appears incrementally; card lifecycle renders all states.
     **Verify:** `uv run --extra dev pytest tests/tui -q`
 
-- [ ] **IC-703 · Shift+Tab modes + approval modal**
+- [x] **IC-703 · Shift+Tab modes + approval modal** *(done: fable-session, 2026-07-16 — mode chip + Shift+Tab CYCLE, ApprovalScreen y/n/a→ApprovalAnswer w/ Deny-default-focus for EXEC/NET; part of IC-701)*
   - **Depends:** IC-701, IC-403 · **Spec:** SPEC §3.1–3.2, SAFETY §4
   - **Files:** `ironcore/tui/widgets/modebar.py`, `ironcore/tui/screens/approval.py`, `tests/tui/test_modes_approvals.py` (new)
   - **Build:** Shift+Tab cycles `safety.modes.CYCLE` with chip + transcript announcement;
@@ -346,7 +346,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Pilot: shift+tab cycles all four; scripted ask-gate shows modal; `n` denies
     and the turn continues with the refusal. **Verify:** `uv run --extra dev pytest tests/tui -q`
 
-- [ ] **IC-704 · Slash palette + completion**
+- [x] **IC-704 · Slash palette + completion** *(done: fable-session, 2026-07-16 — registry-driven dispatch w/ ctx.extra {app,engine,registry,workspace,provider_registry,settings,schedule}; part of IC-701)*
   - **Depends:** IC-701 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/tui/widgets/inputbar.py`, `tests/tui/test_palette.py` (new)
   - **Build:** `/` opens command palette from the registry (live + `[planned]` labels);
@@ -354,7 +354,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Pilot: `/he<tab>` completes `/help`; dispatch output lands in transcript.
     **Verify:** `uv run --extra dev pytest tests/tui -q`
 
-- [ ] **IC-705 · Diff viewer**
+- [~] **IC-705 · Diff viewer** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-702 · **Spec:** SPEC §3.1
   - **Files:** `ironcore/tui/widgets/diffview.py`, `tests/tui/test_diffview.py` (new)
   - **Build:** side-scrollable unified-diff rendering with syntax-aware coloring; used by
@@ -362,7 +362,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Pilot renders a 3-file fixture diff; per-file reject excludes that file from
     apply. **Verify:** `uv run --extra dev pytest tests/tui -q`
 
-- [ ] **IC-706 · Session picker + resume**
+- [~] **IC-706 · Session picker + resume** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-701, IC-1001 · **Spec:** SPEC §11.2
   - **Files:** `ironcore/tui/screens/sessions.py`, `tests/tui/test_sessions.py` (new)
   - **Build:** `ironcore --resume` / picker screen listing `.ironcore/sessions/` (age, first
@@ -372,7 +372,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 8 — Slash commands
 
-- [ ] **IC-801 · /model**
+- [~] **IC-801 · /model** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-204 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/commands/builtins.py`, `tests/test_commands.py`
   - **Build:** list endpoint models (marking probed ones), switch model (loads/queues probe if
@@ -380,7 +380,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** switch reflected in state + status bar data; unprofiled switch queues probe.
     **Verify:** `uv run --extra dev pytest tests/test_commands.py -q`
 
-- [ ] **IC-802 · /init → IRONCORE.md**
+- [~] **IC-802 · /init → IRONCORE.md** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-301 · **Spec:** SPEC §11.1
   - **Files:** `ironcore/commands/initcmd.py` (new), `tests/test_initcmd.py` (new)
   - **Build:** repo scan (manifests, test configs, layout) → IRONCORE.md skeleton (build/test
@@ -389,7 +389,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** fixture repos (py/node) produce correct commands; re-run preserves a
     hand-edited section. **Verify:** `uv run --extra dev pytest tests/test_initcmd.py -q`
 
-- [ ] **IC-803 · /goal engine**
+- [~] **IC-803 · /goal engine** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502, IC-504 · **Spec:** SPEC §3.4
   - **Files:** `ironcore/commands/goalcmd.py` (new), `ironcore/core/engine.py`, `tests/test_goal.py` (new)
   - **Build:** goal in state + anchor injection; on model-claims-done: stop-condition check
@@ -398,7 +398,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scripted premature-victory session gets continued; met goal auto-clears;
     budget trip reports unmet items honestly. **Verify:** `uv run --extra dev pytest tests/test_goal.py -q`
 
-- [ ] **IC-804 · /loop**
+- [~] **IC-804 · /loop** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/commands/loopcmd.py` (new), `tests/test_loop.py` (new)
   - **Build:** `/loop 5m <prompt>` fixed interval; `/loop <prompt>` self-paced (model proposes
@@ -407,7 +407,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** fake-clock tests: fires, reschedules, stops; mode changes mid-loop respected.
     **Verify:** `uv run --extra dev pytest tests/test_loop.py -q`
 
-- [ ] **IC-805 · /compact /undo /redo**
+- [~] **IC-805 · /compact /undo /redo** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-505, IC-405 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/commands/builtins.py`, `tests/test_commands.py`
   - **Build:** wire to compaction and snapshot engines; `/undo` previews what will be restored
@@ -415,7 +415,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** end-to-end in tmp workspace: edit → /undo → bytes restored → /redo.
     **Verify:** `uv run --extra dev pytest tests/test_commands.py -q`
 
-- [ ] **IC-806 · /review**
+- [~] **IC-806 · /review** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-502, IC-705 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/commands/reviewcmd.py` (new), `tests/test_review.py` (new)
   - **Build:** working-diff review via verifier-role model with a bug-focused rubric prompt;
@@ -424,7 +424,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockProvider-scripted review produces parsed findings; malformed model output
     degrades to raw-text display, never a crash. **Verify:** `uv run --extra dev pytest tests/test_review.py -q`
 
-- [ ] **IC-807 · /memory**
+- [~] **IC-807 · /memory** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-802 · **Spec:** SPEC §11.1
   - **Files:** `ironcore/commands/memorycmd.py` (new), `tests/test_memorycmd.py` (new)
   - **Build:** view IRONCORE.md sections, append a note (`/memory add <text>`), open in
@@ -479,7 +479,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 10 — Memory & sessions
 
-- [ ] **IC-1001 · Session store**
+- [x] **IC-1001 · Session store** *(done: fable-session, 2026-07-16 — SessionStore JSONL transcripts: create/append/list(newest-first)/load/rehydrate→Messages+tail, corrupt-tolerant, prune-never-active, caller-stamped time; 20 tests)*
   - **Depends:** IC-102 · **Spec:** SPEC §11.2
   - **Files:** `ironcore/memory/sessions.py` (new), `tests/test_sessions.py` (new)
   - **Build:** JSONL transcript persistence (events + messages) under `.ironcore/sessions/`;
