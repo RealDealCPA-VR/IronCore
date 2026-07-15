@@ -128,9 +128,9 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** tests pass on Windows AND ubuntu CI (echo, exit-code, timeout-kill, big-output
     cap). **Verify:** `uv run --extra dev pytest tests/tools -q`
 
-- [~] **IC-304 · Default toolset assembly** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-304 · Default toolset assembly** *(done: fable-session, 2026-07-15 — build_default_registry: 7 local tools always + fetch_url when network_tools; every spec JSON-schema-valid + example-bearing; added the minimal NET fetch tool the matrix needs; 14 tests)*
   - **Depends:** IC-301, IC-302, IC-303 · **Spec:** SPEC §6.1
-  - **Files:** `ironcore/tools/default.py` (new), `tests/tools/test_default.py` (new)
+  - **Files:** `ironcore/tools/default.py` (new), `ironcore/tools/fetch.py` (new — minimal NET fetch_url, scoped addition), `ironcore/tools/__init__.py` (additive exports), `tests/tools/test_default.py` (new)
   - **Build:** `build_default_registry(settings, workspace)` — fs + shell always; fetch_url
     only when `safety.network_tools`; every schema has model-facing description + example.
   - **Accept:** registry contents match settings matrix; all specs JSON-schema-valid.

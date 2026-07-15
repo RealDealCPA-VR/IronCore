@@ -98,3 +98,12 @@
 **Next:** IC-304 assembles fs_read + shell + fs_write (+ a fetch tool) into build_default_registry(settings, workspace) and owns tools/__init__.py re-exports.
 **Gotchas:** EditFileTool `edit` arg carries the payload for ALL formats (diff text / marker text / full content); `format` enum = EDIT_FORMATS in ladder order. PatchResult.reason is already model-facing (IC-503 passes it through verbatim). no_op success is ok=True + data["no_op"]=True (not failure, not progress). Every path jailed before any fs contact; atomic os.replace; binary/non-UTF-8 refused not corrupted.
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-16T00:35:00+00:00 — wave3-ic304
+**Context:** Phase 3 wave 3 — IC-304 default toolset assembly (needed all of 301/302/303).
+**Changed:** NEW ironcore/tools/default.py (build_default_registry), ironcore/tools/fetch.py (FetchUrlTool NET — scoped addition, ledger Files reconciled), tests/tools/test_default.py (14 tests), tools/__init__.py (additive exports of all 8 tool classes + build_default_registry).
+**Verified:** uv run --extra dev pytest -> 739 passed; ruff clean.
+**Next:** IC-502 engine builds the registry at boot (per-session workspace = per-session registry; no dynamic add/remove — config flip rebuilds). Phase 3+4 COMPLETE.
+**Gotchas:** roster is 7 local tools (read_file/list_dir/glob/grep/write_file/edit_file/shell) always + fetch_url only when settings.safety.network_tools. FetchUrlTool is the ONLY tool with no workspace ctor arg (transport= seam for tests) — build via build_default_registry, not generic cls(workspace). apply_patch is NOT a registered tool (patch.py appliers are harness-side, consumed by edit_file). registry.all() preserves registration order for display.
+<!-- HANDOFF v1 END -->
