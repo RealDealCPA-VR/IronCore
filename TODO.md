@@ -109,7 +109,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** truncation marks exact counts; binary files skipped not crashed; all outputs
     deterministic. **Verify:** `uv run --extra dev pytest tests/tools -q`
 
-- [~] **IC-302 · Deterministic patcher + write-side tools** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-302 · Deterministic patcher + write-side tools** *(done: fable-session, 2026-07-15 — 3 pure appliers (unified-diff ±3 fuzz, unique-match search/replace, whole-file guard+no-op), jail-routed atomic WriteFileTool/EditFileTool, CRLF/LF preserved, byte-unchanged on failure; 54 tests)*
   - **Depends:** IC-301 · **Spec:** SPEC §4.3, §6.1; MODELS §3
   - **Files:** `ironcore/tools/patch.py` (new), `ironcore/tools/fs_write.py` (new), `tests/tools/test_patch.py` (new)
   - **Build:** three appliers — unified diff (fuzzy line-anchor match ±3), search/replace

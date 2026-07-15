@@ -89,3 +89,12 @@
 **Next:** IC-302 (write tools + patcher) consumes jail.resolve_jailed (use the RETURN value, real resolved path). IC-304 assembles fs_read + shell + write tools + a fetch tool into build_default_registry(settings, workspace). IC-502 engine: classify_command before EXEC, downgrade_for_flag(detect_injection(wrapped)) on next gate, redact_context before provider send, ApprovalBroker at GATE, snapshot() each mutating turn.
 **Gotchas:** jail — open the returned path, not the input (symlink/Win32 defenses void otherwise). command policy — classify_command composes the EXEC gate internally (don't also call decide); "format " seed matches `git log --format` (surface matched rule in transcript). redaction — pattern-only until boot calls set_default_redactor(from_env); redact composed text not fragments. snapshots — first snapshot() makes `?? .ironcore/` appear; undo() auto-banks dirty state; constructor raises if git missing (construct lazily). injection — preamble is once-per-session (engine adds to system prompt), downgrade takes base decision. shell — branch on data["timed_out"] not exit code.
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-16T00:10:00+00:00 — wave2-ic302
+**Context:** Phase 3 wave 2 — IC-302 deterministic patcher + write tools (needed jail from IC-401 + read patterns from IC-301).
+**Changed:** NEW ironcore/tools/patch.py (pure appliers), ironcore/tools/fs_write.py (WriteFileTool/EditFileTool), tests/tools/test_patch.py (54 tests).
+**Verified:** uv run --extra dev pytest -> 725 passed; ruff clean.
+**Next:** IC-304 assembles fs_read + shell + fs_write (+ a fetch tool) into build_default_registry(settings, workspace) and owns tools/__init__.py re-exports.
+**Gotchas:** EditFileTool `edit` arg carries the payload for ALL formats (diff text / marker text / full content); `format` enum = EDIT_FORMATS in ladder order. PatchResult.reason is already model-facing (IC-503 passes it through verbatim). no_op success is ok=True + data["no_op"]=True (not failure, not progress). Every path jailed before any fs contact; atomic os.replace; binary/non-UTF-8 refused not corrupted.
+<!-- HANDOFF v1 END -->
