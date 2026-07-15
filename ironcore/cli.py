@@ -32,12 +32,26 @@ BANNER = r"""
 """
 
 
+#: ``--resume`` given with no id: open the session picker at launch. Mirrors
+#: ``ironcore.tui.app.RESUME_PICK`` (kept as a literal so this module stays
+#: import-light — the TUI is imported lazily inside ``main``).
+RESUME_PICK = "__pick__"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ironcore",
         description="A frontier-grade terminal coding agent for open-source models.",
     )
     parser.add_argument("--version", action="store_true", help="print version and exit")
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const=RESUME_PICK,
+        default=None,
+        metavar="SESSION_ID",
+        help="resume a previous session; with no id, pick one from a list at launch",
+    )
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("doctor", help="check the local environment (python, config, endpoint)")
     return parser
@@ -131,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     if sys.stdout.isatty():
         from ironcore.tui.app import run_app
 
-        return run_app()
+        return run_app(resume=args.resume)
     print(BANNER.format(version=__version__))
     return 0
 

@@ -66,3 +66,22 @@ def test_stubs_point_at_todo(ctx):
     registry, context = ctx
     out = registry.dispatch("/workflow review", context)
     assert "IC-904" in out
+
+
+def test_phase8_commands_are_implemented(ctx):
+    registry, _ = ctx
+    by_name = {c.name: c for c in registry.all()}
+    for name in ("model", "init", "goal", "loop", "compact", "undo", "redo", "review", "memory"):
+        assert by_name[name].implemented, f"/{name} must be implemented after phase 8"
+
+
+def test_only_deferred_commands_remain_planned(ctx):
+    registry, _ = ctx
+    planned = {c.name for c in registry.all() if not c.implemented}
+    assert planned == {"workflow", "envelope", "probe"}
+
+
+def test_redo_is_registered(ctx):
+    # /redo is new in phase 8 (SPEC §3.3) — it was not in the scaffold's stub table.
+    registry, _ = ctx
+    assert registry.get("redo") is not None

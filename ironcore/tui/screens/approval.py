@@ -26,9 +26,11 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
+from textual.widget import Widget
 from textual.widgets import Button, Label, Static
 
 from ironcore.core.approvals import ApprovalAnswer, ApprovalRequest
+from ironcore.tui.widgets.diffview import DiffView, looks_like_diff
 
 #: Risk classes for which Approve must not be the default-focused button.
 _HIGH_RISK = frozenset({"exec", "net"})
@@ -51,11 +53,23 @@ class ApprovalScreen(ModalScreen[ApprovalAnswer]):
         risk = self.request.risk
         with Vertical(id="approval-box"):
             yield Label(Text(f"Approval required — {risk.upper()}"), id="approval-title")
-            yield Static(Text(self.request.preview), id="approval-preview")
+            yield self._preview_widget()
             with Horizontal(id="approval-buttons"):
                 yield Button("Deny (n)", id="deny", variant="error")
                 yield Button("Approve (y)", id="approve", variant="success")
                 yield Button("Approve all writes (a)", id="approve-all", variant="warning")
+
+    def _preview_widget(self) -> Widget:
+        """The exact-effect preview: a colored diff for write/edit requests,
+        plain text otherwise (a shell ``$ …`` line, a URL, an out-of-jail read).
+
+        A preview whose body does not look like a diff still falls back to plain
+        text, so an unexpected shape renders honestly instead of as noise.
+        """
+        preview = self.request.preview
+        if self.request.risk == "write" or looks_like_diff(preview):
+            return DiffView(preview, id="approval-preview")
+        return Static(Text(preview), id="approval-preview")
 
     def on_mount(self) -> None:
         # SAFETY §4: EXEC/NET must not default-focus Approve.

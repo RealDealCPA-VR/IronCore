@@ -1,16 +1,40 @@
-"""Built-in slash commands.
+"""Built-in slash commands and the default registry.
 
-Live today: /help, /mode, /version, /goal (set/show/clear state only —
-the per-turn stop-condition check wires in with IC-803).
-Everything else is declared with an honest "ships in IC-xxx" stub so
-/help is complete from day one and the TUI can offer completion.
+Live scaffold commands stay here: ``/help``, ``/version``, ``/mode``. The real
+phase-8 handlers (IC-801..807) live one-per-module and contribute a ``COMMANDS``
+tuple that this module registers: ``/model``, ``/init``, ``/goal``, ``/loop``,
+``/compact`` + ``/undo`` + ``/redo``, ``/review``, ``/memory``.
+
+Only ``/workflow`` (IC-904), ``/envelope`` and ``/probe`` (IC-608) remain honest
+"ships in IC-xxx" stubs, so ``/help`` is complete from day one and still labels
+what is not yet live.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from ironcore import __version__
 from ironcore.commands.base import CommandContext, CommandRegistry, SlashCommand
+from ironcore.commands.goalcmd import COMMANDS as _GOAL_COMMANDS
+from ironcore.commands.initcmd import COMMANDS as _INIT_COMMANDS
+from ironcore.commands.lifecyclecmd import COMMANDS as _LIFECYCLE_COMMANDS
+from ironcore.commands.loopcmd import COMMANDS as _LOOP_COMMANDS
+from ironcore.commands.memorycmd import COMMANDS as _MEMORY_COMMANDS
+from ironcore.commands.modelcmd import COMMANDS as _MODEL_COMMANDS
+from ironcore.commands.reviewcmd import COMMANDS as _REVIEW_COMMANDS
 from ironcore.safety.modes import CYCLE, DESCRIPTIONS, Mode, next_mode
+
+#: Every real phase-8 command, in a stable display-friendly order.
+_REAL_COMMANDS: tuple[SlashCommand, ...] = (
+    *_MODEL_COMMANDS,
+    *_INIT_COMMANDS,
+    *_GOAL_COMMANDS,
+    *_LOOP_COMMANDS,
+    *_LIFECYCLE_COMMANDS,
+    *_REVIEW_COMMANDS,
+    *_MEMORY_COMMANDS,
+)
 
 
 def _cmd_help(ctx: CommandContext, args: str) -> str:
@@ -38,35 +62,15 @@ def _cmd_mode(ctx: CommandContext, args: str) -> str:
     return f"Mode: {ctx.mode.value} — {DESCRIPTIONS[ctx.mode]}"
 
 
-def _cmd_goal(ctx: CommandContext, args: str) -> str:
-    if args == "clear":
-        ctx.goal = None
-        return "Goal cleared."
-    if args:
-        ctx.goal = args
-        return (
-            f"Goal set: {args}\n"
-            "(Per-turn stop-condition enforcement ships in IC-803.)"
-        )
-    return f"Goal: {ctx.goal}" if ctx.goal else "No goal set. Usage: /goal <objective>"
-
-
-def _stub(task_id: str) -> callable:
+def _stub(task_id: str) -> Callable[[CommandContext, str], str]:
     def handler(ctx: CommandContext, args: str) -> str:
         return f"Not implemented yet — ships in {task_id} (see TODO.md)."
 
     return handler
 
 
-#: (name, summary, usage, task-id that implements the real handler)
+#: Commands still awaiting their owning task (name, summary, usage, task-id).
 _PLANNED: tuple[tuple[str, str, str, str], ...] = (
-    ("model", "switch model / list models at the endpoint", "/model [name]", "IC-801"),
-    ("init", "scan the repo and generate IRONCORE.md", "/init", "IC-802"),
-    ("loop", "run a prompt on an interval or self-paced", "/loop [interval] <prompt>", "IC-804"),
-    ("compact", "compress history into a handoff-grade summary", "/compact", "IC-805"),
-    ("undo", "revert the last change set (git snapshots)", "/undo", "IC-805"),
-    ("review", "review the working diff for bugs", "/review", "IC-806"),
-    ("memory", "view or edit project memory", "/memory", "IC-807"),
     ("workflow", "run a multi-agent workflow", "/workflow <name> [args]", "IC-904"),
     ("envelope", "show the current model's capability profile", "/envelope", "IC-608"),
     ("probe", "re-run capability probes for the current model", "/probe", "IC-608"),
@@ -81,14 +85,8 @@ def build_default_registry() -> CommandRegistry:
     registry.register(
         SlashCommand("mode", "cycle or set the operating mode", mode_usage, _cmd_mode)
     )
-    registry.register(
-        SlashCommand(
-            "goal",
-            "set a persistent objective for the session",
-            "/goal <objective> | /goal clear",
-            _cmd_goal,
-        )
-    )
+    for command in _REAL_COMMANDS:
+        registry.register(command)
     for name, summary, usage, task_id in _PLANNED:
         registry.register(SlashCommand(name, summary, usage, _stub(task_id), implemented=False))
     return registry

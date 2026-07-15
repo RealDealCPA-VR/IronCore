@@ -167,3 +167,12 @@
   IC-801..807 (commands/): phase-8 handlers reading ctx.extra = {app, engine, registry, workspace, provider_registry, settings, schedule}. schedule(coro)->None runs a Textual worker + posts the coro's str result to the transcript (this is how async commands like /model list, /review, /goal-check return without blocking). Handlers stay SYNC returning str; long work via schedule(). Own commands/ + builtins.py.
 **Gotchas:** cli.py launches the TUI only when sys.stdout.isatty() (non-TTY prints the banner — keeps the suite from hanging). Approval modal maps y/n/a→ApprovalAnswer(approve once / deny / approve turn), Deny focused for exec/net. Session ids are caller-stamped (no datetime.now in the store) — TUI/commands must supply the timestamp+id. rehydrate returns (list[Message], tail_summary_str).
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-16T08:30:00+00:00 — wave2-phase7-8
+**Context:** Phases 7+8 wave 2 — IC-705 diff viewer + IC-706 session picker/resume + IC-801..807 all phase-8 commands.
+**Changed:** NEW tui/widgets/diffview.py, tui/screens/sessions.py; MOD tui/screens/approval.py + widgets/transcript.py + app.py (session recording/resume) + cli.py (--resume). NEW commands/{_helpers,modelcmd,initcmd,goalcmd,loopcmd,lifecyclecmd,reviewcmd,memorycmd}.py; MOD commands/builtins.py (registers all real handlers; only /workflow /envelope /probe remain planned). + tests.
+**Verified:** uv run --extra dev pytest -> 1087 passed; ruff clean; ironcore --version/doctor OK. Phases 7+8 feature-complete.
+**Next:** Phase 9 workflows (IC-901..905), phase 10 memory/sessions wiring (IC-1002 handoff lifecycle, IC-1003 IRONCORE.md injection), phase 11 packaging/v0.1. Still-planned commands /envelope /probe = IC-608, /workflow = IC-904.
+**Gotchas:** async commands (/model list, /compact, /review, /goal check) return an ack then post the real result via ctx.extra["schedule"](coro); the coro returns the str. /model switch doesn't rebuild ProviderRegistry (no live-mutation API) — updates settings + advises /probe. /loop uses optional app.register_loop/stop_loop hooks (hasattr-guarded); to drive recurrence, IronCoreApp needs those two methods (LoopSpec(prompt, interval_s), interval_s=None=self-paced). /goal checks persist in a module-level map keyed by workspace (TUI rebuilds ctx per dispatch). App records user line in _start_turn, assistant in _drive_turn finally (partial-on-Esc preserved); slash commands not recorded. --resume threads into engine._conversation for continuity; TTY-gated.
+<!-- HANDOFF v1 END -->

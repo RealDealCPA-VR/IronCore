@@ -45,7 +45,9 @@ carries exactly these keys — future handlers (IC-801..807) consume them:
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Coroutine
+from datetime import datetime
 from difflib import get_close_matches
 from pathlib import Path
 
@@ -76,11 +78,16 @@ from ironcore.core.events import (
     TurnStarted,
 )
 from ironcore.envelope.profile import CapabilityProfile
+from ironcore.memory.sessions import SessionStore
 from ironcore.providers.registry import ProviderRegistry
 from ironcore.safety.modes import DESCRIPTIONS, Mode, next_mode
 from ironcore.tools.default import build_default_registry as build_tool_registry
 from ironcore.tui.screens.approval import ApprovalScreen
+from ironcore.tui.screens.sessions import SessionPicker
 from ironcore.tui.widgets import InputBar, StatusBar, Transcript
+
+#: ``--resume`` with no id: open the picker at launch instead of resuming one.
+RESUME_PICK = "__pick__"
 
 
 def match_commands(registry: CommandRegistry, prefix: str) -> list[SlashCommand]:
@@ -93,6 +100,15 @@ def match_commands(registry: CommandRegistry, prefix: str) -> list[SlashCommand]
     starts = [c for c in commands if c.name.startswith(prefix)]
     contains = [c for c in commands if prefix in c.name and c not in starts]
     return starts + contains
+
+
+def _new_session_id() -> str:
+    """A filesystem-safe, chronologically sortable session id, stamped now.
+
+    ``YYYYmmddTHHMMSS-<hex>`` — unique per launch and free of path separators, so
+    ``SessionStore``'s id validation always accepts it. Runtime ``datetime.now``
+    is fine here: app.py is not a frozen-determinism module (the store is)."""
+    return f"{datetime.now():%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 
 def _render_palette(matches: list[SlashCommand]) -> str:
@@ -138,6 +154,19 @@ class IronCoreApp(App):
     #approval-preview { height: auto; max-height: 20; margin: 1 0; }
     #approval-buttons { height: auto; align: center middle; }
     #approval-buttons Button { margin: 0 1; }
+    SessionPicker { align: center middle; }
+    #session-box {
+        width: 80%;
+        max-width: 100;
+        height: auto;
+        max-height: 24;
+        border: thick $primary;
+        background: $surface;
+        padding: 1 2;
+    }
+    #session-title { text-style: bold; width: 100%; }
+    #session-list { height: auto; max-height: 16; margin: 1 0; }
+    #session-empty { margin: 1 0; }
     """
 
     BINDINGS = [
@@ -153,6 +182,8 @@ class IronCoreApp(App):
         settings: Settings,
         *,
         provider_registry: ProviderRegistry | None = None,
+        session_store: SessionStore | None = None,
+        resume_id: str | None = None,
     ) -> None:
         super().__init__()
         self.engine = engine
@@ -165,6 +196,19 @@ class IronCoreApp(App):
         self._matches: list[SlashCommand] = []
         #: call id of the request currently awaiting an approval verdict.
         self._awaiting_call_id: str | None = None
+        # -- session recording (IC-706). ``session_store=None`` disables it
+        # entirely (existing shell tests); ``from_settings`` injects a real
+        # store so production records. ``resume_id`` == RESUME_PICK means "open
+        # the picker at launch"; a concrete id resumes that session directly.
+        self.session_store = session_store
+        self._resume_pick = resume_id == RESUME_PICK
+        self._resume_id = None if self._resume_pick else resume_id
+        #: id of the session being written; created lazily on the first user turn
+        #: (so its first_prompt label is meaningful), reused across a resume.
+        self._session_id: str | None = self._resume_id
+        self._session_created = self._resume_id is not None
+        #: assistant text accumulated across the current turn, flushed on finish.
+        self._turn_assistant: list[str] = []
 
     # -- composition ----------------------------------------------------------
 
@@ -185,6 +229,13 @@ class IronCoreApp(App):
             "IronCore ready. Type a message or /help. "
             "Shift+Tab cycles mode · Esc interrupts."
         )
+        # Resume flow (IC-706): a picker for a bare --resume, a direct rehydrate
+        # for --resume <id>. Both are no-ops without a store.
+        if self.session_store is not None:
+            if self._resume_pick:
+                self.push_screen(SessionPicker(self.session_store), self._on_session_picked)
+            elif self._resume_id is not None:
+                self.call_later(self._resume_session, self._resume_id)
 
     # -- input handling -------------------------------------------------------
 
@@ -303,6 +354,7 @@ class IronCoreApp(App):
         return w is not None and w.state in (WorkerState.PENDING, WorkerState.RUNNING)
 
     def _start_turn(self, text: str) -> None:
+        self._record_user(text)
         self._turn_worker = self.run_worker(
             self._drive_turn(text), group="turn", exclusive=True
         )
@@ -310,15 +362,20 @@ class IronCoreApp(App):
     async def _drive_turn(self, text: str) -> None:
         await self.transcript.add_user(text)
         self.status_bar.set_running(True)
+        self._turn_assistant = []
         try:
             async for event in self.engine.run_turn(text):
+                if isinstance(event, TextDelta):
+                    self._turn_assistant.append(event.text)
                 await self._handle_event(event)
         except Exception as exc:  # engine/provider defect must not crash the app
             await self.transcript.add_note(f"[error] {exc}")
         finally:
             # CancelledError (Esc) skips the except, runs this, then re-raises —
-            # partial output already rendered stays on screen (SPEC §3.1).
+            # partial output already rendered stays on screen (SPEC §3.1), and
+            # the partial assistant text is still recorded to the session.
             self.status_bar.set_running(False)
+            self._record_assistant("".join(self._turn_assistant))
 
     async def _handle_event(self, event: Event) -> None:
         t = self.transcript
@@ -379,6 +436,70 @@ class IronCoreApp(App):
 
         self.push_screen(ApprovalScreen(request), _answered)
 
+    # -- session recording + resume (IC-706, SPEC §11.2) ----------------------
+
+    def _record_user(self, text: str) -> None:
+        """Append a user turn to the session transcript (a no-op without a store).
+
+        The session file is created lazily here — on the FIRST user turn — so its
+        header's ``first_prompt`` label is meaningful in the picker. A resumed
+        session already has a header, so creation is skipped and the line is
+        appended to the same file. All writes are best-effort: a full disk must
+        never crash a turn (mirrors ``state.save``).
+        """
+        store = self.session_store
+        if store is None:
+            return
+        if self._session_id is None:
+            self._session_id = _new_session_id()
+        try:
+            if not self._session_created:
+                self._session_created = True
+                store.create(self._session_id, datetime.now().isoformat(), first_prompt=text)
+            store.append_user(self._session_id, text)
+        except (OSError, ValueError):
+            pass
+
+    def _record_assistant(self, text: str) -> None:
+        """Append the turn's finalized assistant text (a no-op if empty/no store)."""
+        store = self.session_store
+        if store is None or self._session_id is None or not self._session_created or not text:
+            return
+        try:
+            store.append_assistant(self._session_id, text)
+        except OSError:
+            pass
+
+    def _on_session_picked(self, session_id: str | None) -> None:
+        """Picker dismiss callback: rehydrate the chosen id, or start fresh."""
+        if session_id is None:
+            return  # cancelled / empty store — a fresh session records as normal
+        self.call_later(self._resume_session, session_id)
+
+    async def _resume_session(self, session_id: str) -> None:
+        """Rehydrate a stored session: seed the transcript + continue writing it.
+
+        Restores the visible conversation and the tail summary, and threads the
+        prior messages into the engine's conversation so the next turn has real
+        context (``engine._conversation`` — the seam IC-706 owns per its docstring).
+        Recording then CONTINUES into the same session file.
+        """
+        store = self.session_store
+        if store is None:
+            return
+        messages, tail = store.rehydrate(session_id)
+        self._session_id = session_id
+        self._session_created = True
+        if messages:
+            self.engine._conversation = list(messages)
+        for message in messages:
+            if message.role == "user":
+                await self.transcript.add_user(message.content)
+            elif message.role == "assistant":
+                await self.transcript.append_assistant(message.content)
+                self.transcript.end_assistant()
+        await self.transcript.add_note(f"[resumed session {session_id}] {tail}")
+
     # -- notes ----------------------------------------------------------------
 
     def _post_note(self, text: str) -> None:
@@ -399,9 +520,15 @@ class IronCoreApp(App):
         cls,
         settings: Settings | None = None,
         workspace: str | Path | None = None,
+        *,
+        resume: str | None = None,
     ) -> IronCoreApp:
         """Build the real engine + registries from ``Settings`` (the ``ironcore``
-        launch path). Tests bypass this and inject their own engine."""
+        launch path). Tests bypass this and inject their own engine.
+
+        ``resume`` threads the ``--resume`` flag: ``RESUME_PICK`` opens the
+        session picker at launch, a concrete id resumes that session. Production
+        always gets a real ``SessionStore`` so live turns are recorded."""
         ws = Path(workspace) if workspace is not None else Path.cwd()
         if settings is None:
             settings = Settings.load(project_dir=ws)
@@ -422,11 +549,23 @@ class IronCoreApp(App):
             mode,
             workspace=ws,
         )
-        return cls(engine, build_command_registry(), settings, provider_registry=provider_registry)
+        return cls(
+            engine,
+            build_command_registry(),
+            settings,
+            provider_registry=provider_registry,
+            session_store=SessionStore(ws),
+            resume_id=resume,
+        )
 
 
-def run_app(settings: Settings | None = None, workspace: str | Path | None = None) -> int:
+def run_app(
+    settings: Settings | None = None,
+    workspace: str | Path | None = None,
+    *,
+    resume: str | None = None,
+) -> int:
     """Launch the TUI (the ``ironcore`` no-subcommand entry point)."""
-    app = IronCoreApp.from_settings(settings=settings, workspace=workspace)
+    app = IronCoreApp.from_settings(settings=settings, workspace=workspace, resume=resume)
     app.run()
     return 0

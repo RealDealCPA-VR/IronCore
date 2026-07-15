@@ -22,16 +22,21 @@ Rendering only — this widget holds no engine reference and mounts nothing from
 
 from __future__ import annotations
 
-from rich.console import RenderableType
+from rich.console import Group, RenderableType
 from rich.text import Text
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from ironcore.providers.base import ToolCall
 from ironcore.tools.base import ToolResult
+from ironcore.tui.widgets.diffview import diff_to_text, looks_like_diff
 
 #: Max characters of a tool's arg/result preview shown collapsed on the card.
 _PREVIEW_CHARS = 100
+
+#: Lines of the edit payload shown colored on a tool card before it's truncated;
+#: the full diff lives in the approval modal (scrollable), the card stays compact.
+_CARD_DIFF_LINES = 16
 
 
 def args_preview(arguments: dict) -> str:
@@ -45,6 +50,22 @@ def _first_line(text: str) -> str:
     lines = text.strip().splitlines()
     first = lines[0] if lines else ""
     return first if len(first) <= _PREVIEW_CHARS else first[:_PREVIEW_CHARS] + " …"
+
+
+def _card_diff_payload(call: ToolCall) -> str | None:
+    """The ``edit_file`` diff to colorize on a card, or None for other calls.
+
+    Only an ``edit_file`` whose ``edit`` argument actually looks like a diff (a
+    ``unified_diff`` / ``search_replace`` payload) qualifies; a ``whole_file``
+    body or a plain ``write_file`` content dump is left to the compact summary
+    so cards don't balloon with full file contents.
+    """
+    if call.name != "edit_file":
+        return None
+    edit = call.arguments.get("edit")
+    if isinstance(edit, str) and edit and looks_like_diff(edit):
+        return edit
+    return None
 
 
 class _Bubble(Static):
@@ -81,12 +102,19 @@ class ToolCard(Static):
         self.state = "requested"
         self.result: ToolResult | None = None
         self.note: str | None = None
+        #: An ``edit_file`` diff payload to colorize under the card, or None.
+        self._diff = _card_diff_payload(call)
         self._plain = ""
         super().__init__(classes="tool-card")
         self._plain = self._build()
 
     def render(self) -> RenderableType:
-        return Text(self._plain)
+        base = Text(self._plain)
+        if self._diff is None:
+            return base
+        # The plain header/summary (mirrored in _plain for tests) plus the
+        # colored diff — SPEC §3.1 "tool cards ... diff views".
+        return Group(base, diff_to_text(self._diff, max_lines=_CARD_DIFF_LINES))
 
     def set_state(self, state: str) -> None:
         self.state = state
@@ -109,7 +137,12 @@ class ToolCard(Static):
     def _build(self) -> str:
         header = f"▸ {self.call.name}  [{self.risk}]  {self.state}"
         lines = [header]
-        preview = args_preview(self.call.arguments)
+        # When the diff is shown colored below, drop its raw payload from the
+        # one-line arg preview so it isn't printed twice.
+        display_args = self.call.arguments
+        if self._diff is not None:
+            display_args = {k: v for k, v in display_args.items() if k != "edit"}
+        preview = args_preview(display_args)
         if preview:
             lines.append(f"    {preview}")
         if self.result is not None:
