@@ -43,6 +43,8 @@ from pathlib import Path
 from ironcore.config.settings import Settings
 from ironcore.core import ironcall
 from ironcore.core.approvals import ApprovalBroker
+from ironcore.core.budgets import Budget
+from ironcore.core.compact import compact, should_compact
 from ironcore.core.composer import RESPONSE_HEADROOM_SHARE, compose
 from ironcore.core.events import (
     ApprovalRequired,
@@ -56,17 +58,16 @@ from ironcore.core.events import (
 )
 from ironcore.core.protocols import (
     BudgetTracker,
-    DefaultBudget,
-    DefaultRepairPolicy,
-    LinearStepPlanner,
-    NoopVerifier,
     RepairAction,
     RepairPolicy,
     StepPlanner,
     Verifier,
 )
+from ironcore.core.repair import LadderRepairPolicy, frame_error
 from ironcore.core.sampling import resolve_sampling
 from ironcore.core.state import SessionState, state_path
+from ironcore.core.steps import PlanStepPlanner
+from ironcore.core.verify import CommandVerifier
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.providers.base import Message, Provider, ToolCall
 from ironcore.providers.openai_compat import ProviderError
@@ -103,6 +104,10 @@ MAX_TOOL_OUTPUT_CHARS = 20_000
 #: Working-set re-presentation caps (SPEC §5.2): MRU-touched files only.
 _WORKING_SET_MAX_FILES = 8
 _WORKING_SET_MAX_BYTES = 64_000
+
+#: On compaction (SPEC §11.2), keep this many most-recent messages verbatim
+#: after the distilled summary.
+_KEEP_RECENT = 6
 
 #: fs tools whose ``path`` arg names a single file worth carrying in the working set.
 _FS_PATH_TOOLS = frozenset({"read_file", "write_file", "edit_file"})
@@ -150,10 +155,12 @@ class TurnEngine:
         self.workspace = Path(workspace)
         self.approvals = approvals if approvals is not None else ApprovalBroker()
         self.snapshots = snapshots
-        self.repair: RepairPolicy = repair if repair is not None else DefaultRepairPolicy()
-        self.verifier: Verifier = verifier if verifier is not None else NoopVerifier()
-        self.budget: BudgetTracker = budget if budget is not None else DefaultBudget()
-        self.planner: StepPlanner = planner if planner is not None else LinearStepPlanner()
+        # The full phase-5 collaborators are the defaults; callers may still
+        # inject their own (or the simpler protocols.Default* impls) for tests.
+        self.repair: RepairPolicy = repair if repair is not None else LadderRepairPolicy()
+        self.verifier: Verifier = verifier if verifier is not None else CommandVerifier()
+        self.budget: BudgetTracker = budget if budget is not None else Budget()
+        self.planner: StepPlanner = planner if planner is not None else PlanStepPlanner()
         self.system_prompt = system_prompt
         if session is not None:
             self.state = session
@@ -186,6 +193,7 @@ class TurnEngine:
         did_write = False
         did_mutate = False
         snapshotted = False
+        verify_fed_back = False
         stop_reason = "done"
         usage_total: dict[str, int] = {}
         last_text = ""
@@ -197,6 +205,16 @@ class TurnEngine:
                 if cap is not None:
                     stop_reason = cap
                     break
+
+                # COMPACT (SPEC §11.2): under context pressure, distill older
+                # history into one handoff-grade summary + keep the recent tail.
+                if should_compact(self._conversation, profile=self.profile):
+                    summary = await compact(
+                        self._conversation,
+                        provider=self.provider,
+                        model=self.settings.roles.summarizer or "",
+                    )
+                    self._conversation = [summary, *self._conversation[-_KEEP_RECENT:]]
 
                 text_protocol = protocol == "text_protocol"
                 messages = compose(
@@ -281,13 +299,35 @@ class TurnEngine:
                     self._conversation.append(
                         Message(
                             role="user",
-                            content=f"Your previous tool call could not be used: {repair_error}",
+                            content=frame_error(repair_error, repair_raw, protocol),
                         )
                     )
                     continue
 
-                # -- no tool calls → the model is done ------------------------
+                # -- no tool calls → the model wants to stop -----------------
                 if not calls:
+                    # VERIFY (SPEC §5.5): after mutations, run the checker; feed a
+                    # failure back to the model ONCE, then surface honestly. The
+                    # stop_reason stays evidence-based; a failing verify is
+                    # reported, never silently swallowed (SAFETY T7).
+                    if did_mutate:
+                        vr = await self.verifier.verify(
+                            self.workspace, self.settings, state, did_write
+                        )
+                        if not vr.ok:
+                            yield TextDelta(turn_id=turn_id, text=f"\n[verify] {vr.summary}\n")
+                            if not verify_fed_back:
+                                verify_fed_back = True
+                                self._conversation.append(
+                                    Message(
+                                        role="user",
+                                        content=(
+                                            "Verification failed after your changes:\n"
+                                            f"{vr.summary}\nFix it, then stop."
+                                        ),
+                                    )
+                                )
+                                continue
                     stop_reason = "denied" if (any_denied and not any_executed) else "done"
                     break
 
@@ -368,14 +408,9 @@ class TurnEngine:
         except ProviderError as exc:
             fatal = {"reason": "provider_error", "message": str(exc)}
 
-        # -- VERIFY + micro-step (only on a clean run) ------------------------
-        if fatal is None:
-            if did_mutate:
-                vr = await self.verifier.verify(self.workspace, self.settings, state, did_write)
-                if not vr.ok:
-                    yield TextDelta(turn_id=turn_id, text=f"\n[verify] {vr.summary}\n")
-            if state.plan_steps and any_executed:
-                self.planner.advance(state, last_text or "tool activity")
+        # -- micro-step (VERIFY now runs inside the loop, at the clean stop) ---
+        if fatal is None and state.plan_steps and any_executed:
+            self.planner.advance(state, last_text or "tool activity")
 
         # -- DONE -------------------------------------------------------------
         state.turn_count += 1

@@ -215,7 +215,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockProvider-scripted sessions assert full event sequences: text-only turn,
     tool turn, ask→deny turn, deny-in-plan turn. **Verify:** `uv run --extra dev pytest tests/test_engine.py -q`
 
-- [~] **IC-503 · Repair loops** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-503 · Repair loops** *(done: fable-session, 2026-07-16 — LadderRepairPolicy stateless decision table (RETRY→LADDER_DOWN→GIVE_UP, floor gives up, max_attempts backstop) + frame_error, wired as engine default incl. framed re-ask; 14 tests)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.4
   - **Files:** `ironcore/core/repair.py` (new), `ironcore/core/engine.py`, `tests/test_repair.py` (new)
   - **Build:** on repairable parse/apply failure: re-ask once with mechanical error framed;
@@ -224,7 +224,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scripted malformed-then-fixed passes; malformed-twice ladders down; repair
     budget trips cleanly. **Verify:** `uv run --extra dev pytest tests/test_repair.py -q`
 
-- [~] **IC-504 · Verification loop** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-504 · Verification loop** *(done: fable-session, 2026-07-16 — CommandVerifier: discovery (configured>IRONCORE.md>auto-detect pytest/npm/cargo) + subprocess run w/ tail-on-fail, engine default; orchestrator wired the feed-failures-back-once re-loop; 15 tests)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.5, SAFETY §2 T7
   - **Files:** `ironcore/core/verify.py` (new), `ironcore/core/engine.py`, `tests/test_verify.py` (new)
   - **Build:** verify-command discovery (IRONCORE.md → /goal verify: → auto-detect pytest/
@@ -233,7 +233,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** failing-then-passing fixture converges; still-failing surfaces honestly with
     output; no-verify-command turns skip cleanly. **Verify:** `uv run --extra dev pytest tests/test_verify.py -q`
 
-- [~] **IC-505 · Micro-stepping + compaction** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-505 · Micro-stepping + compaction** *(done: fable-session, 2026-07-16 — PlanStepPlanner evidence-gated advance + set_plan (engine default), compact()→handoff-grade summary w/ mechanical fallback + should_compact; orchestrator wired the compaction trigger; 24 tests)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.3, §11.2
   - **Files:** `ironcore/core/steps.py` (new), `ironcore/core/compact.py` (new), tests (new)
   - **Build:** plan holder (steps + cursor + evidence per done step) surfaced through the
@@ -243,7 +243,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** step cursor advances only on evidence; compaction output parses as Handoff;
     fallback path tested. **Verify:** `uv run --extra dev pytest tests/test_steps.py tests/test_compact.py -q`
 
-- [~] **IC-506 · Budgets + runaway protection** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-506 · Budgets + runaway protection** *(done: fable-session, 2026-07-16 — Budget: per-turn+session caps (calls/tokens/wallclock via injected clock/repairs) + 2x-warn/3x-stop loop detector + summary(), engine default; 15 tests)*
   - **Depends:** IC-502 · **Spec:** SPEC §5.6, SAFETY §2 T5
   - **Files:** `ironcore/core/budgets.py` (new), `ironcore/core/engine.py`, `tests/test_budgets.py` (new)
   - **Build:** per-turn/session caps (calls, tokens, wall-clock, repairs) from settings;
