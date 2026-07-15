@@ -90,20 +90,23 @@ introspection). Optional per-role routing: let a 70B plan while a 7B executes, o
 
 ## Quickstart
 
-> ⚠️ **Pre-TUI stage** — the interactive TUI ships in phase 7, but the whole engine beneath
-> it is built and proven. What works today: the full **turn engine** (compose → call →
-> parse → gate → execute → observe → verify → done) with malformed-output repair, an
-> evidence-based "done" that refuses to lie about unverified work, budget/runaway
-> protection, and micro-stepping + history compaction; the complete **safety kernel**
-> (mode & command policy, path jail, secret redaction, injection guard, git-snapshot undo,
+> ⚠️ **Beta stage** — the interactive TUI is live and the whole engine beneath it is built
+> and proven; packaging/polish (phases 9–11) is what remains. What works today: the
+> **interactive terminal app** — a streaming Textual UI with live tool cards, an approval
+> modal with a colored diff viewer, Shift+Tab mode switching, a slash-command palette, and
+> resumable sessions; the full set of **slash commands** (`/goal`, `/loop`, `/model`,
+> `/init`, `/compact`, `/undo`, `/review`, `/memory`, …); the full **turn engine** (compose
+> → call → parse → gate → execute → observe → verify → done) with malformed-output repair,
+> an evidence-based "done" that refuses to lie about unverified work, budget/runaway
+> protection, and micro-stepping + history compaction; the complete **safety kernel** (mode
+> & command policy, path jail, secret redaction, injection guard, git-snapshot undo,
 > approvals); the complete **tool suite** (read/write/edit with a fuzzy patcher,
-> cross-platform shell, search, gated network fetch); the **capability envelope** —
-> measured probes that pick the tool protocol, edit format, and context budget per model,
-> including the IRONCALL floor protocol for weak models; and the full **provider layer**
-> (streaming OpenAI-compatible client, Ollama introspection, role routing). An agent using
-> these can already read, edit, and run code through a fully gated loop, undo byte-exactly,
-> and get frontier-shaped protocol handling out of an open model — all proof-tested
-> end-to-end against real files, real subprocesses, and real git, with no mocks.
+> cross-platform shell, search, gated network fetch); the **capability envelope** — measured
+> probes that pick the tool protocol, edit format, and context budget per model, including
+> the IRONCALL floor protocol for weak models; and the full **provider layer** (streaming
+> OpenAI-compatible client, Ollama introspection, role routing). Point it at a local Ollama
+> and drive real coding work through a fully gated loop — all proof-tested end-to-end
+> against a real headless UI, real files, real subprocesses, and real git.
 
 ```bash
 # install (Python 3.11+)
@@ -111,6 +114,9 @@ pip install git+https://github.com/RealDealCPA-VR/IronCore.git
 
 # check your environment (finds your local Ollama if it's running)
 ironcore doctor
+
+# launch the interactive TUI (point it at a local model via ~/.ironcore/config.toml)
+ironcore                 # resume a past session with:  ironcore --resume
 
 # development setup
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
@@ -149,7 +155,8 @@ probes, and real-socket proof tests — evidence, not claims.
 | 4 | Safety kernel: path jail, command policy, approval broker, secret redaction, git-snapshot undo, injection guard | ✅ shipped · 2026-07-15 · 753 tests, ReDoS blocker fixed, real-fs/git/subprocess proofs |
 | 5 | Turn engine: context composer, gated state machine, repair loops, verification loop, budgets, micro-stepping + compaction | ✅ shipped · 2026-07-16 |
 | 6 | Capability envelope: probe runner + CTX/RETENTION/TOOL-FORM/JSON/EDIT/CODE-SMOKE probes, adapter wiring, IRONCALL protocol, sampling | ✅ shipped · 2026-07-16 · 989 tests, 2 blockers fixed (compaction redaction leak, false-success stop), real-engine proofs |
-| 7–8 | Textual TUI, slash commands | 📋 specced |
+| 7 | Textual TUI: streaming transcript + tool cards, Shift+Tab modes, approval modal + diff viewer, slash palette, session picker + resume | ✅ shipped · 2026-07-16 |
+| 8 | Slash commands: /model, /init, /goal, /loop, /compact, /undo, /redo, /review, /memory | ✅ shipped · 2026-07-16 · 1099 tests, validator SHIP (2 majors fixed), real-app + real-git proofs |
 | 9–11 | Workflows, memory/handoff, v0.1 release | 📋 specced |
 
 - 📖 [`docs/SPEC.md`](docs/SPEC.md) — the full specification

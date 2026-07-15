@@ -38,7 +38,9 @@ _REAL_COMMANDS: tuple[SlashCommand, ...] = (
 
 
 def _cmd_help(ctx: CommandContext, args: str) -> str:
-    registry: CommandRegistry = ctx.extra["registry"]
+    # every ctx.extra key is optional (headless / alternate front ends may not
+    # populate it); fall back to a freshly built registry rather than crash.
+    registry: CommandRegistry = ctx.extra.get("registry") or build_default_registry()
     lines = ["Commands:"]
     for cmd in registry.all():
         marker = "" if cmd.implemented else "  [planned]"

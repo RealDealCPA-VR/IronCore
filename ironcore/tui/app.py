@@ -487,6 +487,15 @@ class IronCoreApp(App):
         store = self.session_store
         if store is None:
             return
+        # A bad/typo'd/stale --resume id must not fabricate a headerless orphan
+        # session (invisible to the picker, un-resumable). Start fresh instead.
+        if not store.path_for(session_id).exists():
+            await self.transcript.add_note(
+                f"[no such session {session_id} — starting a fresh session]"
+            )
+            self._session_id = None
+            self._session_created = False
+            return
         messages, tail = store.rehydrate(session_id)
         self._session_id = session_id
         self._session_created = True
