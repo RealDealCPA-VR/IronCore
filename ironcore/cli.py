@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ironcore import __version__
 
@@ -39,32 +40,70 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def cmd_doctor() -> int:
+#: Role names doctor reports, in the order they appear in RoleModels.
+_ROLE_NAMES = ("planner", "coder", "summarizer", "verifier")
+
+
+def _is_localhost(url: str) -> bool:
+    host = urlsplit(url).hostname or ""
+    return host == "localhost" or host == "::1" or host.startswith("127.")
+
+
+def cmd_doctor(
+    project_dir: Path | None = None,
+    user_config: Path | None = None,
+    env: dict[str, str] | None = None,
+    envelope_dir: Path | None = None,
+    check_endpoint: bool = True,
+) -> int:
+    """Environment checks. Parameters are injectable for tests (mirrors
+    Settings.load); real runs pass nothing. check_endpoint=False skips the
+    network probe so tests stay offline."""
     ok = True
 
     version_ok = sys.version_info >= (3, 11)
     print(f"[{'ok' if version_ok else 'FAIL'}] python {sys.version.split()[0]} (need >= 3.11)")
     ok = ok and version_ok
 
-    try:
-        from ironcore.config.settings import Settings
+    from ironcore.config.settings import ConfigError, Settings
 
-        settings = Settings.load(project_dir=Path.cwd())
-        print(f"[ok] config loaded (model: {settings.provider.model})")
-        endpoint = settings.provider.base_url
+    try:
+        settings = Settings.load(
+            project_dir=project_dir if project_dir is not None else Path.cwd(),
+            user_config=user_config,
+            env=env,
+        )
+    except ConfigError as exc:
+        print(f"[FAIL] config: {exc}")
+        return 1
     except Exception as exc:  # pragma: no cover — defensive
         print(f"[FAIL] config: {exc}")
         return 1
 
-    try:
-        import httpx
+    print(f"[ok] config loaded (model: {settings.provider.model}, mode: {settings.safety.mode})")
+    for role in _ROLE_NAMES:
+        model = getattr(settings.roles, role)
+        if model:
+            print(f"[ok] role {role}: {model}")
 
-        resp = httpx.get(f"{endpoint.rstrip('/').removesuffix('/v1')}/api/version", timeout=2.0)
-        print(f"[ok] endpoint reachable: {endpoint} ({resp.status_code})")
-    except Exception:
-        print(f"[--] endpoint not reachable: {endpoint} (fine if no local server is running)")
+    endpoint = settings.provider.base_url
+    if settings.safety.network_tools and not _is_localhost(endpoint):
+        # SAFETY.md section 6: hosted endpoint + network tools = code leaves this machine.
+        print(f"[!!] endpoint {endpoint} is not localhost and safety.network_tools is on:")
+        print("     your code leaves this machine -- make sure that is what you want")
 
-    envelope_dir = Path.home() / ".ironcore" / "envelopes"
+    if check_endpoint:
+        try:
+            import httpx
+
+            probe = f"{endpoint.rstrip('/').removesuffix('/v1')}/api/version"
+            resp = httpx.get(probe, timeout=2.0)
+            print(f"[ok] endpoint reachable: {endpoint} ({resp.status_code})")
+        except Exception:
+            print(f"[--] endpoint not reachable: {endpoint} (fine if no local server is running)")
+
+    if envelope_dir is None:
+        envelope_dir = Path.home() / ".ironcore" / "envelopes"
     try:
         envelope_dir.mkdir(parents=True, exist_ok=True)
         print(f"[ok] envelope cache writable: {envelope_dir}")

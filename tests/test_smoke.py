@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 
 import ironcore
-from ironcore.cli import build_parser, main
+from ironcore.cli import build_parser, cmd_doctor, main
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -30,3 +30,69 @@ def test_parser_has_doctor():
     parser = build_parser()
     args = parser.parse_args(["doctor"])
     assert args.command == "doctor"
+
+
+def _doctor(tmp_path, user_config, env=None):
+    """Run doctor fully hermetic: injected config/env, no network probe."""
+    return cmd_doctor(
+        project_dir=tmp_path,
+        user_config=user_config,
+        env=env or {},
+        envelope_dir=tmp_path / "envelopes",
+        check_endpoint=False,
+    )
+
+
+def test_doctor_malformed_config_exits_1_with_path_and_line(tmp_path, capsys):
+    bad = tmp_path / "user.toml"
+    bad.write_text("[provider\n")
+    assert _doctor(tmp_path, bad) == 1
+    out = capsys.readouterr().out
+    assert "[FAIL] config" in out
+    assert str(bad) in out
+    assert "line" in out
+
+
+def test_doctor_invalid_mode_exits_1_listing_valid_modes(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "yolo"\n')
+    assert _doctor(tmp_path, user) == 1
+    out = capsys.readouterr().out
+    assert "[FAIL] config" in out
+    assert "accept-edits" in out
+
+
+def test_doctor_reports_set_roles_only(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text('[roles]\nplanner = "big-planner"\ncoder = "fast-coder"\n')
+    assert _doctor(tmp_path, user) == 0
+    out = capsys.readouterr().out
+    assert "role planner: big-planner" in out
+    assert "role coder: fast-coder" in out
+    assert "role summarizer" not in out
+    assert "role verifier" not in out
+
+
+def test_doctor_warns_when_hosted_endpoint_and_network_tools(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        '[provider]\nbase_url = "https://hosted.example.com/v1"\n'
+        "[safety]\nnetwork_tools = true\n"
+    )
+    assert _doctor(tmp_path, user) == 0  # a warning, not a failure
+    out = capsys.readouterr().out
+    assert "[!!]" in out
+    assert "leaves this machine" in out
+
+
+def test_doctor_no_warning_for_localhost_or_network_tools_off(tmp_path, capsys):
+    # localhost endpoint + network_tools on -> no warning
+    user = tmp_path / "user.toml"
+    user.write_text("[safety]\nnetwork_tools = true\n")
+    assert _doctor(tmp_path, user) == 0
+    assert "[!!]" not in capsys.readouterr().out
+
+    # hosted endpoint + network_tools off (default) -> no warning
+    user.write_text('[provider]\nbase_url = "https://hosted.example.com/v1"\n')
+    assert _doctor(tmp_path, user) == 0
+    assert "[!!]" not in capsys.readouterr().out

@@ -1,0 +1,5 @@
+{"type": "text", "content": "Starting the task."}
+{"type": "malformed_tool_json", "text_prefix": "Calling the tool now: ", "raw_fragment": "{\"name\": \"read_file\", \"arguments\": {\"path\": "}
+{"type": "truncate", "content": "Here is the very long explanation you asked for", "after_chars": 12}
+{"type": "timeout"}
+{"type": "error", "message": "server exploded"}

@@ -14,14 +14,24 @@ from ironcore.providers.base import (
     StreamEvent,
     ToolCall,
 )
-from ironcore.providers.mock import MockProvider
+from ironcore.providers.mock import (
+    MalformedToolJSON,
+    MockProvider,
+    RaiseError,
+    TimeoutFailure,
+    Truncate,
+)
 
 __all__ = [
     "CompletionResult",
+    "MalformedToolJSON",
     "Message",
     "MockProvider",
     "Provider",
+    "RaiseError",
     "SamplingPolicy",
     "StreamEvent",
+    "TimeoutFailure",
     "ToolCall",
+    "Truncate",
 ]

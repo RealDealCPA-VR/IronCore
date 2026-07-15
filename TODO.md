@@ -21,7 +21,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 1 — Foundation
 
-- [ ] **IC-101 · Config hardening + doctor depth**
+- [x] **IC-101 · Config hardening + doctor depth** *(done: fable-session, 2026-07-15 — ConfigError w/ path+line, mode validation, IRONCORE_ROLE_* env, doctor roles + non-localhost warning; 18 targeted tests)*
   - **Depends:** —  · **Spec:** SPEC §12, CONTRACTS §7
   - **Files:** `ironcore/config/settings.py`, `ironcore/cli.py`, `tests/test_config.py`, `tests/test_smoke.py`
   - **Build:** friendly TOML-error reporting (file+line, no traceback); `IRONCORE_ROLE_*` env
@@ -30,7 +30,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** malformed TOML → exit 1 with path+line; invalid `safety.mode` rejected;
     doctor output covers all checks. **Verify:** `uv run --extra dev pytest tests/test_config.py tests/test_smoke.py -q`
 
-- [ ] **IC-102 · Session state store**
+- [x] **IC-102 · Session state store** *(done: fable-session, 2026-07-15 — SessionState dataclass, atomic os.replace save, corrupt→fresh+warning; 13 tests)*
   - **Depends:** — · **Spec:** ARCHITECTURE §5
   - **Files:** `ironcore/core/state.py` (new), `tests/test_state.py` (new)
   - **Build:** `SessionState` dataclass (mode, goal, working-set paths, plan steps + cursor,
@@ -39,7 +39,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** roundtrip preserves all fields; interrupted-write simulation recovers.
     **Verify:** `uv run --extra dev pytest tests/test_state.py -q`
 
-- [ ] **IC-103 · Audit trail writer**
+- [x] **IC-103 · Audit trail writer** *(done: fable-session, 2026-07-15 — stdlib-only AuditWriter, day-file JSONL, sha256+120-char previews, no-rewrite-API pinned by introspection; 15 tests)*
   - **Depends:** — · **Spec:** SAFETY §5
   - **Files:** `ironcore/safety/audit.py` (new), `tests/test_audit.py` (new)
   - **Build:** append-only JSONL under `.ironcore/audit/YYYY-MM-DD.jsonl`; event types
@@ -48,7 +48,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** lines parse as JSON; no rewrite API exists; preview never exceeds 120 chars.
     **Verify:** `uv run --extra dev pytest tests/test_audit.py -q`
 
-- [ ] **IC-104 · MockProvider failure injection + transcript fixtures**
+- [x] **IC-104 · MockProvider failure injection + transcript fixtures** *(done: fable-session, 2026-07-15 — MalformedToolJSON/Truncate/TimeoutFailure/RaiseError markers, from_fixture JSONL loader, stream always terminates done|error; 16 new tests, happy path byte-compatible)*
   - **Depends:** — · **Spec:** SPEC §14
   - **Files:** `ironcore/providers/mock.py`, `tests/test_providers.py`, `tests/fixtures/` (new)
   - **Build:** scriptable failures: malformed-tool-JSON event, mid-stream truncation, timeout,
@@ -58,7 +58,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 2 — Providers
 
-- [ ] **IC-201 · OpenAI-compatible client (streaming, retries)**
+- [~] **IC-201 · OpenAI-compatible client (streaming, retries)** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-104 · **Spec:** SPEC §8.1, CONTRACTS §2, module docstring in `openai_compat.py`
   - **Files:** `ironcore/providers/openai_compat.py`, `tests/providers/test_openai_compat.py` (new)
   - **Build:** httpx.AsyncClient; SSE parse; retry/backoff+jitter on 429/5xx honoring
@@ -66,7 +66,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** httpx.MockTransport tests: happy stream, 429-then-success, timeout, key never
     in any error string. **Verify:** `uv run --extra dev pytest tests/providers -q`
 
-- [ ] **IC-202 · Native tool-call parsing across chunk fragments**
+- [~] **IC-202 · Native tool-call parsing across chunk fragments** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-201 · **Spec:** SPEC §8.1
   - **Files:** `ironcore/providers/openai_compat.py`, `tests/providers/test_toolcalls.py` (new)
   - **Build:** accumulate `tool_calls` deltas by index; emit `StreamEvent(kind="tool_call")`
@@ -74,7 +74,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** fragmented-across-chunks call reassembles; two parallel calls both emit;
     garbage args → `repairable: true` event, no exception. **Verify:** same as IC-201
 
-- [ ] **IC-203 · Ollama extras**
+- [~] **IC-203 · Ollama extras** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-201 · **Spec:** SPEC §8.2, MODELS §7
   - **Files:** `ironcore/providers/ollama.py` (new), `tests/providers/test_ollama.py` (new)
   - **Build:** subclass adding `/api/tags` discovery, `/api/show` context-length+quant
@@ -82,7 +82,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockTransport tests for all three; degrades gracefully on non-Ollama endpoints.
     **Verify:** `uv run --extra dev pytest tests/providers -q`
 
-- [ ] **IC-204 · Provider registry + role routing**
+- [~] **IC-204 · Provider registry + role routing** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-201 · **Spec:** SPEC §4.4, §12
   - **Files:** `ironcore/providers/registry.py` (new), `tests/providers/test_registry.py` (new)
   - **Build:** build provider(s) from Settings; `for_role("planner"|...)` returns the routed
@@ -90,7 +90,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** role fallback to default; same base_url reuses one client.
     **Verify:** `uv run --extra dev pytest tests/providers -q`
 
-- [ ] **IC-205 · Endpoint capability detection**
+- [~] **IC-205 · Endpoint capability detection** *(claimed: fable-session, 2026-07-15)*
   - **Depends:** IC-201 · **Spec:** SPEC §8.3
   - **Files:** `ironcore/providers/detect.py` (new), `tests/providers/test_detect.py` (new)
   - **Build:** feature-probe an endpoint: native `tools` accepted? `format=json`/grammar/

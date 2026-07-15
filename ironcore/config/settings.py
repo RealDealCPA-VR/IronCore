@@ -4,8 +4,13 @@ Files (TOML):
   user:    ~/.ironcore/config.toml
   project: <workspace>/.ironcore/config.toml   (committable)
 
-Environment overrides (highest precedence, IC-101 extends the set):
-  IRONCORE_BASE_URL, IRONCORE_MODEL, IRONCORE_API_KEY, IRONCORE_MODE
+Environment overrides (highest precedence):
+  IRONCORE_BASE_URL, IRONCORE_MODEL, IRONCORE_API_KEY, IRONCORE_MODE,
+  IRONCORE_ROLE_PLANNER, IRONCORE_ROLE_CODER, IRONCORE_ROLE_SUMMARIZER,
+  IRONCORE_ROLE_VERIFIER
+
+Malformed files and invalid values raise ConfigError with a human message
+(file path + line for TOML errors) -- callers never see a raw traceback.
 """
 
 from __future__ import annotations
@@ -16,6 +21,17 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from ironcore.safety.modes import Mode  # config may import safety; safety imports stdlib only
+
+
+class ConfigError(Exception):
+    """A config file is malformed or contains an invalid value.
+
+    The message is user-facing: it names the offending file (and line, for
+    TOML syntax errors) or lists the valid values. cli/doctor catches this
+    and exits 1 with the message instead of a traceback.
+    """
 
 
 class ProviderSettings(BaseModel):
@@ -64,10 +80,22 @@ class Settings(BaseModel):
         for path in (user_config, project_config):
             if path is not None and path.exists():
                 with path.open("rb") as f:
-                    _deep_merge(data, tomllib.load(f))
+                    try:
+                        _deep_merge(data, tomllib.load(f))
+                    except tomllib.TOMLDecodeError as exc:
+                        # exc's message already carries "(at line N, column M)".
+                        raise ConfigError(f"malformed config file {path}: {exc}") from exc
 
         _apply_env(data, env)
-        return cls.model_validate(data)
+        settings = cls.model_validate(data)
+        try:
+            Mode(settings.safety.mode)
+        except ValueError:
+            valid = ", ".join(m.value for m in Mode)
+            raise ConfigError(
+                f"invalid safety.mode {settings.safety.mode!r}; valid modes: {valid}"
+            ) from None
+        return settings
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
@@ -84,6 +112,10 @@ def _apply_env(data: dict[str, Any], env: dict[str, str]) -> None:
         "IRONCORE_MODEL": ("provider", "model"),
         "IRONCORE_API_KEY": ("provider", "api_key"),
         "IRONCORE_MODE": ("safety", "mode"),
+        "IRONCORE_ROLE_PLANNER": ("roles", "planner"),
+        "IRONCORE_ROLE_CODER": ("roles", "coder"),
+        "IRONCORE_ROLE_SUMMARIZER": ("roles", "summarizer"),
+        "IRONCORE_ROLE_VERIFIER": ("roles", "verifier"),
     }
     for var, (section, key) in mapping.items():
         if var in env and env[var]:
