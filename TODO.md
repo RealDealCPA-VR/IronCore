@@ -74,7 +74,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** fragmented-across-chunks call reassembles; two parallel calls both emit;
     garbage args → `repairable: true` event, no exception. **Verify:** same as IC-201
 
-- [~] **IC-203 · Ollama extras** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-203 · Ollama extras** *(done: fable-session, 2026-07-15 — /api/tags discovery, /api/show ModelDetails for the envelope, keep_alive injection, num_ctx warning, graceful non-Ollama fallback; 21 tests)*
   - **Depends:** IC-201 · **Spec:** SPEC §8.2, MODELS §7
   - **Files:** `ironcore/providers/ollama.py` (new), `tests/providers/test_ollama.py` (new)
   - **Build:** subclass adding `/api/tags` discovery, `/api/show` context-length+quant
@@ -82,7 +82,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** MockTransport tests for all three; degrades gracefully on non-Ollama endpoints.
     **Verify:** `uv run --extra dev pytest tests/providers -q`
 
-- [~] **IC-204 · Provider registry + role routing** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-204 · Provider registry + role routing** *(done: fable-session, 2026-07-15 — model-keyed instance cache, for_role fallback-to-default, idempotent async close_all, factory/transport seams; 11 tests)*
   - **Depends:** IC-201 · **Spec:** SPEC §4.4, §12
   - **Files:** `ironcore/providers/registry.py` (new), `tests/providers/test_registry.py` (new)
   - **Build:** build provider(s) from Settings; `for_role("planner"|...)` returns the routed
@@ -90,7 +90,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** role fallback to default; same base_url reuses one client.
     **Verify:** `uv run --extra dev pytest tests/providers -q`
 
-- [~] **IC-205 · Endpoint capability detection** *(claimed: fable-session, 2026-07-15)*
+- [x] **IC-205 · Endpoint capability detection** *(done: fable-session, 2026-07-15 — EndpointFeatures via one-knob probes, server_hint heuristics, dead-endpoint→all-False never-raise, as_priors below ladder thresholds; 20 tests)*
   - **Depends:** IC-201 · **Spec:** SPEC §8.3
   - **Files:** `ironcore/providers/detect.py` (new), `tests/providers/test_detect.py` (new)
   - **Build:** feature-probe an endpoint: native `tools` accepted? `format=json`/grammar/

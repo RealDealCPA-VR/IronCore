@@ -44,3 +44,30 @@
 **Next:** IC-203/204/205 — reuse self._send_with_retries(method, path, json_body=, retries=, stream=); Ollama /api/* lives at server ROOT, strip /v1 from base_url; registry can share one httpx transport via the transport= kwarg (aclose is idempotent).
 **Gotchas:** tool_call events flush at stream END only (on [DONE] or EOF), sorted by index; malformed accumulated JSON -> terminal repairable error event (no done after it); mid-stream transport death does NOT flush drafts; stream-mode connect failures yield error events while complete() raises ProviderError. Redaction is instance-level (_redact/_describe) — new subclass error paths must route through them.
 <!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-15T21:55:00+00:00 — agent-ic203
+**Context:** IC-203 Ollama extras, phase-2 wave.
+**Changed:** ironcore/providers/ollama.py (new: OllamaProvider, ModelInfo, ModelDetails), tests/providers/test_ollama.py (21 tests). openai_compat.py NOT touched (used the existing _request_body seam for keep_alive).
+**Verified:** uv run --extra dev pytest -q -> 180 passed; ruff clean.
+**Next:** IC-601 consumes ModelDetails verbatim (context_length/quantization/family/num_ctx_configured; None = unknown, floor-conservative). Registry should only construct OllamaProvider for Ollama-detected endpoints or pass keep_alive=None.
+**Gotchas:** /api/* anchored at api_root (trailing /v1 stripped) via private _send_api — parent _send_with_retries would nest /api under /v1. ollama.py imports module-private _RETRY_STATUSES/_TRANSPORT_ERRORS/_backoff_delay from openai_compat — renames there must update ollama.py same-commit. num_ctx_configured None means server-default (often tiny), not unlimited.
+<!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-15T21:55:00+00:00 — agent-ic204
+**Context:** IC-204 provider registry + role routing, phase-2 wave.
+**Changed:** ironcore/providers/registry.py (new), tests/providers/test_registry.py (11 tests), providers/__init__.py (additive ProviderRegistry export).
+**Verified:** uv run --extra dev pytest -q -> 139 at run time (isolated +11); ruff clean.
+**Next:** IC-502 boots via ProviderRegistry.from_settings(settings) and MUST await registry.close_all() at shutdown. IC-801: no mutation API — a model switch builds a NEW registry (default is built eagerly; cache is keyed by MODEL not role).
+**Gotchas:** close_all is async + idempotent; post-close for_role raises RuntimeError. VALID_ROLES static tuple pinned against RoleModels.model_fields by a test. Factory convention: all-keyword call, transport omitted when None.
+<!-- HANDOFF v1 END -->
+
+<!-- HANDOFF v1 BEGIN -->
+## Handoff — 2026-07-15T21:55:00+00:00 — agent-ic205
+**Context:** IC-205 endpoint capability detection, phase-2 wave.
+**Changed:** ironcore/providers/detect.py (new: EndpointFeatures, detect, as_priors, PRIOR_SCORE=0.5), tests/providers/test_detect.py (20 tests). Intentionally NOT exported from providers/__init__ — import ironcore.providers.detect directly.
+**Verified:** uv run --extra dev pytest -q -> 180 passed; ruff clean.
+**Next:** IC-601/IC-603 OVERWRITE prior keys with measured scores (priors are accept-signals, not reliabilities; all 0.5, below every ladder threshold so unprobed models stay on the text floor — test-pinned against a real CapabilityProfile).
+**Gotchas:** all-False + hint unknown = dead-endpoint signature (do not cache); grammar/guided_json trustworthy only on their matching server hints; logprobs is the only body-verified feature; detect() never raises and emits no messages (no key-leak surface).
+<!-- HANDOFF v1 END -->

@@ -21,6 +21,7 @@ from ironcore.providers.mock import (
     TimeoutFailure,
     Truncate,
 )
+from ironcore.providers.registry import ProviderRegistry
 
 __all__ = [
     "CompletionResult",
@@ -28,6 +29,7 @@ __all__ = [
     "Message",
     "MockProvider",
     "Provider",
+    "ProviderRegistry",
     "RaiseError",
     "SamplingPolicy",
     "StreamEvent",
