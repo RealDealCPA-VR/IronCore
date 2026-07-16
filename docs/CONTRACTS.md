@@ -32,6 +32,9 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
   types (additive fields allowed with defaults).
 - `Provider.complete/stream/list_models` signatures; `stream` must terminate with a `done`
   or `error` event; providers raise `ProviderError` only (never transport exceptions).
+- `complete`/`stream` accept optional keyword-only `response_format` + `extra_body`
+  (default `None`) — additive, backward-compatible guided-decoding knobs merged into the
+  request body (`extra_body` wins a key clash); `MockProvider` records them.
 - Malformed model output is repairable data (an `error` event with `repairable: true`),
   not an exception.
 - `MockProvider` remains a drop-in for every consumer — nothing may require a concrete

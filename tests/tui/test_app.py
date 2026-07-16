@@ -334,7 +334,9 @@ class _SlowProvider(Provider):
     async def complete(self, messages, *, tools=None, sampling=None):  # pragma: no cover
         raise NotImplementedError
 
-    async def stream(self, messages, *, tools=None, sampling=None) -> AsyncIterator[StreamEvent]:
+    async def stream(
+        self, messages, *, tools=None, sampling=None, response_format=None, extra_body=None
+    ) -> AsyncIterator[StreamEvent]:
         yield StreamEvent(kind="text", text="Thinking about it")
         await asyncio.sleep(30)  # long enough to be cancelled first
         yield StreamEvent(kind="done", data={})

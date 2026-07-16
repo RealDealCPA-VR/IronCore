@@ -42,8 +42,13 @@ from ironcore.tools.default import build_default_registry
 
 
 def _profile(protocol: str = "native") -> CapabilityProfile:
-    """A profile whose ladder recommends `protocol` (native vs the text floor)."""
-    tp = {"native": 1.0} if protocol == "native" else {}
+    """A profile whose ladder recommends `protocol` (native / strict_json / floor)."""
+    if protocol == "native":
+        tp = {"native": 1.0}
+    elif protocol == "strict_json":
+        tp = {"strict_json": 0.95}  # clears strict_json's 0.90 gate, not native's 0.95
+    else:
+        tp = {}  # nothing clears a gate -> the always-works text floor
     return CapabilityProfile(model_id="mock", honest_context=8192, tool_protocols=tp)
 
 
@@ -172,6 +177,64 @@ def test_ironcall_text_protocol_turn(tmp_path):
     assert len(fins) == 1
     assert fins[0].result.ok and "payload-1234" in fins[0].result.output
     assert _of(events, ToolCallRequested)[0].decision == "allow"
+    assert isinstance(events[-1], TurnCompleted) and events[-1].stop_reason == "done"
+
+
+# --------------------------------------------------------------------------- #
+# (3b) guided strict_json turn: server-constrained JSON tool call, then done
+# --------------------------------------------------------------------------- #
+
+
+def test_guided_strict_json_read_then_done(tmp_path):
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    # each reply is a bare JSON object (as `response_format` would force); the
+    # first is a tool call, the second the `done` pseudo-tool that ends the turn.
+    script = [
+        _text('{"tool": "read_file", "args": {"path": "app.py"}}'),
+        _text('{"tool": "done", "args": {"message": "read the file"}}'),
+    ]
+    engine = _engine(tmp_path, script, protocol="strict_json")
+    events = drive(engine, "read app.py")
+
+    # the engine asked the server for constrained decoding (the json_schema form)
+    rf = engine.provider.last_response_format
+    assert rf is not None and rf["json_schema"]["name"] == "ironcore_tool_call"
+
+    # the guided call really executed
+    fins = _of(events, ToolCallFinished)
+    assert [f.call.name for f in fins] == ["read_file"]
+    assert fins[0].result.ok and "x = 1" in fins[0].result.output
+
+    transcript = _text_of(events)
+    assert "read the file" in transcript  # the done summary is shown as prose
+    assert '{"tool"' not in transcript  # raw JSON scaffold is never streamed out
+    assert isinstance(events[-1], TurnCompleted) and events[-1].stop_reason == "done"
+
+
+def test_guided_strict_json_repairs_then_executes(tmp_path):
+    (tmp_path / "app.py").write_text("x = 1\n", encoding="utf-8")
+    # a server that ignored `response_format` (unparsable) -> repair -> a valid
+    # guided call on the re-ask (RETRY stays on strict_json) -> done.
+    script = [
+        _text("not json at all"),
+        _text('{"tool": "read_file", "args": {"path": "app.py"}}'),
+        _text('{"tool": "done", "args": {"message": "repaired and read"}}'),
+    ]
+    events = drive(_engine(tmp_path, script, protocol="strict_json"), "read it")
+
+    assert "[repair]" in _text_of(events)  # the malformed body was repaired, visibly
+    fins = _of(events, ToolCallFinished)
+    assert [f.call.name for f in fins] == ["read_file"]  # recovered + executed
+    assert isinstance(events[-1], TurnCompleted) and events[-1].stop_reason == "done"
+
+
+def test_guided_strict_json_immediate_done(tmp_path):
+    # the model finishes immediately with the `done` pseudo-tool; no tool runs.
+    script = [_text('{"tool": "done", "args": {"message": "nothing to do"}}')]
+    events = drive(_engine(tmp_path, script, protocol="strict_json"), "anything?")
+
+    assert not _of(events, ToolCallFinished)  # nothing executed
+    assert "nothing to do" in _text_of(events)  # the summary is shown
     assert isinstance(events[-1], TurnCompleted) and events[-1].stop_reason == "done"
 
 

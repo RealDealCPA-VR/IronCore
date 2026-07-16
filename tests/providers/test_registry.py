@@ -35,7 +35,7 @@ class FakeProvider(Provider):
     async def complete(self, messages, *, tools=None, sampling=None):
         raise NotImplementedError
 
-    def stream(self, messages, *, tools=None, sampling=None):
+    def stream(self, messages, *, tools=None, sampling=None, response_format=None, extra_body=None):
         raise NotImplementedError
 
     async def list_models(self):

@@ -50,11 +50,16 @@ Then it walks **downgrade ladders** instead of failing — always landing on a f
 can actually produce:
 
 ```
-tool calls:  native function-calling  →  strict JSON  →  IRONCALL text protocol (+ repair loop)
+tool calls:  native function-calling  →  strict JSON (server-constrained)  →  IRONCALL text protocol
 file edits:  unified diff  →  search/replace blocks  →  whole-file rewrite
 context:     budgeted composition against the MEASURED honest window, working-set files
 anchoring:   goal + constraints re-injected every N turns — N from measured retention
 ```
+
+The middle rung is real: a model routed to **strict JSON** is driven with server-side
+**guided decoding** (`response_format` / json-schema — vLLM, llama.cpp, LM Studio, Ollama) so
+its output is *constrained* to a well-formed `{"tool", "args"}` object — guaranteed-parseable
+tool calls, not best-effort — with a `done` action so a constrained model can still finish.
 
 A capable 30B gets native tool calls and unified diffs. A scrappy 7B gets the IRONCALL text
 protocol, whole-file edits, and an anchor every other turn — and *still finishes the task*.
@@ -174,12 +179,9 @@ Plan-mode workflow escape) were caught and fixed exactly this way.
 
 ## 🌙 Moonshots — where we're aiming next
 
-v0.1 molds to your model — and now does it *instantly* (see above). These are the bets that
-would make it mold *deeper*:
+v0.1 molds to your model — instantly (above), and the strict-JSON rung is now real
+server-side guided decoding (above). These are the bets that would make it mold *deeper*:
 
-- **Guided decoding.** Drive the strict-JSON rung with real server-side grammars
-  (`response_format` / GBNF / vLLM guided decoding) so a mid-tier model gets *guaranteed*
-  well-formed tool calls, not best-effort ones.
 - **A model per role, each measured.** Route planning to a 70B and execution to a fast 7B (or
   the reverse), with a separate capability envelope per role — pick the right brain for each
   step of the loop.

@@ -81,8 +81,14 @@ class Provider(ABC):
         *,
         tools: list[dict[str, Any]] | None = None,
         sampling: SamplingPolicy | None = None,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> CompletionResult:
-        """Non-streaming completion."""
+        """Non-streaming completion.
+
+        response_format / extra_body: server-side guided-decoding knobs, merged
+        into the request body.
+        """
 
     @abstractmethod
     def stream(
@@ -91,8 +97,14 @@ class Provider(ABC):
         *,
         tools: list[dict[str, Any]] | None = None,
         sampling: SamplingPolicy | None = None,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """Streaming completion. Must yield a terminal 'done' or 'error' event."""
+        """Streaming completion. Must yield a terminal 'done' or 'error' event.
+
+        response_format / extra_body: server-side guided-decoding knobs, merged
+        into the request body.
+        """
 
     @abstractmethod
     async def list_models(self) -> list[str]:

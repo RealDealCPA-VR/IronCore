@@ -40,6 +40,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from ironcore.core.guided import tool_call_response_format
 from ironcore.core.ironcall import parse as ironcall_parse
 from ironcore.envelope.runner import ProbeResult
 from ironcore.providers.base import CompletionResult, Message, Provider
@@ -82,8 +83,12 @@ class ToolFormProbe:
 
       * ``native``       — ``completion.message.tool_calls`` has exactly one call with the
         expected name + args.
-      * ``strict_json``  — the reply text is a bare JSON object ``{"tool":.., "args":..}``
-        (``json.loads``) whose name + args match.
+      * ``strict_json``  — the GUIDED rung: the request sends ``response_format`` (an
+        OpenAI structured-outputs json-schema pinning output to the one-call shape via
+        ``guided.tool_call_response_format``), and the reply is scored as a bare JSON
+        object ``{"tool":.., "args":..}`` (``json.loads``) whose name + args match. A
+        server that honors the constraint cannot emit malformed JSON; a server that
+        ignores it returns best-effort JSON, scored exactly as before (no regression).
       * ``text_protocol``— ``ironcall.parse(text)`` yields ``error is None`` and exactly one
         call whose name + args match (the ironcall author's guidance, verbatim).
     """
@@ -104,17 +109,28 @@ class ToolFormProbe:
     async def run(self, provider: Provider) -> ProbeResult:
         scores: dict[str, float] = {}
         summary: list[str] = []
+        # strict_json is the GUIDED rung: its trials ask the server to CONSTRAIN output
+        # to the one-tool-call schema (OpenAI structured outputs) so the measured score
+        # reflects guided-decoding reliability, not best-effort JSON — the envelope then
+        # routes to strict_json only when that constrained score is high. native and
+        # text_protocol stay unconstrained (response_format=None, call byte-identical).
+        guided_format = tool_call_response_format([_TOOL_SPEC])
         protocols = (
-            ("native", self._native_correct, [_TOOL_SPEC]),
-            ("strict_json", self._strict_json_correct, None),
-            ("text_protocol", self._text_protocol_correct, None),
+            ("native", self._native_correct, [_TOOL_SPEC], None),
+            ("strict_json", self._strict_json_correct, None, guided_format),
+            ("text_protocol", self._text_protocol_correct, None, None),
         )
         try:
-            for name, checker, tools in protocols:
+            for name, checker, tools, response_format in protocols:
                 messages = self._messages(name)
                 correct = 0
                 for _ in range(self.trials):
-                    completion = await provider.complete(messages, tools=tools)
+                    if response_format is None:
+                        completion = await provider.complete(messages, tools=tools)
+                    else:
+                        completion = await provider.complete(
+                            messages, tools=tools, response_format=response_format
+                        )
                     if checker(completion):
                         correct += 1
                 scores[f"tool_protocols.{name}"] = correct / self.trials

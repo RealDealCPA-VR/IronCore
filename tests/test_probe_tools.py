@@ -53,6 +53,39 @@ def _provider(entries):
     return MockProvider(script=list(entries))
 
 
+class _RecordingProvider(MockProvider):
+    """MockProvider that remembers the ``response_format`` of every ``complete`` call.
+
+    ``MockProvider.last_response_format`` keeps only the most recent value, and the probe
+    runs ``text_protocol`` (unconstrained) after ``strict_json`` — so the *sequence* is
+    what proves the strict_json trials requested server-side constrained decoding while the
+    native/text trials did not. Scoring is untouched: ``super().complete`` still replays the
+    FIFO script and ignores the knob, exactly like a server that honors (or drops) it.
+    """
+
+    def __init__(self, entries):
+        super().__init__(script=list(entries))
+        self.response_formats: list[dict | None] = []
+
+    async def complete(
+        self,
+        messages,
+        *,
+        tools=None,
+        sampling=None,
+        response_format=None,
+        extra_body=None,
+    ):
+        self.response_formats.append(response_format)
+        return await super().complete(
+            messages,
+            tools=tools,
+            sampling=sampling,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Metadata
 # --------------------------------------------------------------------------- #
@@ -159,6 +192,48 @@ def test_strict_json_half():
     script = [_GARBAGE] * t + strict + [_GARBAGE] * t
     result = asyncio.run(ToolFormProbe(trials=t).run(_provider(script)))
     assert result.scores["tool_protocols.strict_json"] == 0.5
+
+
+def test_strict_json_trials_request_guided_decoding():
+    # The strict_json rung is GUIDED: its trials must ask the server to CONSTRAIN output
+    # (response_format), while native + text_protocol stay unconstrained. Scoring unchanged.
+    t = 3
+    script = (
+        [_native_ok() for _ in range(t)]
+        + [_text(_STRICT_JSON_OK) for _ in range(t)]
+        + [_text(_IRONCALL_OK) for _ in range(t)]
+    )
+    provider = _RecordingProvider(script)
+    result = asyncio.run(ToolFormProbe(trials=t).run(provider))
+    # constrained-and-valid strict_json still scores perfect (mechanical scoring intact)
+    assert result.scores["tool_protocols.strict_json"] == 1.0
+    seen = provider.response_formats
+    assert len(seen) == 3 * t
+    native, strict, text = seen[:t], seen[t : 2 * t], seen[2 * t :]
+    # native trials requested NO server-side constraint
+    assert native == [None] * t
+    # after the strict_json trials ran, response_format was requested on every one
+    assert all(rf is not None for rf in strict)
+    assert all(rf["type"] == "json_schema" for rf in strict)
+    # the json-schema pins the tool NAME (get_weather) + the done finisher
+    enum = strict[0]["json_schema"]["schema"]["properties"]["tool"]["enum"]
+    assert "get_weather" in enum and "done" in enum
+    # text_protocol (IRONCALL) trials requested NO constraint
+    assert text == [None] * t
+    # text_protocol ran last, so the latest recorded knob is None again
+    assert provider.last_response_format is None
+
+
+def test_strict_json_guided_but_server_ignores_scores_low():
+    # A server that IGNORES response_format returns best-effort text: the probe still
+    # asked for the constraint, but scores by the same criterion -> low (no regression).
+    t = 4
+    script = [_native_ok() for _ in range(t)] + [_GARBAGE] * t + [_GARBAGE] * t
+    provider = _RecordingProvider(script)
+    result = asyncio.run(ToolFormProbe(trials=t).run(provider))
+    assert result.scores["tool_protocols.strict_json"] == 0.0
+    strict = provider.response_formats[t : 2 * t]
+    assert all(rf is not None for rf in strict)  # constraint requested regardless
 
 
 def test_tool_form_deterministic():

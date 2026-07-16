@@ -138,6 +138,10 @@ class MockProvider(Provider):
     def __init__(self, script: list[ScriptEntry] | None = None) -> None:
         self.script: list[ScriptEntry] = list(script or [])
         self.calls: list[list[Message]] = []  # what the engine sent, for assertions
+        # guided-decoding seam (CONTRACTS #2): the most recent call's knobs, so
+        # tests can assert the engine requested server-side constrained decoding.
+        self.last_response_format: dict | None = None
+        self.last_extra_body: dict | None = None
 
     def push(self, result: ScriptEntry) -> None:
         self.script.append(result)
@@ -181,7 +185,11 @@ class MockProvider(Provider):
         *,
         tools: list[dict[str, Any]] | None = None,
         sampling: SamplingPolicy | None = None,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> CompletionResult:
+        self.last_response_format = response_format
+        self.last_extra_body = extra_body
         entry = self._pop_entry(messages)
         if isinstance(entry, CompletionResult):
             return entry
@@ -205,7 +213,11 @@ class MockProvider(Provider):
         *,
         tools: list[dict[str, Any]] | None = None,
         sampling: SamplingPolicy | None = None,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        self.last_response_format = response_format
+        self.last_extra_body = extra_body
         entry = self._pop_entry(messages)
         if isinstance(entry, CompletionResult):
             for event in _chunked(entry.message.content):

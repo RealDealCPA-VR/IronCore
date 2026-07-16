@@ -256,6 +256,8 @@ class OpenAICompatProvider(Provider):
         sampling: SamplingPolicy,
         *,
         stream: bool,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "model": self.model,
@@ -268,6 +270,14 @@ class OpenAICompatProvider(Provider):
             body["tools"] = tools
         if stream:
             body["stream"] = True
+        # Guided-decoding knobs (IC guided decoding): response_format is the
+        # portable OpenAI form; extra_body carries server-specific keys
+        # (vLLM guided_json/guided_grammar, llama.cpp grammar) and is applied
+        # last, so it wins any key clash.
+        if response_format is not None:
+            body["response_format"] = response_format
+        if extra_body:
+            body.update(extra_body)
         return body
 
     def _parse_completion(self, payload: Any) -> CompletionResult:
@@ -363,9 +373,18 @@ class OpenAICompatProvider(Provider):
         *,
         tools: list[dict[str, Any]] | None = None,
         sampling: SamplingPolicy | None = None,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> CompletionResult:
         sampling = sampling or SamplingPolicy()
-        body = self._request_body(messages, tools, sampling, stream=False)
+        body = self._request_body(
+            messages,
+            tools,
+            sampling,
+            stream=False,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
         response = await self._send_with_retries(
             "POST", "/chat/completions", json_body=body, retries=sampling.retries
         )
@@ -383,9 +402,18 @@ class OpenAICompatProvider(Provider):
         *,
         tools: list[dict[str, Any]] | None = None,
         sampling: SamplingPolicy | None = None,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> AsyncIterator[StreamEvent]:
         sampling = sampling or SamplingPolicy()
-        body = self._request_body(messages, tools, sampling, stream=True)
+        body = self._request_body(
+            messages,
+            tools,
+            sampling,
+            stream=True,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
         try:
             response = await self._send_with_retries(
                 "POST", "/chat/completions", json_body=body, retries=sampling.retries, stream=True

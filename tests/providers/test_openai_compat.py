@@ -351,6 +351,83 @@ def test_non_json_success_body_raises_provider_error():
         complete_one(provider)
 
 
+# --- guided decoding: response_format + extra_body ---------------------------
+
+_RESPONSE_FORMAT = {"type": "json_schema", "json_schema": {"name": "t", "schema": {}}}
+
+
+def _capture_complete_body(**kwargs):
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json=completion_json())
+
+    provider, _ = make_provider(handler)
+    complete_one(provider, **kwargs)
+    return seen["body"]
+
+
+def _capture_stream_body(**kwargs):
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content.decode())
+        return httpx.Response(
+            200,
+            content=sse_bytes(text_chunk("hi"), finish_chunk("stop")),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    provider, _ = make_provider(handler)
+    collect_stream(provider, **kwargs)
+    return seen["body"]
+
+
+def test_complete_threads_response_format_into_body():
+    body = _capture_complete_body(response_format=_RESPONSE_FORMAT)
+    assert body["response_format"] == _RESPONSE_FORMAT
+    assert "guided_json" not in body
+
+
+def test_complete_threads_extra_body_into_body():
+    body = _capture_complete_body(extra_body={"guided_json": {"type": "object"}})
+    assert body["guided_json"] == {"type": "object"}
+    assert "response_format" not in body
+
+
+def test_complete_omits_guided_keys_when_neither_supplied():
+    body = _capture_complete_body()
+    assert "response_format" not in body  # no accidental default
+    assert "guided_json" not in body
+
+
+def test_stream_threads_response_format_and_extra_body_into_body():
+    body = _capture_stream_body(
+        response_format=_RESPONSE_FORMAT, extra_body={"guided_json": {"x": 1}}
+    )
+    assert body["response_format"] == _RESPONSE_FORMAT
+    assert body["guided_json"] == {"x": 1}
+    assert body["stream"] is True  # guided knobs don't disturb the stream flag
+
+
+def test_stream_omits_guided_keys_when_neither_supplied():
+    body = _capture_stream_body()
+    assert "response_format" not in body
+    assert "guided_json" not in body
+
+
+def test_extra_body_wins_a_clash_with_a_same_named_body_key():
+    # extra_body is applied last, so it overrides both a same-named response_format
+    # and any base body key (here max_tokens) — the documented clash rule.
+    body = _capture_complete_body(
+        response_format={"type": "json_object"},
+        extra_body={"response_format": {"type": "json_schema"}, "max_tokens": 7},
+    )
+    assert body["response_format"] == {"type": "json_schema"}
+    assert body["max_tokens"] == 7
+
+
 # --- redaction ---------------------------------------------------------------
 
 WEIRD_KEY = "sk-SUPER$ecret.key+123"

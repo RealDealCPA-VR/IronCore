@@ -6,6 +6,16 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Added
+- **Guided decoding — the real `strict_json` rung.** A model the envelope routes
+  to `strict_json` is now driven with server-side constrained decoding: the
+  engine sends `response_format` (a json-schema pinning output to one
+  `{"tool","args"}` call) so the model emits *guaranteed* well-formed tool calls
+  instead of best-effort ones — with a `done` action so a constrained model can
+  still finish a turn, the raw JSON scaffold suppressed from the transcript, and
+  a clean ladder-down to the IRONCALL text floor if the server can't constrain.
+  The `Provider` gained additive `response_format`/`extra_body` knobs (vLLM
+  `guided_json`/llama.cpp GBNF via `extra_body`), and the capability probe now
+  measures *guided* reliability so the ladder routes here only when it works.
 - **Instant-on profiling.** On first use of an unprobed model, IronCore now
   seeds a *usable* capability profile in ~1 second from endpoint introspection
   (Ollama `/api/show` for the real context window + capability detection) — the

@@ -77,6 +77,48 @@ def test_openai_compat_normalizes_base_url():
     assert provider.base_url == "http://localhost:11434/v1"  # trailing slash stripped
 
 
+# --- guided-decoding seam: MockProvider records response_format/extra_body ---
+
+
+def test_mock_records_response_format_and_extra_body_on_complete():
+    mock = MockProvider(script=[CompletionResult(message=Message(role="assistant", content="ok"))])
+    rf = {"type": "json_schema", "json_schema": {"name": "t", "schema": {}}}
+    xb = {"guided_json": {"type": "object"}}
+
+    async def go():
+        return await mock.complete(
+            [Message(role="user", content="hi")], response_format=rf, extra_body=xb
+        )
+
+    asyncio.run(go())
+    assert mock.last_response_format == rf
+    assert mock.last_extra_body == xb
+
+
+def test_mock_records_response_format_on_stream_extra_body_stays_none():
+    mock = MockProvider(script=[CompletionResult(message=Message(role="assistant", content="ok"))])
+    rf = {"type": "json_object"}
+
+    async def go():
+        return [
+            event
+            async for event in mock.stream(
+                [Message(role="user", content="hi")], response_format=rf
+            )
+        ]
+
+    asyncio.run(go())
+    assert mock.last_response_format == rf
+    assert mock.last_extra_body is None  # unset knob stays None
+
+
+def test_mock_leaves_guided_knobs_none_when_neither_supplied():
+    mock = MockProvider(script=[CompletionResult(message=Message(role="assistant", content="ok"))])
+    complete_one(mock)  # a plain call, no guided knobs
+    assert mock.last_response_format is None
+    assert mock.last_extra_body is None
+
+
 # --- IC-104: failure injection ---------------------------------------------
 
 

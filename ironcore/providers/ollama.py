@@ -175,8 +175,17 @@ class OllamaProvider(OpenAICompatProvider):
         sampling: SamplingPolicy,
         *,
         stream: bool,
+        response_format: dict | None = None,
+        extra_body: dict | None = None,
     ) -> dict[str, Any]:
-        body = super()._request_body(messages, tools, sampling, stream=stream)
+        body = super()._request_body(
+            messages,
+            tools,
+            sampling,
+            stream=stream,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
         if self.keep_alive is not None:
             # keep weights resident between interactive turns (SPEC §8.2)
             body["keep_alive"] = self.keep_alive

@@ -41,7 +41,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from ironcore.config.settings import Settings
-from ironcore.core import ironcall
+from ironcore.core import guided, ironcall
 from ironcore.core.approvals import ApprovalBroker
 from ironcore.core.budgets import Budget
 from ironcore.core.compact import compact, should_compact
@@ -245,6 +245,11 @@ class TurnEngine:
                     self._write_compaction_handoff(summary)
 
                 text_protocol = protocol == "text_protocol"
+                is_guided = protocol == "strict_json"
+                # The text floor and the guided strict_json rung both emit the
+                # call in-band (no native tool specs) and are fed results with the
+                # same ironresult framing; only their compose/parse shapes differ.
+                text_frame = text_protocol or is_guided
                 # IRONCORE.md project memory rides the system share (IC-1003);
                 # re-read per turn so mid-session /init and /memory edits land.
                 memory = load_project_memory(self.workspace, profile=self.profile)
@@ -252,7 +257,7 @@ class TurnEngine:
                     state,
                     profile=self.profile,
                     settings=self.settings,
-                    system_prompt=self._system_prompt(text_protocol),
+                    system_prompt=self._system_prompt(protocol),
                     working_set=self._working_set(),
                     history=self._conversation,
                     user_input="",
@@ -260,19 +265,31 @@ class TurnEngine:
                 )
                 sampling = resolve_sampling(self.profile, kind="tool", attempt=repair_attempt)
                 sampling = replace(sampling, max_tokens=self._headroom_tokens())
-                tool_specs = None if text_protocol else self.tools.specs()
+                tool_specs = None if text_frame else self.tools.specs()
+                # strict_json constrains the server to emit exactly one JSON tool
+                # call; the model emits it directly, so we send no native specs.
+                response_format = (
+                    guided.tool_call_response_format(self.tools.specs()) if is_guided else None
+                )
 
                 # -- CALL (stream) --------------------------------------------
                 text_parts: list[str] = []
                 native_calls: list[ToolCall] = []
                 usage: dict = {}
                 stream_error: dict | None = None
-                async for ev in self.provider.stream(
-                    messages, tools=tool_specs, sampling=sampling
-                ):
+                # Forward response_format ONLY when guided constrains it; a
+                # non-guided call stays byte-identical (some providers/test
+                # doubles predate the seam and accept no such kwarg).
+                stream_kwargs: dict = {"tools": tool_specs, "sampling": sampling}
+                if response_format is not None:
+                    stream_kwargs["response_format"] = response_format
+                async for ev in self.provider.stream(messages, **stream_kwargs):
                     if ev.kind == "text":
                         text_parts.append(ev.text)
-                        yield TextDelta(turn_id=turn_id, text=ev.text)
+                        # Guided text IS the JSON tool-call scaffold, not prose:
+                        # accumulate it into full_text but never stream it out.
+                        if not is_guided:
+                            yield TextDelta(turn_id=turn_id, text=ev.text)
                     elif ev.kind == "tool_call" and ev.tool_call is not None:
                         native_calls.append(ev.tool_call)
                     elif ev.kind == "usage":
@@ -305,6 +322,20 @@ class TurnEngine:
                         repair_error, repair_raw = parsed.error, full_text
                     else:
                         calls = parsed.calls
+                elif is_guided:
+                    gparsed = guided.parse_guided_tool_call(full_text)
+                    if gparsed.error is not None:
+                        # a malformed body feeds the existing repair loop; a
+                        # LADDER_DOWN from strict_json pins protocol to the text
+                        # floor, which is exactly the correct fallback.
+                        repair_error, repair_raw = gparsed.error, full_text
+                    elif gparsed.done:
+                        # the model finished: show its summary prose (not the raw
+                        # JSON) and fall into the existing "no calls -> stop" path.
+                        yield TextDelta(turn_id=turn_id, text=gparsed.message)
+                        calls = []
+                    elif gparsed.call is not None:
+                        calls = [gparsed.call]
                 else:
                     calls = native_calls
 
@@ -312,7 +343,7 @@ class TurnEngine:
                     Message(
                         role="assistant",
                         content=full_text,
-                        tool_calls=list(native_calls) if not text_protocol else [],
+                        tool_calls=list(native_calls) if not text_frame else [],
                     )
                 )
 
@@ -383,7 +414,7 @@ class TurnEngine:
                         yield ToolCallRequested(
                             turn_id=turn_id, call=call, risk="unknown", decision="deny"
                         )
-                        self._feed_refusal(call, text_protocol, f"unknown tool {call.name!r}")
+                        self._feed_refusal(call, text_frame, f"unknown tool {call.name!r}")
                         continue
 
                     decision = self._gate(call, tool)
@@ -402,13 +433,13 @@ class TurnEngine:
                         if answer.decision != "approve":
                             any_denied = True
                             self._feed_refusal(
-                                call, text_protocol, answer.reason or "denied by user"
+                                call, text_frame, answer.reason or "denied by user"
                             )
                             continue
                     elif decision == Decision.DENY:
                         any_denied = True
                         self._feed_refusal(
-                            call, text_protocol, "denied by policy in the current mode"
+                            call, text_frame, "denied by policy in the current mode"
                         )
                         continue
 
@@ -435,7 +466,7 @@ class TurnEngine:
                     self._pending_flag = detect_injection(raw_output)
                     wrapped = wrap_untrusted(self._truncate(raw_output), source=tool.name)
                     self._conversation.append(
-                        self._tool_message(call, wrapped, text_protocol, ok=result.ok)
+                        self._tool_message(call, wrapped, text_frame, ok=result.ok)
                     )
                     yield ToolCallFinished(turn_id=turn_id, call=call, result=result)
 
@@ -549,10 +580,20 @@ class TurnEngine:
 
     # -- context assembly -----------------------------------------------------
 
-    def _system_prompt(self, text_protocol: bool) -> str:
+    def _system_prompt(
+        self, protocol: str = "native", *, text_protocol: bool | None = None
+    ) -> str:
         """Base prompt + the standing untrusted-data rule; steer the model to the
-        edit format the envelope measured as most reliable for it (IC-605); on the
-        text floor, prepend the IRONCALL protocol teaching fragment (SPEC §6.3)."""
+        edit format the envelope measured as most reliable for it (IC-605). On the
+        ``text_protocol`` floor prepend the IRONCALL teaching fragment (SPEC §6.3);
+        on the ``strict_json`` rung prepend the guided-JSON fragment — both hand
+        the model the tool docs the wire form itself omits.
+
+        ``protocol`` is the active tool-call rung. ``text_protocol`` is a
+        backward-compat bool alias for existing callers (True -> the text floor);
+        new code passes ``protocol``."""
+        if text_protocol is not None:
+            protocol = "text_protocol" if text_protocol else "native"
         prompt = f"{self.system_prompt}\n\n{UNTRUSTED_PREAMBLE}"
         if self.tools.get("edit_file") is not None:
             fmt = self.profile.recommended_edit_format()
@@ -560,8 +601,11 @@ class TurnEngine:
                 f"\n\nWhen you change a file with edit_file, prefer format={fmt!r} — "
                 "it is the edit format this model applies most reliably."
             )
-        if text_protocol:
+        if protocol == "text_protocol":
             fragment = ironcall.render_system_fragment(self.tools.specs())
+            prompt = f"{fragment}\n\n{prompt}"
+        elif protocol == "strict_json":
+            fragment = guided.render_json_system_fragment(self.tools.specs())
             prompt = f"{fragment}\n\n{prompt}"
         return prompt
 
@@ -600,18 +644,19 @@ class TurnEngine:
     # -- feeding results back to the model ------------------------------------
 
     def _tool_message(
-        self, call: ToolCall, content: str, text_protocol: bool, *, ok: bool
+        self, call: ToolCall, content: str, text_frame: bool, *, ok: bool
     ) -> Message:
         """Frame a tool outcome for the model: an ``ironresult`` block on the text
-        floor, a native ``tool`` role message otherwise."""
-        if text_protocol:
+        floor or the guided ``strict_json`` rung (``text_frame`` true), a native
+        ``tool`` role message for native function-calling."""
+        if text_frame:
             return Message(role="user", content=ironcall.render_result(call.id, content, ok))
         return Message(role="tool", content=content, tool_call_id=call.id, name=call.name)
 
-    def _feed_refusal(self, call: ToolCall, text_protocol: bool, reason: str) -> None:
+    def _feed_refusal(self, call: ToolCall, text_frame: bool, reason: str) -> None:
         """Append a framed refusal so a denied call is answered, not left dangling."""
         self._conversation.append(
-            self._tool_message(call, f"[denied] {reason}", text_protocol, ok=False)
+            self._tool_message(call, f"[denied] {reason}", text_frame, ok=False)
         )
 
     @staticmethod

@@ -286,7 +286,9 @@ class _Probe(Provider):
     async def complete(self, messages, *, tools=None, sampling=None):  # pragma: no cover
         raise NotImplementedError
 
-    async def stream(self, messages, *, tools=None, sampling=None):
+    async def stream(
+        self, messages, *, tools=None, sampling=None, response_format=None, extra_body=None
+    ):
         joined = " ".join(m.content for m in messages)
         match = self._MARK.search(joined)
         marker = match.group(1) if match else "?"
