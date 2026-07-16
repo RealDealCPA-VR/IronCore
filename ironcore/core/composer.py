@@ -178,7 +178,9 @@ def load_project_memory(
     try:
         if not path.is_file():
             return ""
-        content = path.read_text(encoding="utf-8")
+        # errors="replace": a non-UTF-8/binary IRONCORE.md must never crash a
+        # turn (UnicodeDecodeError is a ValueError, not OSError) — best-effort.
+        content = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""  # unreadable == absent: memory is best-effort, never fatal
     if not content:

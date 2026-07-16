@@ -9,7 +9,7 @@
 [![CI](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml/badge.svg)](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Status: scaffold](https://img.shields.io/badge/status-scaffold-orange.svg)](TODO.md)
+[![Status: v0.1](https://img.shields.io/badge/status-v0.1-brightgreen.svg)](CHANGELOG.md)
 
 </div>
 
@@ -90,26 +90,30 @@ introspection). Optional per-role routing: let a 70B plan while a 7B executes, o
 
 ## Quickstart
 
-> ⚠️ **Beta stage** — the interactive TUI is live and the whole engine beneath it is built
-> and proven; packaging/polish (phases 9–11) is what remains. What works today: the
-> **interactive terminal app** — a streaming Textual UI with live tool cards, an approval
+> ✅ **v0.1 — feature-complete.** Every phase of the build plan is shipped, adversarially
+> validated, and proof-tested end-to-end (**1223 tests**, all offline). What's in the box:
+> the **interactive terminal app** — a streaming Textual UI with live tool cards, an approval
 > modal with a colored diff viewer, Shift+Tab mode switching, a slash-command palette, and
 > resumable sessions; the full set of **slash commands** (`/goal`, `/loop`, `/model`,
-> `/init`, `/compact`, `/undo`, `/review`, `/memory`, …); the full **turn engine** (compose
-> → call → parse → gate → execute → observe → verify → done) with malformed-output repair,
-> an evidence-based "done" that refuses to lie about unverified work, budget/runaway
-> protection, and micro-stepping + history compaction; the complete **safety kernel** (mode
-> & command policy, path jail, secret redaction, injection guard, git-snapshot undo,
-> approvals); the complete **tool suite** (read/write/edit with a fuzzy patcher,
-> cross-platform shell, search, gated network fetch); the **capability envelope** — measured
-> probes that pick the tool protocol, edit format, and context budget per model, including
-> the IRONCALL floor protocol for weak models; and the full **provider layer** (streaming
-> OpenAI-compatible client, Ollama introspection, role routing). Point it at a local Ollama
-> and drive real coding work through a fully gated loop — all proof-tested end-to-end
-> against a real headless UI, real files, real subprocesses, and real git.
+> `/init`, `/compact`, `/undo`, `/review`, `/memory`, `/workflow`, …); the full **turn
+> engine** (compose → call → parse → gate → execute → observe → verify → done) with
+> malformed-output repair, an evidence-based "done" that refuses to lie about unverified
+> work, budget/runaway protection, and micro-stepping + history compaction; the complete
+> **safety kernel** (mode & command policy, path jail, secret redaction, injection guard,
+> git-snapshot undo, approvals); the complete **tool suite** (read/write/edit with a fuzzy
+> patcher, cross-platform shell, search, gated network fetch); the **capability envelope** —
+> measured probes that pick the tool protocol, edit format, and context budget per model,
+> including the IRONCALL floor protocol for weak models; **deterministic multi-agent
+> workflows** (fanout/foreach/reduce with three built-ins) whose subagents inherit the
+> session mode; and the full **provider layer** (streaming OpenAI-compatible client, Ollama
+> introspection, role routing). Point it at a local Ollama and drive real coding work through
+> a fully gated loop. See the [CHANGELOG](CHANGELOG.md), or run `python -m demo` for a fully
+> offline walkthrough.
 
 ```bash
-# install (Python 3.11+)
+# install (Python 3.11+) — once published to PyPI:
+pip install ironcore     # or:  uv tool install ironcore  /  pipx install ironcore
+# latest from source:
 pip install git+https://github.com/RealDealCPA-VR/IronCore.git
 
 # check your environment (finds your local Ollama if it's running)
@@ -141,10 +145,9 @@ kernel. The TUI is a thin client over an event stream — the engine never print
 
 ## Project status & roadmap
 
-The architecture, contracts, and build plan are done; implementation proceeds in one-pass
-tasks designed for agent (or human) contributors. Every shipped phase is validated the same
-way: full offline test suite, an independent adversarial review with execution-verified
-probes, and real-socket proof tests — evidence, not claims.
+All eleven build phases are shipped (v0.1). Each was validated the same way: a full offline
+test suite, an independent adversarial review with execution-verified probes, and real proof
+tests against files, subprocesses, git, and the headless UI — evidence, not claims.
 
 | Phase | What lands | Status |
 |---|---|---|
@@ -157,7 +160,9 @@ probes, and real-socket proof tests — evidence, not claims.
 | 6 | Capability envelope: probe runner + CTX/RETENTION/TOOL-FORM/JSON/EDIT/CODE-SMOKE probes, adapter wiring, IRONCALL protocol, sampling | ✅ shipped · 2026-07-16 · 989 tests, 2 blockers fixed (compaction redaction leak, false-success stop), real-engine proofs |
 | 7 | Textual TUI: streaming transcript + tool cards, Shift+Tab modes, approval modal + diff viewer, slash palette, session picker + resume | ✅ shipped · 2026-07-16 |
 | 8 | Slash commands: /model, /init, /goal, /loop, /compact, /undo, /redo, /review, /memory | ✅ shipped · 2026-07-16 · 1099 tests, validator SHIP (2 majors fixed), real-app + real-git proofs |
-| 9–11 | Workflows, memory/handoff, v0.1 release | 📋 specced |
+| 9 | Workflows: subagent runner, YAML schema, orchestrator, /workflow command + progress UI, built-ins (review/migrate/explain-repo) | ✅ shipped · 2026-07-16 |
+| 10 | Memory: session store + resume, handoff lifecycle, IRONCORE.md injection | ✅ shipped · 2026-07-16 |
+| 11 | Distribution: CI coverage gate, packaging + PyPI release automation, offline demo, **v0.1** | ✅ shipped · 2026-07-16 · 1223 tests, validator FIX-FIRST→clean (1 blocker + 2 majors fixed), wheel + real-workflow proofs |
 
 - 📖 [`docs/SPEC.md`](docs/SPEC.md) — the full specification
 - 🏗️ [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, module map, dependency rules

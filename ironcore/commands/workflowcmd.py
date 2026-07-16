@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Any
 from ironcore import workflows as _workflows_pkg
 from ironcore.commands._helpers import resolve_workspace
 from ironcore.commands.base import CommandContext, SlashCommand
+from ironcore.safety.modes import Mode
 from ironcore.workflows.engine import WorkflowProgress, WorkflowRunner
 from ironcore.workflows.schema import (
     Phase,
@@ -166,7 +167,10 @@ def _run(ctx: CommandContext, name: str, arg_text: str, *, confirm: bool) -> str
     confirmed.add(name)
     inputs = _parse_inputs(arg_text)
     on_progress = _make_on_progress(ctx)
-    schedule(run_workflow(workflow, inputs, factory, on_progress))
+    # subagents inherit the live SESSION mode (SAFETY T8): a PLAN session can
+    # never mutate through a workflow.
+    mode = getattr(ctx.extra.get("engine"), "mode", Mode.AUTO)
+    schedule(run_workflow(workflow, inputs, factory, on_progress, mode))
     tail = f" with {_fmt_inputs(inputs)}" if inputs else ""
     plural = "phase" if len(workflow.phases) == 1 else "phases"
     return (
@@ -218,13 +222,15 @@ async def run_workflow(
     inputs: dict[str, Any],
     engine_factory: Callable[[], TurnEngine],
     on_progress: Callable[[WorkflowProgress], None] | None,
+    mode: Mode = Mode.AUTO,
 ) -> str:
     """Build a :class:`WorkflowRunner`, run it, and return a report string.
 
     ``run`` never raises for content/structural errors, so this coroutine always
     returns a human digest (``render_summary``) — the scheduler posts it verbatim.
+    ``mode`` is the session mode subagents run under (SAFETY T8).
     """
-    runner = WorkflowRunner(engine_factory=engine_factory, on_progress=on_progress)
+    runner = WorkflowRunner(engine_factory=engine_factory, on_progress=on_progress, mode=mode)
     result = await runner.run(workflow, inputs)
     return f"Workflow {workflow.name!r}:\n{result.render_summary()}"
 
@@ -265,9 +271,28 @@ def _factory_from_engine(engine: Any) -> Callable[[], TurnEngine]:
             engine.mode,
             workspace=engine.workspace,
             snapshots=None,
+            approvals=_unattended_broker(),
         )
 
     return make
+
+
+def _unattended_broker() -> Any:
+    """A fresh ApprovalBroker that DENIES any ASK immediately — workflows run
+    unattended, so a gated action must fail fast (a note) rather than stall the
+    whole fan-out for the interactive approval timeout (SAFETY: fail-closed)."""
+    from ironcore.core.approvals import ApprovalAnswer, ApprovalBroker
+
+    broker = ApprovalBroker(timeout=5.0)
+
+    async def _deny(request: Any) -> None:
+        broker.answer(
+            request.id,
+            ApprovalAnswer(decision="deny", reason="workflows run unattended"),
+        )
+
+    broker.on_request = _deny
+    return broker
 
 
 def _make_on_progress(ctx: CommandContext) -> Callable[[WorkflowProgress], None]:

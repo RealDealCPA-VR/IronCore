@@ -528,7 +528,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     recordable for the README gif.
   - **Accept:** demo runs green in CI on both OSes. **Verify:** `uv run --extra dev pytest tests/test_demo.py -q`
 
-- [~] **IC-1104 · v0.1 release** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-1104 · v0.1 release** *(done: fable-session, 2026-07-16 — CHANGELOG.md, README flipped to v0.1 feature-complete, all 11 phases shipped; 1223 tests, coverage gate 94%, wheel builds+installs; ready-to-tag v0.1.0 (PyPI publish awaits the maintainer's trusted-publisher setup — not auto-published))*
   - **Depends:** all phase 1–8 + IC-1101..1103 · **Spec:** SPEC §15
   - **Files:** `CHANGELOG.md` (new), `README.md`, version bumps
   - **Build:** changelog; README status flip (scaffold → v0.1) + demo gif; live smoke against

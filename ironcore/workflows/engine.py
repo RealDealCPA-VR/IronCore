@@ -47,6 +47,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ironcore.safety.modes import Mode
 from ironcore.workflows.schema import AgentSpec, Phase, Workflow, WorkflowError, interpolate
 from ironcore.workflows.subagent import SubagentTask, run_subagent
 
@@ -123,10 +124,16 @@ class WorkflowRunner:
         engine_factory: Callable[[], TurnEngine],
         concurrency: int = 4,
         on_progress: Callable[[WorkflowProgress], None] | None = None,
+        mode: Mode = Mode.AUTO,
     ) -> None:
         self._engine_factory = engine_factory
         self._concurrency = max(1, concurrency)
         self._on_progress = on_progress
+        # Subagents run in the SESSION's mode (SAFETY T8): a PLAN session cannot
+        # mutate through a workflow, because run_subagent stamps this onto the
+        # fresh engine and the gate denies WRITE/EXEC/NET in PLAN. The /workflow
+        # command sources this from the live engine's mode.
+        self._mode = mode
 
     async def run(self, workflow: Workflow, inputs: dict[str, Any]) -> WorkflowResult:
         """Run every phase in order and return the accumulated result.
@@ -257,7 +264,12 @@ class WorkflowRunner:
         """
         try:
             prompt = interpolate(agent.prompt, item_context)
-            task = SubagentTask(role=agent.role, prompt=prompt, output_schema=agent.output_schema)
+            task = SubagentTask(
+                role=agent.role,
+                prompt=prompt,
+                output_schema=agent.output_schema,
+                mode=self._mode,  # SAFETY T8: subagent inherits the session mode
+            )
             result = await run_subagent(task, engine_factory=self._engine_factory)
         except Exception as exc:  # noqa: BLE001 — per-item isolation is the whole point
             results[index] = None
