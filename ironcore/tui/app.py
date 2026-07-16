@@ -184,11 +184,15 @@ class IronCoreApp(App):
         provider_registry: ProviderRegistry | None = None,
         session_store: SessionStore | None = None,
         resume_id: str | None = None,
+        auto_probe: bool = False,
     ) -> None:
         super().__init__()
         self.engine = engine
         self.registry = registry
         self.settings = settings
+        #: measure the model in the background on first launch (from_settings sets
+        #: this for an unprobed model when envelope.auto_probe is on).
+        self._auto_probe = auto_probe
         self.provider_registry = provider_registry
         self.workspace: Path = Path(engine.workspace)
         self._goal: str | None = engine.state.goal
@@ -236,6 +240,24 @@ class IronCoreApp(App):
                 self.push_screen(SessionPicker(self.session_store), self._on_session_picked)
             elif self._resume_id is not None:
                 self.call_later(self._resume_session, self._resume_id)
+        # First-use auto-probe (docs/MODELS.md): measure an unprobed model in the
+        # background so the engine molds to it — the user can work immediately on
+        # floor defaults and the profile hot-swaps when the probe finishes.
+        if self._auto_probe:
+            self._post_note(
+                f"Model {self.settings.provider.model!r} is unprobed — running on "
+                "conservative defaults while I measure its real capabilities in the "
+                "background. The profile updates itself when that finishes (or run /probe)."
+            )
+            self.run_worker(self._auto_probe_task(), group="probe")
+
+    async def _auto_probe_task(self) -> None:
+        """Background first-use probe: measure the model, hot-swap the profile,
+        and report. Never raises (probe_and_swap catches its own failures)."""
+        from ironcore.commands.envelopecmd import probe_and_swap
+
+        report = await probe_and_swap(self.engine)
+        await self.transcript.add_note(report)
 
     # -- input handling -------------------------------------------------------
 
@@ -582,6 +604,8 @@ class IronCoreApp(App):
             mode,
             workspace=ws,
         )
+        # mold to the model on first use: probe an unprobed model unless disabled
+        auto_probe = settings.envelope.auto_probe and profile.probed_at is None
         return cls(
             engine,
             build_command_registry(),
@@ -589,6 +613,7 @@ class IronCoreApp(App):
             provider_registry=provider_registry,
             session_store=SessionStore(ws),
             resume_id=resume,
+            auto_probe=auto_probe,
         )
 
 

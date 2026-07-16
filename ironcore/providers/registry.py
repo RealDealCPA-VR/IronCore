@@ -43,6 +43,25 @@ if TYPE_CHECKING:
 VALID_ROLES: tuple[str, ...] = ("planner", "coder", "summarizer", "verifier")
 
 
+def select_provider_factory(settings: Settings) -> Callable[..., Provider]:
+    """Pick the client class from ``settings.provider.type``.
+
+    Local models are overwhelmingly Ollama; ``"auto"`` builds an
+    :class:`OllamaProvider` for an Ollama-looking endpoint (which keeps the
+    model resident via ``keep_alive`` and exposes ``/api`` introspection —
+    a real win for local UX) and the generic OpenAI-compatible client
+    otherwise. ``"ollama"``/``"openai"`` force the choice.
+    """
+    from ironcore.providers.ollama import OllamaProvider
+
+    ptype = getattr(settings.provider, "type", "auto")
+    if ptype == "openai":
+        return OpenAICompatProvider
+    if ptype == "ollama":
+        return OllamaProvider
+    return OllamaProvider if ":11434" in settings.provider.base_url else OpenAICompatProvider
+
+
 class ProviderRegistry:
     """See module docstring."""
 
@@ -55,7 +74,7 @@ class ProviderRegistry:
     ) -> None:
         self._settings = settings
         self._factory: Callable[..., Provider] = (
-            provider_factory if provider_factory is not None else OpenAICompatProvider
+            provider_factory if provider_factory is not None else select_provider_factory(settings)
         )
         self._transport = transport
         self._closed = False

@@ -128,6 +128,22 @@ def cmd_doctor(
         print(f"[FAIL] envelope cache: {exc}")
         ok = False
 
+    # whether the configured model has been measured — the molds-to-the-model status
+    from ironcore.envelope.profile import CapabilityProfile
+
+    profile = CapabilityProfile.load(envelope_dir, settings.provider.model)
+    if profile is not None and profile.probed_at is not None:
+        print(
+            f"[ok] model {settings.provider.model} probed "
+            f"(tools: {profile.recommended_tool_protocol()}, edits: "
+            f"{profile.recommended_edit_format()}, ctx: {profile.honest_context})"
+        )
+    else:
+        print(
+            f"[--] model {settings.provider.model} is unprobed -- on floor defaults; "
+            "launch the app (auto-probes) or run /probe to adapt to it"
+        )
+
     return 0 if ok else 1
 
 

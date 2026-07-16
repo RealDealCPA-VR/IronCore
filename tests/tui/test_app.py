@@ -265,7 +265,7 @@ def test_slash_help_dispatches_to_transcript(tmp_path):
             text = app.transcript_text()
             assert "Commands:" in text
             assert "/version" in text
-            assert "[planned]" in text  # honest planned labels
+            assert "/probe" in text  # every command is live in v0.1
 
     asyncio.run(scenario())
 
@@ -315,8 +315,10 @@ def test_match_commands_prefix_first():
     registry = build_cmds()
     matches = match_commands(registry, "he")
     assert matches and matches[0].name == "help"
-    # planned commands are still listed (with their implemented flag intact)
-    assert any(not c.implemented for c in match_commands(registry, ""))
+    # the palette lists the full command set (all implemented in v0.1)
+    everything = match_commands(registry, "")
+    assert everything and all(c.implemented for c in everything)
+    assert {"probe", "envelope", "workflow"} <= {c.name for c in everything}
 
 
 # --------------------------------------------------------------------------- #

@@ -550,9 +550,16 @@ class TurnEngine:
     # -- context assembly -----------------------------------------------------
 
     def _system_prompt(self, text_protocol: bool) -> str:
-        """Base prompt + the standing untrusted-data rule; on the text floor,
-        prepend the IRONCALL protocol teaching fragment (SPEC §6.3)."""
+        """Base prompt + the standing untrusted-data rule; steer the model to the
+        edit format the envelope measured as most reliable for it (IC-605); on the
+        text floor, prepend the IRONCALL protocol teaching fragment (SPEC §6.3)."""
         prompt = f"{self.system_prompt}\n\n{UNTRUSTED_PREAMBLE}"
+        if self.tools.get("edit_file") is not None:
+            fmt = self.profile.recommended_edit_format()
+            prompt += (
+                f"\n\nWhen you change a file with edit_file, prefer format={fmt!r} — "
+                "it is the edit format this model applies most reliably."
+            )
         if text_protocol:
             fragment = ironcall.render_system_fragment(self.tools.specs())
             prompt = f"{fragment}\n\n{prompt}"

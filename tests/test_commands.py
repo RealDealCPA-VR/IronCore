@@ -22,11 +22,11 @@ def test_core_commands_declared(ctx):
     assert {"help", "goal", "loop", "workflow", "mode", "model", "init", "undo"} <= names
 
 
-def test_help_lists_everything_and_labels_planned(ctx):
+def test_help_lists_every_command_all_implemented(ctx):
     registry, context = ctx
     out = registry.dispatch("/help", context)
-    assert "/goal" in out
-    assert "[planned]" in out  # honesty: stubs are labeled
+    assert "/goal" in out and "/envelope" in out and "/probe" in out
+    assert "[planned]" not in out  # every declared command is now live
 
 
 def test_version_command(ctx):
@@ -62,11 +62,13 @@ def test_unknown_command_raises(ctx):
         registry.dispatch("/frobnicate", context)
 
 
-def test_stubs_point_at_todo(ctx):
-    # /workflow is implemented now (IC-904); /envelope remains a planned stub.
+def test_envelope_and_probe_are_live(ctx):
+    # IC-608: /envelope + /probe are real; with no engine they degrade gracefully.
     registry, context = ctx
-    out = registry.dispatch("/envelope", context)
-    assert "IC-608" in out
+    env = registry.dispatch("/envelope", context)
+    assert "IC-608" not in env and "profile" in env.lower()
+    prb = registry.dispatch("/probe", context)
+    assert "IC-608" not in prb and "session" in prb.lower()
 
 
 def test_phase8_commands_are_implemented(ctx):
@@ -76,10 +78,10 @@ def test_phase8_commands_are_implemented(ctx):
         assert by_name[name].implemented, f"/{name} must be implemented after phase 8"
 
 
-def test_only_deferred_commands_remain_planned(ctx):
+def test_no_commands_remain_planned(ctx):
     registry, _ = ctx
     planned = {c.name for c in registry.all() if not c.implemented}
-    assert planned == {"envelope", "probe"}
+    assert planned == set()  # v0.1: every command is implemented
 
 
 def test_redo_is_registered(ctx):

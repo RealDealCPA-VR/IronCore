@@ -8,5 +8,13 @@ protocols, edit formats, context budgets, and anchor cadence — the
 """
 
 from ironcore.envelope.profile import CapabilityProfile
+from ironcore.envelope.runner import render_report_card
+from ironcore.envelope.suite import default_envelope_dir, default_probe_suite, probe_model
 
-__all__ = ["CapabilityProfile"]
+__all__ = [
+    "CapabilityProfile",
+    "default_envelope_dir",
+    "default_probe_suite",
+    "probe_model",
+    "render_report_card",
+]

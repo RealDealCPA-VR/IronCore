@@ -38,6 +38,10 @@ class ProviderSettings(BaseModel):
     base_url: str = "http://localhost:11434/v1"  # Ollama's OpenAI-compatible port
     api_key: str = "ironcore-local"  # local servers ignore it; never ship a real key
     model: str = "qwen3-coder:30b"
+    #: which client to build: "auto" picks OllamaProvider for an Ollama-looking
+    #: endpoint (unlocking keep_alive + /api introspection) and the generic
+    #: OpenAI-compatible client otherwise; "ollama"/"openai" force one.
+    type: str = "auto"
 
 
 class RoleModels(BaseModel):
@@ -57,10 +61,19 @@ class SafetySettings(BaseModel):
     network_tools: bool = False  # NET-risk tools not even registered unless true
 
 
+class EnvelopeSettings(BaseModel):
+    """How IronCore molds itself to the model (docs/MODELS.md)."""
+
+    #: measure an UNPROBED model in the background on first launch, so the
+    #: engine adapts automatically. Off = stay on floor defaults until /probe.
+    auto_probe: bool = True
+
+
 class Settings(BaseModel):
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
     roles: RoleModels = Field(default_factory=RoleModels)
     safety: SafetySettings = Field(default_factory=SafetySettings)
+    envelope: EnvelopeSettings = Field(default_factory=EnvelopeSettings)
 
     @classmethod
     def load(
