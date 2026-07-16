@@ -1,0 +1,51 @@
+name: migrate
+description: >-
+  Orchestrate a migration across a list of targets: discover what each target
+  needs, propose a concrete transform per target, then count the plan. No code
+  is changed here — the subagents only DESCRIBE the transforms.
+inputs: [targets, goal]
+phases:
+  # DISCOVER: iterate the caller-supplied target list and classify each one.
+  # `{{targets}}` must already be a list in the inputs; foreach walks it.
+  - id: discover
+    foreach: "{{targets}}"
+    agent:
+      role: surveyor
+      prompt: |
+        Migration goal: {{goal}}
+        Inspect the target "{{item}}" and classify the work it needs.
+
+        Reply with ONLY a single JSON object (no prose):
+        {"target": "{{item}}", "kind": "<rename|rewrite|config|delete|noop>",
+         "reason": "<one line>"}
+      output_schema:
+        type: object
+        required: [target, kind]
+        properties:
+          target: {type: string}
+          kind: {type: string}
+          reason: {type: string}
+  # TRANSFORM: iterate the discovered list (each item is a dict from DISCOVER)
+  # and propose the concrete change for that target.
+  - id: transform
+    foreach: "{{discover}}"
+    agent:
+      role: migrator
+      prompt: |
+        Migration goal: {{goal}}
+        Target "{{item.target}}" was classified as {{item.kind}}.
+        Propose the concrete transform (do NOT apply it).
+
+        Reply with ONLY a single JSON object (no prose):
+        {"target": "{{item.target}}", "change": "<what to do>",
+         "risk": "<low|medium|high>"}
+      output_schema:
+        type: object
+        required: [target, change]
+        properties:
+          target: {type: string}
+          change: {type: string}
+          risk: {type: string}
+  # VERIFY: count the proposed transforms so the caller sees the plan size.
+  - id: report
+    reduce: count

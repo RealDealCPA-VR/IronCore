@@ -9,6 +9,7 @@ from ironcore.tui.widgets.diffview import DiffView, diff_to_text, looks_like_dif
 from ironcore.tui.widgets.inputbar import InputBar
 from ironcore.tui.widgets.statusbar import StatusBar
 from ironcore.tui.widgets.transcript import ToolCard, Transcript
+from ironcore.tui.widgets.workflowview import WorkflowView, render_progress
 
 __all__ = [
     "DiffView",
@@ -16,6 +17,8 @@ __all__ = [
     "StatusBar",
     "ToolCard",
     "Transcript",
+    "WorkflowView",
     "diff_to_text",
     "looks_like_diff",
+    "render_progress",
 ]

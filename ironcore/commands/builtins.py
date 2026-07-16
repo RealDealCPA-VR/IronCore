@@ -3,11 +3,11 @@
 Live scaffold commands stay here: ``/help``, ``/version``, ``/mode``. The real
 phase-8 handlers (IC-801..807) live one-per-module and contribute a ``COMMANDS``
 tuple that this module registers: ``/model``, ``/init``, ``/goal``, ``/loop``,
-``/compact`` + ``/undo`` + ``/redo``, ``/review``, ``/memory``.
+``/compact`` + ``/undo`` + ``/redo``, ``/review``, ``/memory``. The phase-9
+``/workflow`` (IC-904) command is registered the same way.
 
-Only ``/workflow`` (IC-904), ``/envelope`` and ``/probe`` (IC-608) remain honest
-"ships in IC-xxx" stubs, so ``/help`` is complete from day one and still labels
-what is not yet live.
+Only ``/envelope`` and ``/probe`` (IC-608) remain honest "ships in IC-xxx" stubs,
+so ``/help`` is complete from day one and still labels what is not yet live.
 """
 
 from __future__ import annotations
@@ -23,9 +23,10 @@ from ironcore.commands.loopcmd import COMMANDS as _LOOP_COMMANDS
 from ironcore.commands.memorycmd import COMMANDS as _MEMORY_COMMANDS
 from ironcore.commands.modelcmd import COMMANDS as _MODEL_COMMANDS
 from ironcore.commands.reviewcmd import COMMANDS as _REVIEW_COMMANDS
+from ironcore.commands.workflowcmd import COMMANDS as _WORKFLOW_COMMANDS
 from ironcore.safety.modes import CYCLE, DESCRIPTIONS, Mode, next_mode
 
-#: Every real phase-8 command, in a stable display-friendly order.
+#: Every real phase-8/9 command, in a stable display-friendly order.
 _REAL_COMMANDS: tuple[SlashCommand, ...] = (
     *_MODEL_COMMANDS,
     *_INIT_COMMANDS,
@@ -34,6 +35,7 @@ _REAL_COMMANDS: tuple[SlashCommand, ...] = (
     *_LIFECYCLE_COMMANDS,
     *_REVIEW_COMMANDS,
     *_MEMORY_COMMANDS,
+    *_WORKFLOW_COMMANDS,
 )
 
 
@@ -73,7 +75,6 @@ def _stub(task_id: str) -> Callable[[CommandContext, str], str]:
 
 #: Commands still awaiting their owning task (name, summary, usage, task-id).
 _PLANNED: tuple[tuple[str, str, str, str], ...] = (
-    ("workflow", "run a multi-agent workflow", "/workflow <name> [args]", "IC-904"),
     ("envelope", "show the current model's capability profile", "/envelope", "IC-608"),
     ("probe", "re-run capability probes for the current model", "/probe", "IC-608"),
 )

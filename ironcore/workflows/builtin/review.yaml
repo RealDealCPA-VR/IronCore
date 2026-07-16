@@ -1,0 +1,34 @@
+name: review
+description: >-
+  Review a working diff across bugs / security / performance dimensions,
+  then tabulate the per-dimension findings into one markdown report.
+inputs: [diff]
+phases:
+  # Fan out one reviewer per dimension; each reads the same diff but only
+  # hunts for its own dimension and returns a structured finding block.
+  - id: find
+    fanout:
+      items: [bugs, security, performance]
+      agent:
+        role: reviewer
+        prompt: |
+          You are reviewing a code diff for {{item}} issues ONLY.
+          Ignore every other concern.
+
+          Diff under review:
+          {{diff}}
+
+          Reply with ONLY a single JSON object (no prose):
+          {"dimension": "{{item}}", "findings": ["<short issue>", ...],
+           "summary": "<one-line verdict>"}
+          Use an empty findings array if the diff is clean for this dimension.
+        output_schema:
+          type: object
+          required: [dimension, findings]
+          properties:
+            dimension: {type: string}
+            findings: {type: array}
+            summary: {type: string}
+  # Collapse the per-dimension findings into a single review table.
+  - id: report
+    reduce: markdown_table

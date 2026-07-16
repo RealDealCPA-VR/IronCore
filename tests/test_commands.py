@@ -63,9 +63,10 @@ def test_unknown_command_raises(ctx):
 
 
 def test_stubs_point_at_todo(ctx):
+    # /workflow is implemented now (IC-904); /envelope remains a planned stub.
     registry, context = ctx
-    out = registry.dispatch("/workflow review", context)
-    assert "IC-904" in out
+    out = registry.dispatch("/envelope", context)
+    assert "IC-608" in out
 
 
 def test_phase8_commands_are_implemented(ctx):
@@ -78,7 +79,7 @@ def test_phase8_commands_are_implemented(ctx):
 def test_only_deferred_commands_remain_planned(ctx):
     registry, _ = ctx
     planned = {c.name for c in registry.all() if not c.implemented}
-    assert planned == {"workflow", "envelope", "probe"}
+    assert planned == {"envelope", "probe"}
 
 
 def test_redo_is_registered(ctx):

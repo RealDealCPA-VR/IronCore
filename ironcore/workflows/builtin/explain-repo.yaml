@@ -1,0 +1,28 @@
+name: explain-repo
+description: >-
+  Explain an unfamiliar repository: fan a reader out over its major
+  subsystems, then synthesize the per-subsystem notes into one overview table.
+inputs: [repo]
+phases:
+  # One reader per subsystem; each explains just its own area in plain terms.
+  - id: read
+    fanout:
+      items: [architecture, entrypoints, core, tests, tooling]
+      agent:
+        role: explainer
+        prompt: |
+          You are onboarding to the repository "{{repo}}".
+          Explain the "{{item}}" subsystem for a new contributor: what it is,
+          where it lives, and the one thing to know before touching it.
+
+          Reply with ONLY a single JSON object (no prose):
+          {"subsystem": "{{item}}", "summary": "<2-3 sentence explanation>"}
+        output_schema:
+          type: object
+          required: [subsystem, summary]
+          properties:
+            subsystem: {type: string}
+            summary: {type: string}
+  # Synthesize the per-subsystem notes into a single overview table.
+  - id: overview
+    reduce: markdown_table

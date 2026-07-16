@@ -336,6 +336,30 @@ class IronCoreApp(App):
 
         self.run_worker(_runner(), group="command")
 
+    # -- workflow progress (IC-904 optional hooks) ----------------------------
+
+    def on_workflow_progress(self, beat: object) -> None:
+        """Live /workflow progress: post a compact beat line to the transcript.
+        Sync by contract (WorkflowRunner.on_progress is a plain callback)."""
+        phase = getattr(beat, "phase_id", "")
+        kind = getattr(beat, "kind", "")
+        line = f"[workflow] {phase}: {kind}"
+        detail = getattr(beat, "detail", "")
+        if detail:
+            line += f" — {detail}"
+        index, total = getattr(beat, "index", None), getattr(beat, "total", None)
+        if index and total:
+            line += f" ({index}/{total})"
+        self._post_note(line)
+
+    def stop_workflow(self) -> bool:
+        """/workflow stop hook: cancel the running command worker(s)."""
+        try:
+            self.workers.cancel_group(self, "command")
+        except Exception:  # no running group / older Textual — report inaction
+            return False
+        return True
+
     # -- modes (IC-703) -------------------------------------------------------
 
     def action_cycle_mode(self) -> None:

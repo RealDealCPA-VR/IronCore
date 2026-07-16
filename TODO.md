@@ -460,7 +460,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scripted 3-phase workflow (fanout→foreach→reduce) with one injected agent
     failure completes with the failure noted. **Verify:** `uv run --extra dev pytest tests/test_workflow_engine.py -q`
 
-- [~] **IC-904 · /workflow command + progress UI** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-904 · /workflow command + progress UI** *(done: fable-session, 2026-07-16 — /workflow list/confirm(SAFETY-T8 first-run)/run/stop via WorkflowRunner+schedule, engine_factory from ctx.extra (test seam), WorkflowView + pure render_progress grouped tree, app on_workflow_progress/stop_workflow hooks wired; 18 tests)*
   - **Depends:** IC-903, IC-702 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/commands/workflowcmd.py` (new), `ironcore/tui/widgets/workflowview.py` (new), tests (new)
   - **Build:** list/run workflows from `.ironcore/workflows/`; first-run-per-repo confirmation
@@ -468,7 +468,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Pilot: run fixture workflow, watch phases, cancel mid-fanout cleans up.
     **Verify:** `uv run --extra dev pytest tests/tui -q tests/test_commands.py -q`
 
-- [~] **IC-905 · Built-in workflows** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-905 · Built-in workflows** *(done: fable-session, 2026-07-16 — review (fanout dims→markdown_table), migrate (foreach targets→foreach discover→count), explain-repo (fanout subsystems→table); all schema-valid + MockProvider-runnable, ship in the wheel via builtin/__init__.py; 7 tests)*
   - **Depends:** IC-903 · **Spec:** SPEC §10
   - **Files:** `ironcore/workflows/builtin/*.yaml` (new), `tests/test_builtin_workflows.py` (new)
   - **Build:** `review` (dimensions fanout → verify → report), `migrate` (discover → transform
