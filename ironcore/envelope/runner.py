@@ -23,11 +23,13 @@ The dotted-path merge convention (CRITICAL — probe authors implement this exac
                        ``"sampling.temperature"``   (value written under that sub-key)
     * scalar fields -> ``"honest_context"``, ``"context_window"``,
                        ``"coherence_horizon"``       (coerced to int)
-                       ``"json_adherence"``, ``"instruction_retention"``  (coerced to float)
+                       ``"json_adherence"``, ``"instruction_retention"``,
+                       ``"chars_per_token"``         (coerced to float)
   A path whose root is ``tool_protocols`` / ``edit_formats`` / ``json_adherence`` /
   ``instruction_retention`` is a RELIABILITY (degrades to ``0.0`` on failure).
-  ``honest_context`` / ``context_window`` / ``coherence_horizon`` / ``sampling`` are NOT
-  reliabilities — a failed probe leaves them at the base/default. Unknown or malformed
+  ``honest_context`` / ``context_window`` / ``coherence_horizon`` / ``sampling`` /
+  ``chars_per_token`` are NOT reliabilities — a failed probe leaves them at the
+  base/default (a failed measurement must not invent a token ratio). Unknown or malformed
   paths from a misbehaving probe are skipped, never fatal.
 """
 
@@ -53,7 +55,9 @@ from ironcore.providers.base import Provider
 
 _DICT_FIELDS = frozenset({"tool_protocols", "edit_formats", "sampling"})
 _INT_FIELDS = frozenset({"honest_context", "context_window", "coherence_horizon"})
-_FLOAT_FIELDS = frozenset({"json_adherence", "instruction_retention"})
+#: chars_per_token is deliberately NOT in _RELIABILITY_ROOTS: a failed TOKEN-RATIO
+#: measurement keeps the 4.0 base instead of degrading to a nonsense 0.0 ratio.
+_FLOAT_FIELDS = frozenset({"json_adherence", "instruction_retention", "chars_per_token"})
 #: Roots whose scores are reliabilities in [0, 1] and degrade to 0.0 on failure.
 _RELIABILITY_ROOTS = frozenset(
     {"tool_protocols", "edit_formats", "json_adherence", "instruction_retention"}
@@ -310,6 +314,10 @@ def render_report_card(profile: CapabilityProfile) -> str:
         f"Source:           {_source_label(profile)}",
         f"Probed:           {probed}",
         f"Context:          honest {honest:,} / advertised {advertised:,} tokens ({pct})",
+        # "(default)" not "(unmeasured)": the existing provenance pin forbids the
+        # substring "measured" before the verdict; the Source line carries provenance.
+        f"Token ratio:      {profile.chars_per_token:.1f} chars/token"
+        + ("" if profile.chars_per_token != 4.0 else "  (default)"),
         "",
         f"Tool protocol:    {proto}  (recommended)",
     ]

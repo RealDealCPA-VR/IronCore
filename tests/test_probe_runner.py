@@ -259,3 +259,42 @@ def test_probe_and_save_writes_loadable_profile(tmp_path: Path):
     assert loaded == saved
     assert loaded.tool_protocols["native"] == 0.97
     assert loaded.honest_context == 16384
+
+
+# --------------------------------------------------------------------------- #
+# chars_per_token (MS-1): float merge, failure keeps the base
+# --------------------------------------------------------------------------- #
+
+
+def test_chars_per_token_merges_as_float_scalar():
+    probes = [FakeProbe("TOKEN-RATIO", ("chars_per_token",), {"chars_per_token": 3.5})]
+    profile = asyncio.run(run_probes(_provider(1), probes, model_id="m", probed_at="t"))
+    assert profile.chars_per_token == 3.5
+    assert isinstance(profile.chars_per_token, float)
+
+
+class RaisingRatioProbe:
+    """Raises but only targets chars_per_token — a NON-reliability that must be
+    left at its base, never degraded to a nonsense 0.0 ratio."""
+
+    id = "RATIO-BOOM"
+    title = "ratio probe that raises"
+    targets = ("chars_per_token",)
+
+    async def run(self, provider):
+        raise ValueError("no usage anywhere")
+
+
+def test_raising_ratio_probe_leaves_base_default():
+    profile = asyncio.run(
+        run_probes(_provider(0), [RaisingRatioProbe()], model_id="m", probed_at="t")
+    )
+    assert profile.chars_per_token == 4.0  # untouched, not degraded to 0.0
+
+
+def test_raising_ratio_probe_keeps_a_seeded_base_value():
+    base = CapabilityProfile(model_id="m", chars_per_token=3.2)
+    profile = asyncio.run(
+        run_probes(_provider(0), [RaisingRatioProbe()], model_id="m", base=base, probed_at="t")
+    )
+    assert profile.chars_per_token == 3.2  # base survives the failed measurement

@@ -129,3 +129,23 @@ def test_should_compact_honors_headroom_ratio():
     # A tight ratio (0.05 -> 204-token budget) trips on even small history.
     small = [Message(role="user", content="a short line of text here")]
     assert should_compact(small, profile=_profile(), headroom_ratio=0.001) is True
+
+
+# -- model-aware tokenization (MS-1): the predicate uses the measured ratio -----
+
+
+def test_should_compact_flips_with_the_measured_ratio():
+    # fixed history: 1000 chars; budget = int(1000 * 0.25) = 250 tokens
+    history = [Message(role="assistant", content="x" * 1000)]
+    dense = CapabilityProfile(model_id="m", honest_context=1000, chars_per_token=1.0)
+    sparse = CapabilityProfile(model_id="m", honest_context=1000, chars_per_token=8.0)
+    assert should_compact(history, profile=dense) is True  # 1000 tokens > 250
+    assert should_compact(history, profile=sparse) is False  # 125 tokens <= 250
+
+
+def test_should_compact_default_ratio_matches_legacy_math():
+    # a profile that never met the TOKEN-RATIO probe judges exactly like before
+    big = Message(role="assistant", content="x" * 6000)  # (6000+3)//4 = 1500 tokens
+    profile = CapabilityProfile(model_id="m", honest_context=4096, chars_per_token=4.0)
+    assert should_compact([big], profile=profile) is True
+    assert should_compact([big], profile=profile, headroom_ratio=0.9) is False

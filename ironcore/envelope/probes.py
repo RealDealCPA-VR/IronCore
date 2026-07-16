@@ -56,4 +56,10 @@ PROBES: tuple[ProbeSpec, ...] = (
         measures="sanity gate; flags models below the usability floor",
         task="IC-604",
     ),
+    ProbeSpec(
+        id="TOKEN-RATIO",
+        title="Known-char filler docs vs server-reported prompt tokens",
+        measures="chars_per_token (measured chars-per-token ratio for the budget math)",
+        task="MS-1",
+    ),
 )

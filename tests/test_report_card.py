@@ -76,3 +76,22 @@ def test_default_card_says_defaults_and_unprobed():
     # the Source line must not claim measurement (the verdict's "until measured" is fine)
     assert "source:" in lower and "measured" not in lower.split("verdict:")[0]
     assert card.isascii()
+
+
+def test_card_shows_the_measured_token_ratio():
+    card = render_report_card(
+        CapabilityProfile(
+            model_id="m", source="probed", probed_at="t", chars_per_token=3.2
+        )
+    )
+    assert "3.2 chars/token" in card
+    assert card.isascii()
+    ratio_line = next(line for line in card.splitlines() if "chars/token" in line)
+    assert "default" not in ratio_line  # a measured ratio is not labelled default
+
+
+def test_card_labels_the_default_ratio_honestly():
+    card = render_report_card(CapabilityProfile(model_id="fresh"))
+    assert "4.0 chars/token" in card
+    assert "(default)" in card
+    assert card.isascii()

@@ -37,6 +37,11 @@ class CapabilityProfile(BaseModel):
     # Context
     context_window: int = 8192  # advertised
     honest_context: int = 4096  # depth at which needle retrieval stays >= 0.9
+    #: measured chars per prompt token (TOKEN-RATIO probe); 4.0 = the universal
+    #: unmeasured default. The composer's token estimator divides character
+    #: counts by this ratio. Additive field — CONTRACTS.md §5; envelope JSONs
+    #: written before it exist load as 4.0 via this default.
+    chars_per_token: float = 4.0
 
     # Reliability scores, [0..1]
     tool_protocols: dict[str, float] = Field(default_factory=dict)

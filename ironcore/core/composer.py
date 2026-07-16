@@ -42,13 +42,14 @@ first within that region — never dropped, only truncated if it alone exceeds
 the region — and the remaining budget is filled with the most-recent history.
 Each section is capped independently, so the guaranteed invariant holds:
 
-    sum(estimate_tokens(m.content) for m in compose(...))
+    sum(estimate_tokens(m.content, profile.chars_per_token) for m in compose(...))
         <= honest_context - int(honest_context * RESPONSE_HEADROOM_SHARE)
 
 The 15% response headroom is reserved (not filled with content) for the model's
 reply; IC-502 sizes SamplingPolicy.max_tokens from it. Token estimation is
-isolated behind `estimate_tokens` (≈ chars/4) so it can be swapped for a real
-tokenizer without touching the packing logic.
+isolated behind `estimate_tokens`, which divides character counts by the
+MEASURED `profile.chars_per_token` (MS-1, TOKEN-RATIO probe) — 4.0 is the
+unmeasured universal default and keeps the exact legacy ceil(chars/4) math.
 
 PROJECT MEMORY (SPEC §11.1, IC-1003). `IRONCORE.md` at the workspace root holds
 user/`/init`-authored build/test/convention notes. `load_project_memory` — the
@@ -75,6 +76,7 @@ survive):
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -119,15 +121,30 @@ IRONCORE_MD = "IRONCORE.md"
 _MEMORY_CACHE: dict[tuple[str, int, int], str] = {}
 
 
-def estimate_tokens(text: str) -> int:
-    """Approximate token count for `text` (≈ chars / 4, rounded up).
+def _safe_ratio(chars_per_token: float) -> float:
+    """Guard a profile-sourced ratio: non-finite or <= 0 (a hand-edited or corrupt
+    envelope JSON) falls back to the universal 4.0 default — the loader stays
+    never-raise, so the guard lives at consumption."""
+    if not math.isfinite(chars_per_token) or chars_per_token <= 0:
+        return 4.0
+    return chars_per_token
 
-    The single place token cost is judged: swap this for a real tokenizer and
-    every budget in this module tracks it. Empty text costs 0.
+
+def estimate_tokens(text: str, chars_per_token: float = 4.0) -> int:
+    """Approximate token count for `text`: chars / `chars_per_token`, rounded up.
+
+    The single place token cost is judged — every budget in this module tracks
+    it. `chars_per_token` is the profile's MEASURED ratio (TOKEN-RATIO probe,
+    MS-1); the 4.0 default keeps the exact-integer legacy `ceil(chars/4)` fast
+    path (zero float drift), and an invalid ratio falls back to it. Empty text
+    costs 0.
     """
     if not text:
         return 0
-    return (len(text) + 3) // 4
+    ratio = _safe_ratio(chars_per_token)
+    if ratio == 4.0:
+        return (len(text) + 3) // 4
+    return math.ceil(len(text) / ratio)
 
 
 def should_anchor(turn: int, cadence: int) -> bool:
@@ -186,14 +203,15 @@ def load_project_memory(
     if not content:
         return ""
 
+    cpt = profile.chars_per_token
     budget = int(profile.honest_context * budget_ratio)
     if budget <= 0:
         return ""
-    if estimate_tokens(content) <= budget:
+    if estimate_tokens(content, cpt) <= budget:
         return content
 
     if summarizer is None:
-        return _truncate_to_tokens(content, budget, MEMORY_MARKER)
+        return _truncate_to_tokens(content, budget, MEMORY_MARKER, cpt)
 
     try:
         mtime = path.stat().st_mtime_ns
@@ -229,22 +247,25 @@ def compose(
     redaction rules. Pure and deterministic: no clocks, no randomness.
     """
     hc = profile.honest_context
+    cpt = profile.chars_per_token  # measured ratio (MS-1); estimate_tokens guards it
     sys_budget = int(hc * SYSTEM_SHARE)
     anchor_budget = int(hc * ANCHOR_SHARE)
     ws_budget = int(hc * WORKING_SET_SHARE)
     conv_budget = int(hc * HISTORY_SHARE)
 
     messages: list[Message] = [
-        Message(role="system", content=_build_system(system_prompt, memory, sys_budget))
+        Message(role="system", content=_build_system(system_prompt, memory, sys_budget, cpt))
     ]
 
     cadence = profile.anchor_cadence()
     if should_anchor(state.turn_count, cadence) or bool(state.plan_steps):
-        anchor = _truncate_to_tokens(_render_anchor(state, settings), anchor_budget, ANCHOR_MARKER)
+        anchor = _truncate_to_tokens(
+            _render_anchor(state, settings), anchor_budget, ANCHOR_MARKER, cpt
+        )
         if anchor:
             messages.append(Message(role="system", content=anchor))
 
-    ws_msg = _build_working_set(working_set, ws_budget)
+    ws_msg = _build_working_set(working_set, ws_budget, cpt)
     if ws_msg is not None:
         messages.append(ws_msg)
 
@@ -252,12 +273,12 @@ def compose(
     input_msg: Message | None = None
     remaining_conv = conv_budget
     if user_input:
-        ui = _truncate_to_tokens(user_input, conv_budget, INPUT_MARKER)
+        ui = _truncate_to_tokens(user_input, conv_budget, INPUT_MARKER, cpt)
         if ui:
             input_msg = Message(role="user", content=ui)
-            remaining_conv -= estimate_tokens(ui)
+            remaining_conv -= estimate_tokens(ui, cpt)
 
-    messages.extend(_select_history(history, remaining_conv))
+    messages.extend(_select_history(history, remaining_conv, cpt))
     if input_msg is not None:
         messages.append(input_msg)
 
@@ -267,18 +288,18 @@ def compose(
 # -- section builders ----------------------------------------------------------
 
 
-def _build_system(system_prompt: str, memory: str, budget: int) -> str:
+def _build_system(system_prompt: str, memory: str, budget: int, cpt: float = 4.0) -> str:
     """System prompt (trusted, core) plus optional project memory, capped to
     `budget`. The system prompt is kept whole; it is truncated only as a last
     resort to preserve the hard context invariant. Memory fills the remainder."""
     text = system_prompt or ""
-    if estimate_tokens(text) > budget:
-        text = _truncate_to_tokens(text, budget, SYSTEM_MARKER)
-    remaining = budget - estimate_tokens(text)
+    if estimate_tokens(text, cpt) > budget:
+        text = _truncate_to_tokens(text, budget, SYSTEM_MARKER, cpt)
+    remaining = budget - estimate_tokens(text, cpt)
     if memory and remaining > 0:
         block = f"{MEMORY_HEADER}{memory}"
-        if estimate_tokens(block) > remaining:
-            block = _truncate_to_tokens(block, remaining, MEMORY_MARKER)
+        if estimate_tokens(block, cpt) > remaining:
+            block = _truncate_to_tokens(block, remaining, MEMORY_MARKER, cpt)
         if block:
             text = f"{text}{block}" if text else block.lstrip("\n")
     return text
@@ -327,14 +348,16 @@ def _completed_note(state: SessionState) -> str:
     return "; ".join(parts)
 
 
-def _build_working_set(working_set: dict[str, str], budget: int) -> Message | None:
+def _build_working_set(
+    working_set: dict[str, str], budget: int, cpt: float = 4.0
+) -> Message | None:
     """Wrap each working-set file as delimited DATA (injection defense, §7.5),
     MRU-first. Contents are redacted, then full files are included while they
     fit; the first file that does not fit is truncated to the remaining budget
     with an honest marker, and every less-recent file after it is dropped."""
     if not working_set:
         return None
-    remaining = budget - estimate_tokens(WS_HEADER)
+    remaining = budget - estimate_tokens(WS_HEADER, cpt)
     if remaining <= 0:
         return None
     blocks: list[str] = []
@@ -345,13 +368,15 @@ def _build_working_set(working_set: dict[str, str], budget: int) -> Message | No
         open_tag = f'\n<file path="{relpath}">\n'
         close_tag = "\n</file>"
         full_block = f"{open_tag}{redacted}{close_tag}"
-        cost = estimate_tokens(full_block)
+        cost = estimate_tokens(full_block, cpt)
         if cost <= remaining:
             blocks.append(full_block)
             remaining -= cost
             continue
-        content_budget = remaining - estimate_tokens(open_tag) - estimate_tokens(close_tag)
-        trimmed = _truncate_to_tokens(redacted, content_budget, FILE_MARKER)
+        content_budget = (
+            remaining - estimate_tokens(open_tag, cpt) - estimate_tokens(close_tag, cpt)
+        )
+        trimmed = _truncate_to_tokens(redacted, content_budget, FILE_MARKER, cpt)
         if trimmed:
             blocks.append(f"{open_tag}{trimmed}{close_tag}")
         break  # tight budget spent: drop the least-recent files entirely
@@ -360,7 +385,7 @@ def _build_working_set(working_set: dict[str, str], budget: int) -> Message | No
     return Message(role="user", content=WS_HEADER + "".join(blocks))
 
 
-def _select_history(history: list[Message], budget: int) -> list[Message]:
+def _select_history(history: list[Message], budget: int, cpt: float = 4.0) -> list[Message]:
     """Most-recent history messages whose redacted content fits `budget`, back
     in chronological order. Oldest messages are dropped first; roles, tool_calls
     and ids are preserved (only content is redacted)."""
@@ -370,7 +395,7 @@ def _select_history(history: list[Message], budget: int) -> list[Message]:
     used = 0
     for msg in reversed(history):
         redacted = redact_context(msg.content)
-        cost = estimate_tokens(redacted)
+        cost = estimate_tokens(redacted, cpt)
         if used + cost > budget:
             break
         selected.append(replace(msg, content=redacted))
@@ -379,22 +404,23 @@ def _select_history(history: list[Message], budget: int) -> list[Message]:
     return selected
 
 
-def _truncate_to_tokens(text: str, max_tokens: int, marker: str) -> str:
-    """Trim `text` so estimate_tokens(result) <= max_tokens, appending `marker`
+def _truncate_to_tokens(text: str, max_tokens: int, marker: str, cpt: float = 4.0) -> str:
+    """Trim `text` so estimate_tokens(result, cpt) <= max_tokens, appending `marker`
     when trimming occurs. Returns "" when there is no room even for the marker
     (the caller then omits the section). Trim by characters — callers redact
-    untrusted text BEFORE calling, so a split can never expose a secret."""
+    untrusted text BEFORE calling, so a split can never expose a secret. The
+    trim-back loop guarantees the budget invariant for ANY ratio."""
     if not text or max_tokens <= 0:
         return ""
-    if estimate_tokens(text) <= max_tokens:
+    if estimate_tokens(text, cpt) <= max_tokens:
         return text
-    marker_tokens = estimate_tokens(marker)
+    marker_tokens = estimate_tokens(marker, cpt)
     if marker_tokens >= max_tokens:
         return ""
-    keep_chars = (max_tokens - marker_tokens) * 4
+    keep_chars = int((max_tokens - marker_tokens) * _safe_ratio(cpt))
     trimmed = text[:keep_chars]
     result = trimmed + marker
-    while trimmed and estimate_tokens(result) > max_tokens:
+    while trimmed and estimate_tokens(result, cpt) > max_tokens:
         trimmed = trimmed[:-4]
         result = trimmed + marker
     return result if trimmed else ""

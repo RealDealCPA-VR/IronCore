@@ -156,8 +156,10 @@ def should_compact(
 ) -> bool:
     """Is the history large enough that it should be compacted now?
 
-    Sums the composer's token estimate over every message's content and compares
-    it to ``headroom_ratio`` of the model's honest context. ``headroom_ratio`` is
+    Sums the composer's token estimate over every message's content — at the
+    profile's MEASURED ``chars_per_token`` ratio (MS-1), so the predicate judges
+    size with the same math the composer packs with — and compares it to
+    ``headroom_ratio`` of the model's honest context. ``headroom_ratio`` is
     the fraction of ``profile.honest_context`` history may occupy before compaction
     is due; it defaults to the composer's ``HISTORY_SHARE`` — the exact point past
     which the composer starts dropping the oldest turns, i.e. the moment the model
@@ -165,5 +167,5 @@ def should_compact(
     exceeds that budget, ``False`` while it still fits.
     """
     budget = int(profile.honest_context * headroom_ratio)
-    used = sum(estimate_tokens(msg.content) for msg in history)
+    used = sum(estimate_tokens(msg.content, profile.chars_per_token) for msg in history)
     return used > budget

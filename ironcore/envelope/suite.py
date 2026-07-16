@@ -1,10 +1,11 @@
 """The default probe battery + the one-call runtime entry point.
 
 ``probe_model`` is what makes IronCore actually MOLD to the model it is
-pointed at: it runs the six-probe suite (docs/MODELS.md §2) against a live
+pointed at: it runs the seven-probe suite (docs/MODELS.md §2) against a live
 provider, caches the resulting :class:`CapabilityProfile` under the envelope
 dir, and returns it. The engine then hot-swaps that profile and adapts its
-wire protocol, edit format, context budget, anchor cadence, and sampling.
+wire protocol, edit format, context budget, token-ratio estimate, anchor
+cadence, and sampling.
 
 Both the ``/probe`` command and the app's first-use auto-probe call
 ``probe_model`` — one measurement path, one cache, one source of truth.
@@ -16,6 +17,7 @@ from pathlib import Path
 
 from ironcore.envelope.probe_ctx import CtxHonestyProbe, RetentionProbe
 from ironcore.envelope.probe_edits import CodeSmokeProbe, EditFormatProbe
+from ironcore.envelope.probe_ratio import TokenRatioProbe
 from ironcore.envelope.probe_tools import JsonStrictProbe, ToolFormProbe
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.envelope.runner import Probe, probe_and_save
@@ -28,9 +30,10 @@ def default_envelope_dir() -> Path:
 
 
 def default_probe_suite() -> list[Probe]:
-    """The six-probe battery: context honesty, retention, tool-form, JSON
-    adherence, edit-format, and the code-smoke floor gate. Order is cosmetic;
-    each probe declares the profile fields it fills."""
+    """The seven-probe battery: context honesty, retention, tool-form, JSON
+    adherence, edit-format, the code-smoke floor gate, and the token-ratio
+    measurement. Order is cosmetic; each probe declares the profile fields it
+    fills."""
     return [
         CtxHonestyProbe(),
         RetentionProbe(),
@@ -38,6 +41,7 @@ def default_probe_suite() -> list[Probe]:
         JsonStrictProbe(),
         EditFormatProbe(),
         CodeSmokeProbe(),
+        TokenRatioProbe(),
     ]
 
 

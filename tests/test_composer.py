@@ -424,3 +424,110 @@ def test_budget_invariant_holds_with_large_memory():
             )
             ceiling = _budget_ceiling(profile)
             assert _content_tokens(msgs) <= ceiling, (profile.honest_context, mem_len)
+
+
+# -- model-aware tokenization (MS-1): measured chars_per_token ------------------
+
+
+def _ratio_profile(honest_context: int = 4096, cpt: float = 4.0) -> CapabilityProfile:
+    return CapabilityProfile(
+        model_id="test-model", honest_context=honest_context, chars_per_token=cpt
+    )
+
+
+def test_estimate_tokens_divides_by_the_measured_ratio():
+    assert estimate_tokens("abcdef", 2.0) == 3
+    assert estimate_tokens("abcdef", 6.0) == 1
+    assert estimate_tokens("abcdefg", 2.0) == 4  # ceil, never floor
+    assert estimate_tokens("", 2.0) == 0
+
+
+def test_estimate_tokens_default_ratio_is_byte_identical_legacy():
+    for s in ("", "a", "abcd", "abcde", "x" * 400, "line\n" * 60):
+        assert estimate_tokens(s, 4.0) == (len(s) + 3) // 4 == estimate_tokens(s)
+
+
+def test_estimate_tokens_invalid_ratio_falls_back_to_default():
+    for bad in (0.0, -1.0, float("inf"), float("-inf"), float("nan")):
+        assert estimate_tokens("x" * 400, bad) == 100  # the guarded 4.0 fallback
+
+
+def test_truncate_honors_a_non_default_ratio():
+    from ironcore.core.composer import _truncate_to_tokens
+
+    text = "z" * 5000
+    for cpt in (1.0, 2.0, 3.3, 4.0, 8.0):
+        out = _truncate_to_tokens(text, 100, FILE_MARKER, cpt)
+        assert out  # room for content at every ratio here
+        assert estimate_tokens(out, cpt) <= 100  # the invariant at THAT ratio
+        assert FILE_MARKER in out
+
+
+def test_smaller_ratio_packs_fewer_history_messages():
+    history = [Message(role="user", content="z" * 200) for _ in range(8)]
+    # history region = int(400 * 0.25) = 100 tokens
+    legacy = _compose(
+        SessionState(turn_count=3),  # off-cadence: no anchor noise
+        _ratio_profile(400, 4.0),
+        history=list(history),
+        user_input="",
+    )
+    dense = _compose(
+        SessionState(turn_count=3),
+        _ratio_profile(400, 2.0),  # measured: chars are twice as expensive
+        history=list(history),
+        user_input="",
+    )
+    n_legacy = sum(1 for m in legacy if m.content.startswith("z"))
+    n_dense = sum(1 for m in dense if m.content.startswith("z"))
+    assert n_legacy == 2  # 50 tokens each at chars/4
+    assert n_dense == 1  # 100 tokens each at chars/2
+    assert n_dense < n_legacy
+
+
+def test_budget_invariant_holds_at_measured_ratios():
+    for cpt in (1.0, 2.0, 3.3, 5.5, 8.0):
+        for hc in (256, 1024, 4096):
+            profile = _ratio_profile(hc, cpt)
+            msgs = _compose(
+                SessionState(
+                    goal="g" * 300,
+                    plan_steps=["a" * 200, "b"],
+                    plan_cursor=0,
+                    turn_count=0,
+                ),
+                profile,
+                working_set={"f.py": "x\n" * 500},
+                history=[Message(role="user", content="h" * 400)],
+                user_input="u" * 400,
+                memory="M" * 3000,
+            )
+            used = sum(estimate_tokens(m.content, cpt) for m in msgs)
+            ceiling = hc - int(hc * RESPONSE_HEADROOM_SHARE)
+            assert used <= ceiling, (cpt, hc)
+
+
+def test_default_profile_composition_is_byte_identical_to_legacy():
+    # a profile that never met the TOKEN-RATIO probe carries 4.0 -> identical output
+    state = SessionState(turn_count=0, goal="ship MS-1")
+    kw = dict(
+        working_set={"a.py": "print('a')\n" * 30},
+        history=[Message(role="assistant", content="earlier reply " * 40)],
+        user_input="do the thing",
+        memory="note " * 50,
+    )
+    # compose is pure and never mutates inputs (pinned above), so kw is reusable
+    legacy = _compose(state, _profile(1024), **kw)
+    explicit = _compose(state, _ratio_profile(1024, 4.0), **kw)
+    assert legacy == explicit
+
+
+def test_load_project_memory_uses_the_profile_ratio(tmp_path):
+    _write_memory(tmp_path, "Z" * 4000)
+    # honest_context 400 -> memory budget 40 tokens; at cpt=2.0 that's ~80 chars
+    dense = load_project_memory(tmp_path, profile=_ratio_profile(400, 2.0))
+    legacy = load_project_memory(tmp_path, profile=_ratio_profile(400, 4.0))
+    assert MEMORY_MARKER in dense and MEMORY_MARKER in legacy
+    assert estimate_tokens(dense, 2.0) <= 40
+    assert estimate_tokens(legacy, 4.0) <= 40
+    assert len(dense) < len(legacy)  # a denser tokenizer keeps fewer chars

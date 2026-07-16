@@ -536,6 +536,30 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** tagged, CI-green, installable, README truthful. **Verify:** fresh
     `pipx install ironcore` on a clean machine runs the TUI
 
+## Moonshots
+
+- [x] **MS-1 · Model-aware tokenization** *(done: fable-ms1, 2026-07-16 — TOKEN-RATIO probe
+  (suite now SEVEN probes), additive `chars_per_token` (default 4.0, non-reliability),
+  ratio-aware `estimate_tokens`/composer/should_compact with the exact-integer chars/4 fast
+  path; 1322 tests green (28 new), ruff clean; legacy envelope JSONs load as 4.0)*
+  - **Depends:** IC-501, IC-601 · **Spec:** README Moonshots; docs/MODELS.md §2 design rules
+  - **Files:** `ironcore/envelope/probe_ratio.py` (new), `ironcore/envelope/profile.py`,
+    `ironcore/envelope/runner.py`, `ironcore/envelope/probes.py`, `ironcore/envelope/suite.py`,
+    `ironcore/core/composer.py`, `ironcore/core/compact.py`, `docs/CONTRACTS.md`,
+    `tests/test_probe_ratio.py` (new), `tests/test_composer.py`, `tests/test_compact.py`,
+    `tests/test_probe_runner.py`, `tests/test_envelope.py`, `tests/test_report_card.py`
+  - **Build:** TOKEN-RATIO probe measures chars-per-token (deterministic known-char filler
+    docs vs server-reported `prompt_tokens`; clamp [1.0, 8.0]; no usage reported → keep the
+    default honestly); additive `CapabilityProfile.chars_per_token` (default 4.0, NOT a
+    reliability — a failed probe leaves it at base); composer `estimate_tokens` +
+    `should_compact` divide by the measured ratio (exact-integer chars/4 fast path at 4.0).
+  - **Accept:** a probed ratio shifts the packing math; default/seeded profiles are
+    numerically identical to legacy; envelope JSONs written before this field load as 4.0;
+    the report card shows the ratio; context invariant holds at any ratio.
+    **Verify:** `uv run --extra dev pytest tests/test_probe_ratio.py tests/test_composer.py
+    tests/test_compact.py tests/test_probe_runner.py tests/test_envelope.py
+    tests/test_report_card.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map

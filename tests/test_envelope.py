@@ -57,3 +57,28 @@ def test_load_missing_returns_none(tmp_path: Path):
 def test_slug_is_filesystem_safe():
     assert "/" not in CapabilityProfile.slug("org/model:7b-q4_K_M")
     assert ":" not in CapabilityProfile.slug("org/model:7b-q4_K_M")
+
+
+# -- chars_per_token (MS-1): persistence + legacy-cache compatibility -----------
+
+
+def test_chars_per_token_round_trips(tmp_path: Path):
+    profile = CapabilityProfile(model_id="m", chars_per_token=3.2)
+    profile.save(tmp_path)
+    loaded = CapabilityProfile.load(tmp_path, "m")
+    assert loaded is not None
+    assert loaded.chars_per_token == 3.2
+
+
+def test_legacy_envelope_json_without_ratio_loads_as_default(tmp_path: Path):
+    # a cached envelope written BEFORE MS-1 has no chars_per_token key
+    import json
+
+    legacy = CapabilityProfile(model_id="legacy-model").model_dump()
+    legacy.pop("chars_per_token")
+    path = tmp_path / f"{CapabilityProfile.slug('legacy-model')}.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    loaded = CapabilityProfile.load(tmp_path, "legacy-model")
+    assert loaded is not None
+    assert loaded.chars_per_token == 4.0  # pydantic default: byte-identical legacy packing

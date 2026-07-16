@@ -26,6 +26,7 @@ partial failure degrades scores rather than blocking.
 | `JSON-STRICT` | 10 trials: emit JSON matching a schema with distracting instructions in the payload text; mechanical validation | `json_adherence` |
 | `EDIT-FORMAT` | per format: given a fixture file + change request, emit the edit; score = the harness patcher applies it AND result compiles | `edit_formats` |
 | `CODE-SMOKE` | write a ~10-line function from a docstring + make a failing test pass; floor gate | usability flag |
+| `TOKEN-RATIO` | send filler docs of known char counts; read the server-reported `prompt_tokens`; ratio = chars/tokens, clamped [1.0, 8.0]; a server that omits usage keeps the 4.0 default | `chars_per_token` |
 
 ## 3. The ladders (implemented, frozen)
 

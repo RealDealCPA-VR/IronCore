@@ -186,14 +186,19 @@ server-side guided decoding (above). These are the bets that would make it mold 
   the reverse), with a separate capability envelope per role — pick the right brain for each
   step of the loop.
 - **Live model swaps.** Re-point the running provider and re-probe on `/model <name>` mid-session, with an on-disk envelope cache that remembers every model you've measured.
-- **Model-aware tokenization.** Replace the universal `chars/4` estimate with a per-model
-  measured chars-per-token ratio, so the budget respects the *exact* window the probe found.
 - **Best-of-N escape hatches.** When a weak model dead-ends on a step that has a mechanical
   verifier (patch applies / test passes), resample and race candidates instead of failing.
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
   entry-point plugins — extend IronCore without touching core.
 - **Beyond text.** Vision for screenshots/diagrams, MCP tool servers, and a self-improvement
   loop that learns each model's quirks across sessions and tunes the ladders automatically.
+
+**Shipped:**
+
+- **Model-aware tokenization.** The probe battery now *measures* each model's chars-per-token
+  ratio (known-char filler docs vs the server's reported `prompt_tokens`) and the context
+  composer + compaction predicate budget with it — the universal `chars/4` guess only remains
+  as the honest default for servers that don't report usage.
 
 ## Contributing (humans *and* agents)
 
