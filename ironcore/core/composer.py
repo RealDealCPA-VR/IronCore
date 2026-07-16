@@ -50,6 +50,16 @@ reply; IC-502 sizes SamplingPolicy.max_tokens from it. Token estimation is
 isolated behind `estimate_tokens` (≈ chars/4) so it can be swapped for a real
 tokenizer without touching the packing logic.
 
+PROJECT MEMORY (SPEC §11.1, IC-1003). `IRONCORE.md` at the workspace root holds
+user/`/init`-authored build/test/convention notes. `load_project_memory` — the
+one impure function in this module (it reads that one file) — fits the file to a
+token budget and hands `compose` the resulting string via `memory=`; `compose`
+stays PURE (it never touches the disk). `compose` then places the string on the
+trusted system side and HARD-CAPS it into the SYSTEM share, so an oversize file
+can never push the total past the context invariant even if the loader's
+pre-fit was generous. See `load_project_memory` for its missing-file,
+oversize-truncation, and summarize-once-and-cache behaviour.
+
 REDACTION (docs/SAFETY.md §6, choke point 1). Untrusted, accumulated,
 model/file/tool-derived text is passed through `redact_context` BEFORE it is
 truncated (so a secret can never be split across the truncation boundary and
@@ -65,7 +75,9 @@ survive):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
+from pathlib import Path
 
 from ironcore.config.settings import Settings
 from ironcore.core.state import SessionState
@@ -94,6 +106,18 @@ WS_HEADER = (
     "Most-recently-used first.\n"
 )
 
+#: Workspace-root filename for project memory (SPEC §11.1). Defined here (not
+#: imported from commands/) to keep core independent of the commands package;
+#: /init writes this same file with the format `load_project_memory` reads.
+IRONCORE_MD = "IRONCORE.md"
+
+#: Summarize-once cache for oversize project memory, keyed by (path, mtime,
+#: budget). A re-load of an unchanged file returns the cached summary instead of
+#: re-invoking the (expensive) summarizer; editing the file bumps its mtime and
+#: a different budget changes the key, so either re-summarizes. mtime is read off
+#: the file (IO, not a wall clock), keeping the loader's result reproducible.
+_MEMORY_CACHE: dict[tuple[str, int, int], str] = {}
+
 
 def estimate_tokens(text: str) -> int:
     """Approximate token count for `text` (≈ chars / 4, rounded up).
@@ -117,6 +141,69 @@ def should_anchor(turn: int, cadence: int) -> bool:
     if cadence <= 1:
         return True
     return turn % cadence == 0
+
+
+def load_project_memory(
+    workspace: Path,
+    *,
+    profile: CapabilityProfile,
+    budget_ratio: float = SYSTEM_SHARE,
+    summarizer: Callable[[str], str] | None = None,
+) -> str:
+    """Read `<workspace>/IRONCORE.md` and fit it to the project-memory budget.
+
+    The returned string is what `compose` receives as `memory=`. This is the one
+    impure function in the module (it reads exactly one file) so that `compose`
+    can stay a pure function; `compose` applies the FINAL hard cap into the
+    SYSTEM share, so whatever this returns can never break the context invariant.
+    This is a first-pass fit so an enormous file is never shipped whole into the
+    composer.
+
+    Budget: ``int(profile.honest_context * budget_ratio)`` tokens (default the
+    SYSTEM share). Behaviour:
+
+    - Missing or unreadable file (or an empty budget) -> ``""`` (silent skip).
+    - Content within budget -> returned verbatim.
+    - OVERSIZE without a summarizer -> truncated to the budget with an honest
+      marker (``MEMORY_MARKER``): the model still gets the head of the file.
+    - OVERSIZE with a summarizer -> the summarizer is called ONCE and its output
+      is cached, keyed by ``(path, mtime, budget)``; a re-load of an unchanged
+      file returns the cached summary without re-summarizing. Editing the file
+      (new mtime) or a different budget invalidates the key and re-summarizes.
+
+    Project memory is TRUSTED, user/`/init`-authored content, so it is NOT passed
+    through the redactor (matching `compose`'s treatment of the system prompt).
+    """
+    path = workspace / IRONCORE_MD
+    try:
+        if not path.is_file():
+            return ""
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return ""  # unreadable == absent: memory is best-effort, never fatal
+    if not content:
+        return ""
+
+    budget = int(profile.honest_context * budget_ratio)
+    if budget <= 0:
+        return ""
+    if estimate_tokens(content) <= budget:
+        return content
+
+    if summarizer is None:
+        return _truncate_to_tokens(content, budget, MEMORY_MARKER)
+
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        mtime = -1
+    key = (str(path), mtime, budget)
+    cached = _MEMORY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    summary = summarizer(content)
+    _MEMORY_CACHE[key] = summary
+    return summary
 
 
 def compose(

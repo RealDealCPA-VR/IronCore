@@ -106,11 +106,32 @@ owns them, then freezes the *budget shares* here).
   🔒 `tests/test_handoff.py`
 - Format changes = `v2` sentinels + a reader that still parses v1.
 
-## 9. Workflow schema — `ironcore/workflows/`
+## 9. Workflow schema — `ironcore/workflows/schema.py`
 
-**Frozen after IC-902 lands** (schema is draft until then; the sketch in `engine.py` is the
-starting point). Already binding: workflows are YAML in `.ironcore/workflows/`; the model
-never controls orchestration flow; subagent outputs validate against declared schemas.
+**Frozen (IC-902).** Pydantic v2 models + loader; the model never controls orchestration flow.
+
+- **`Workflow`**: `name: str` (required), `description: str = ""`, `inputs: list[str] = []`,
+  `phases: list[Phase]` (required, **non-empty**, **unique `id`s**). Extra keys forbidden.
+- **`Phase`**: `id: str`, plus **exactly one** phase-kind — `fanout: Fanout`,
+  `foreach: str`, or `reduce: str | dict`. A `foreach` phase carries its subagent in the
+  sibling `agent: AgentSpec` field and its value must be a `{{...}}` reference; a top-level
+  `agent` is invalid on any non-foreach phase. Extra keys forbidden.
+- **`Fanout`**: `items: list`, `agent: AgentSpec` (agent nests inside `fanout:`).
+- **`AgentSpec`**: `role: str`, `prompt: str` (a `{{var}}` template), `output_schema: dict | None
+  = None` (an inline schema mapping, **not** a string ref). Extra keys forbidden.
+- **`{{...}}` rule**: prompts/refs use `{{var}}` and dotted `{{phase.field}}` placeholders;
+  `interpolate(template, context) -> str` walks nested dicts and raises `WorkflowError` naming
+  any unresolved variable. Substitution is a pure harness op — never model-driven.
+- **Loading**: `load_workflow(path_or_text: str | Path, *, source=None) -> Workflow`
+  (str = YAML text, Path delegates to file), `load_workflow_file(path) -> Workflow`,
+  `discover_workflows(dir) -> dict[str, Path]` (stem→path; `.yaml`/`.yml`; `.yaml` wins a clash;
+  missing dir → `{}`). YAML is parsed with **`yaml.safe_load` only — never `yaml.load`** (files
+  are untrusted; tags must not construct objects). All syntax **and** schema failures surface as
+  a `WorkflowError` with a message naming the file/field — callers never see a raw
+  `yaml.YAMLError`/pydantic `ValidationError`. 🔒 `tests/test_workflow_schema.py`
+
+**Not frozen:** the reducer registry and `output_schema` validator internals (IC-903); the
+built-in workflow set (IC-905); `WorkflowRunner` execution semantics.
 
 ## 10. IRONCALL text protocol
 

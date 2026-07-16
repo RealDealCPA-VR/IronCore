@@ -433,7 +433,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 9 — Workflows
 
-- [ ] **IC-901 · Subagent runner**
+- [x] **IC-901 · Subagent runner** *(done: fable-session, 2026-07-16 — SubagentTask/Result, run_subagent(engine_factory) fresh-context bounded loop, extract_json + subset-schema validate_against w/ one mechanical retry; 16 tests)*
   - **Depends:** IC-502 · **Spec:** SPEC §10
   - **Files:** `ironcore/workflows/subagent.py` (new), `tests/test_subagent.py` (new)
   - **Build:** run one agent task: fresh composed context (role prompt + task + envelope-
@@ -442,7 +442,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scripted subagent returns validated output; schema-fail retries once then
     errors cleanly. **Verify:** `uv run --extra dev pytest tests/test_subagent.py -q`
 
-- [ ] **IC-902 · Workflow YAML schema + loader**
+- [x] **IC-902 · Workflow YAML schema + loader** *(done: fable-session, 2026-07-16 — pydantic Workflow/Phase/Fanout/AgentSpec (exactly-one-kind), load_workflow via yaml.safe_load→WorkflowError, discover_workflows, interpolate; CONTRACTS §9 frozen; 26 tests)*
   - **Depends:** — · **Spec:** SPEC §10, `workflows/engine.py` sketch
   - **Files:** `ironcore/workflows/schema.py` (new), `tests/test_workflow_schema.py` (new), `docs/CONTRACTS.md` (§9 finalize)
   - **Build:** finalize schema (phases: fanout/foreach/reduce; `{{var}}` interpolation;
@@ -451,7 +451,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** valid fixtures load; 8 invalid fixtures produce pointed errors.
     **Verify:** `uv run --extra dev pytest tests/test_workflow_schema.py -q`
 
-- [ ] **IC-903 · Orchestrator**
+- [~] **IC-903 · Orchestrator** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-901, IC-902 · **Spec:** SPEC §10
   - **Files:** `ironcore/workflows/engine.py`, `tests/test_workflow_engine.py` (new)
   - **Build:** execute phases sequentially, items concurrently (cap from settings); harness-
@@ -460,7 +460,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** scripted 3-phase workflow (fanout→foreach→reduce) with one injected agent
     failure completes with the failure noted. **Verify:** `uv run --extra dev pytest tests/test_workflow_engine.py -q`
 
-- [ ] **IC-904 · /workflow command + progress UI**
+- [~] **IC-904 · /workflow command + progress UI** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-903, IC-702 · **Spec:** SPEC §3.3
   - **Files:** `ironcore/commands/workflowcmd.py` (new), `ironcore/tui/widgets/workflowview.py` (new), tests (new)
   - **Build:** list/run workflows from `.ironcore/workflows/`; first-run-per-repo confirmation
@@ -468,7 +468,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** Pilot: run fixture workflow, watch phases, cancel mid-fanout cleans up.
     **Verify:** `uv run --extra dev pytest tests/tui -q tests/test_commands.py -q`
 
-- [ ] **IC-905 · Built-in workflows**
+- [~] **IC-905 · Built-in workflows** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-903 · **Spec:** SPEC §10
   - **Files:** `ironcore/workflows/builtin/*.yaml` (new), `tests/test_builtin_workflows.py` (new)
   - **Build:** `review` (dimensions fanout → verify → report), `migrate` (discover → transform
@@ -487,7 +487,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** write→load roundtrip rehydrates state + tail; corrupt line skipped with
     warning. **Verify:** `uv run --extra dev pytest tests/test_sessions.py -q`
 
-- [ ] **IC-1002 · Handoff lifecycle wiring**
+- [x] **IC-1002 · Handoff lifecycle wiring** *(done: fable-session, 2026-07-16 — handoff_from_summary parser + engine handoff_path/author params, compaction auto-appends a handoff, end_session() writes a final block, best-effort/decoupled (None-control byte-identical); 13 tests)*
   - **Depends:** IC-505, IC-1001 · **Spec:** SPEC §11.3
   - **Files:** `ironcore/memory/handoff.py`, `ironcore/core/engine.py`, `tests/test_handoff.py`
   - **Build:** auto-append handoff blocks on session end, compaction, and workflow-agent
@@ -495,7 +495,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** end/compact/subagent each produce parseable blocks; resume shows the latest.
     **Verify:** `uv run --extra dev pytest tests/test_handoff.py -q`
 
-- [ ] **IC-1003 · IRONCORE.md injection**
+- [x] **IC-1003 · IRONCORE.md injection** *(done: fable-session, 2026-07-16 — load_project_memory (budget-capped/summarize-once-cached), compose budgets memory into the SYSTEM share (invariant held), orchestrator wired the per-turn engine call; 12 tests)*
   - **Depends:** IC-501, IC-802 · **Spec:** SPEC §11.1
   - **Files:** `ironcore/core/composer.py`, `tests/test_composer.py`
   - **Build:** project memory into the system share of the budget; oversize → summarize-once
@@ -505,14 +505,14 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
 
 ## Phase 11 — Distribution & v0.1
 
-- [ ] **IC-1101 · CI hardening**
+- [x] **IC-1101 · CI hardening** *(done: fable-session, 2026-07-16 — coverage gate --cov-fail-under=85 on core/safety/envelope (measured 91-94%), uv cache + --frozen sync, matrix/concurrency/smoke intact; pyproject [tool.coverage] added)*
   - **Depends:** — (tighten as phases land) · **Spec:** SPEC §14
   - **Files:** `.github/workflows/ci.yml`, `pyproject.toml`
   - **Build:** coverage gate (85% on core/safety/envelope once IC-502 lands), `uv lock` +
     cached installs, concurrency-cancel, badge already in README.
   - **Accept:** CI green on matrix with gates active. **Verify:** GitHub Actions run
 
-- [ ] **IC-1102 · Packaging + release automation**
+- [~] **IC-1102 · Packaging + release automation** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-701 · **Spec:** SPEC §13
   - **Files:** `.github/workflows/release.yml` (new), `pyproject.toml`, `README.md`
   - **Build:** tag-triggered build + PyPI publish (trusted publishing); `uv tool install`
@@ -520,7 +520,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** dry-run release produces installable wheel; `ironcore --version` correct from
     wheel. **Verify:** release workflow dry-run
 
-- [ ] **IC-1103 · Offline e2e demo**
+- [~] **IC-1103 · Offline e2e demo** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** IC-701..704 · **Spec:** SPEC §14
   - **Files:** `demo/` (new), `tests/test_demo.py` (new)
   - **Build:** scripted MockProvider session (fixture transcript): user asks for a small
@@ -528,7 +528,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     recordable for the README gif.
   - **Accept:** demo runs green in CI on both OSes. **Verify:** `uv run --extra dev pytest tests/test_demo.py -q`
 
-- [ ] **IC-1104 · v0.1 release**
+- [~] **IC-1104 · v0.1 release** *(claimed: fable-session, 2026-07-16)*
   - **Depends:** all phase 1–8 + IC-1101..1103 · **Spec:** SPEC §15
   - **Files:** `CHANGELOG.md` (new), `README.md`, version bumps
   - **Build:** changelog; README status flip (scaffold → v0.1) + demo gif; live smoke against

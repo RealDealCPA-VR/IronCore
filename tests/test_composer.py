@@ -1,16 +1,20 @@
 """Context composer (IC-501): determinism, budget invariant, anchor cadence,
 micro-step surfacing, working-set truncation/MRU-drop, and redaction."""
 
+from pathlib import Path
+
 from ironcore.config.settings import Settings
 from ironcore.core.composer import (
     ANCHOR_SHARE,
     FILE_MARKER,
     HISTORY_SHARE,
+    MEMORY_MARKER,
     RESPONSE_HEADROOM_SHARE,
     SYSTEM_SHARE,
     WORKING_SET_SHARE,
     compose,
     estimate_tokens,
+    load_project_memory,
     should_anchor,
 )
 from ironcore.core.state import SessionState
@@ -297,3 +301,126 @@ def test_system_prompt_and_user_input_are_not_redacted():
     user_in = msgs[-1].content
     assert SECRET in system  # system_prompt + memory are trusted
     assert SECRET in user_in  # live user input is trusted
+
+
+# -- project memory loading (IC-1003) ------------------------------------------
+
+
+def _write_memory(ws: Path, text: str) -> Path:
+    path = ws / "IRONCORE.md"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_load_project_memory_reads_file_verbatim(tmp_path):
+    content = "## Verify\n- `pytest -q`\n"
+    _write_memory(tmp_path, content)
+    assert load_project_memory(tmp_path, profile=_profile()) == content
+
+
+def test_load_project_memory_missing_file_returns_empty(tmp_path):
+    assert load_project_memory(tmp_path, profile=_profile()) == ""
+
+
+def test_load_project_memory_empty_file_returns_empty(tmp_path):
+    _write_memory(tmp_path, "")
+    assert load_project_memory(tmp_path, profile=_profile()) == ""
+
+
+def test_load_project_memory_oversize_truncated_with_marker(tmp_path):
+    profile = _profile(honest_context=400)  # memory budget = 40 tokens (~160 chars)
+    _write_memory(tmp_path, "Z" * 4000)
+    result = load_project_memory(tmp_path, profile=profile)
+    budget = int(400 * SYSTEM_SHARE)
+    assert MEMORY_MARKER in result  # honest marker on the truncated tail
+    assert estimate_tokens(result) <= budget
+    assert result.startswith("Z")  # the head of the file is what survives
+
+
+def test_budget_ratio_controls_the_memory_budget(tmp_path):
+    content = "line\n" * 60  # ~75 tokens
+    _write_memory(tmp_path, content)
+    profile = _profile(honest_context=4096)  # default budget ~409 tokens -> fits
+    assert load_project_memory(tmp_path, profile=profile) == content
+    small = load_project_memory(tmp_path, profile=profile, budget_ratio=0.01)  # 40 tokens
+    assert small != content
+    assert MEMORY_MARKER in small
+
+
+def test_oversize_memory_summarized_once_and_cached(tmp_path):
+    profile = _profile(honest_context=400)
+    _write_memory(tmp_path, "Z" * 4000)
+    calls: list[str] = []
+
+    def summarizer(text: str) -> str:
+        calls.append(text)
+        return "SUMMARY: build with uv, verify with pytest -q"
+
+    first = load_project_memory(tmp_path, profile=profile, summarizer=summarizer)
+    second = load_project_memory(tmp_path, profile=profile, summarizer=summarizer)
+    assert first == second == "SUMMARY: build with uv, verify with pytest -q"
+    assert len(calls) == 1  # second load hit the (path, mtime, budget) cache
+
+
+def test_summarizer_reruns_when_budget_key_differs(tmp_path):
+    profile = _profile(honest_context=400)
+    _write_memory(tmp_path, "Z" * 4000)  # oversize at both budgets below
+    calls: list[str] = []
+
+    def summarizer(text: str) -> str:
+        calls.append(text)
+        return "S"
+
+    load_project_memory(tmp_path, profile=profile, summarizer=summarizer)
+    load_project_memory(tmp_path, profile=profile, summarizer=summarizer)  # cache hit
+    load_project_memory(tmp_path, profile=profile, budget_ratio=0.05, summarizer=summarizer)
+    assert len(calls) == 2  # different budget -> different key -> re-summarized once
+
+
+def test_summarizer_not_called_when_content_fits(tmp_path):
+    _write_memory(tmp_path, "small note")
+    calls: list[str] = []
+    out = load_project_memory(
+        tmp_path, profile=_profile(), summarizer=lambda t: calls.append(t) or "X"
+    )
+    assert out == "small note"
+    assert calls == []  # in-budget content is returned verbatim, never summarized
+
+
+# -- compose() budgets a large memory into the SYSTEM share --------------------
+
+
+def test_memory_text_appears_in_composed_system_context():
+    msgs = _compose(SessionState(turn_count=0), _profile(), memory="RUN: uv run pytest -q")
+    assert "RUN: uv run pytest -q" in msgs[0].content  # rides the system message
+    assert "Project memory" in msgs[0].content  # under the MEMORY_HEADER label
+
+
+def test_compose_caps_large_memory_into_system_share():
+    profile = _profile(honest_context=400)  # system share = 40 tokens
+    msgs = _compose(SessionState(turn_count=0), profile, memory="M" * 10000)
+    system = msgs[0].content
+    assert estimate_tokens(system) <= int(400 * SYSTEM_SHARE)  # capped, not naively glued
+    assert MEMORY_MARKER in system  # honest marker shows the cap fired
+    assert _content_tokens(msgs) <= _budget_ceiling(profile)
+
+
+def test_budget_invariant_holds_with_large_memory():
+    profiles = [_profile(256), _profile(1024), _profile(4096, 12), _profile(8192, 3)]
+    for profile in profiles:
+        for mem_len in (0, 500, 5000, 50000):
+            msgs = _compose(
+                SessionState(
+                    goal="g" * 500,
+                    plan_steps=["a" * 300, "b"],
+                    plan_cursor=0,
+                    turn_count=0,
+                ),
+                profile,
+                working_set={"f.py": "x\n" * 500},
+                history=[Message(role="user", content="h" * 400)],
+                user_input="u" * 400,
+                memory="M" * mem_len,
+            )
+            ceiling = _budget_ceiling(profile)
+            assert _content_tokens(msgs) <= ceiling, (profile.honest_context, mem_len)

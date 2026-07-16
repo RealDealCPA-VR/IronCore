@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
 
+# Only one run per ref; a newer push cancels the in-flight run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -24,12 +25,30 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
+          # Cache uv's download + build cache (keyed on uv.lock) across runs.
+          enable-cache: true
+
+      # Reproducible install straight from the committed uv.lock; --frozen fails the
+      # build if the lock has drifted from pyproject rather than silently re-locking.
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
 
       - name: Lint
         run: uv run --extra dev ruff check .
 
-      - name: Test
-        run: uv run --extra dev pytest -q
+      # Coverage gate runs on EVERY matrix leg: the suite is fully offline and
+      # deterministic (MockProvider, no network/model), so measuring on all four legs
+      # gives cross-OS + cross-Python coverage confidence for negligible extra cost.
+      # Floor is 85% on core/safety/envelope per SPEC section 14 (measured ~92%, passes
+      # with margin). Do not raise the floor above the measured value.
+      - name: Test (with coverage gate)
+        run: >-
+          uv run --extra dev pytest
+          --cov=ironcore/core
+          --cov=ironcore/safety
+          --cov=ironcore/envelope
+          --cov-report=term-missing
+          --cov-fail-under=85
 
       - name: CLI smoke
         run: |

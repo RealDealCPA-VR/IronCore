@@ -45,7 +45,7 @@ from ironcore.core import ironcall
 from ironcore.core.approvals import ApprovalBroker
 from ironcore.core.budgets import Budget
 from ironcore.core.compact import compact, should_compact
-from ironcore.core.composer import RESPONSE_HEADROOM_SHARE, compose
+from ironcore.core.composer import RESPONSE_HEADROOM_SHARE, compose, load_project_memory
 from ironcore.core.events import (
     ApprovalRequired,
     Event,
@@ -69,6 +69,7 @@ from ironcore.core.state import SessionState, state_path
 from ironcore.core.steps import PlanStepPlanner
 from ironcore.core.verify import CommandVerifier
 from ironcore.envelope.profile import CapabilityProfile
+from ironcore.memory.handoff import Handoff, append_handoff, handoff_from_summary
 from ironcore.providers.base import Message, Provider, ToolCall
 from ironcore.providers.openai_compat import ProviderError
 from ironcore.safety.commands import classify_command
@@ -112,6 +113,13 @@ _KEEP_RECENT = 6
 #: fs tools whose ``path`` arg names a single file worth carrying in the working set.
 _FS_PATH_TOOLS = frozenset({"read_file", "write_file", "edit_file"})
 
+#: Default handoff file, written under the workspace on compaction / session end.
+HANDOFF_FILENAME = "HANDOFF.md"
+
+#: Sentinel distinguishing "caller passed no handoff_path" (→ ``<ws>/HANDOFF.md``)
+#: from an explicit ``None`` (→ handoff writing disabled). See ``TurnEngine``.
+_AUTO_HANDOFF: object = object()
+
 
 def _merge_usage(total: dict[str, int], usage: dict) -> None:
     """Accumulate integer usage counters (prompt/completion/total tokens)."""
@@ -146,6 +154,8 @@ class TurnEngine:
         planner: StepPlanner | None = None,
         session: SessionState | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        handoff_path: str | Path | None = _AUTO_HANDOFF,  # type: ignore[assignment]
+        author: str | None = None,
     ) -> None:
         self.provider = provider
         self.tools = tools
@@ -162,6 +172,15 @@ class TurnEngine:
         self.budget: BudgetTracker = budget if budget is not None else Budget()
         self.planner: StepPlanner = planner if planner is not None else PlanStepPlanner()
         self.system_prompt = system_prompt
+        # Handoff sink (SPEC §11.3): default to <workspace>/HANDOFF.md, an explicit
+        # None disables all handoff writes. Author labels the block (session/model id).
+        if handoff_path is _AUTO_HANDOFF:
+            self.handoff_path: Path | None = self.workspace / HANDOFF_FILENAME
+        elif handoff_path is None:
+            self.handoff_path = None
+        else:
+            self.handoff_path = Path(handoff_path)
+        self.handoff_author = author or f"ironcore/{self.profile.model_id or 'unknown'}"
         if session is not None:
             self.state = session
         else:
@@ -220,8 +239,15 @@ class TurnEngine:
                     )
                     self._conversation = [summary, *self._conversation[-_KEEP_RECENT:]]
                     self.budget.record_call(0)
+                    # A compaction IS a handoff-grade summary (SPEC §11.3): persist
+                    # it. Once per turn (the `not compacted` guard above), best-effort
+                    # — a failed write must never crash the turn or alter its events.
+                    self._write_compaction_handoff(summary)
 
                 text_protocol = protocol == "text_protocol"
+                # IRONCORE.md project memory rides the system share (IC-1003);
+                # re-read per turn so mid-session /init and /memory edits land.
+                memory = load_project_memory(self.workspace, profile=self.profile)
                 messages = compose(
                     state,
                     profile=self.profile,
@@ -230,6 +256,7 @@ class TurnEngine:
                     working_set=self._working_set(),
                     history=self._conversation,
                     user_input="",
+                    memory=memory,
                 )
                 sampling = resolve_sampling(self.profile, kind="tool", attempt=repair_attempt)
                 sampling = replace(sampling, max_tokens=self._headroom_tokens())
@@ -435,6 +462,65 @@ class TurnEngine:
             yield TurnError(turn_id=turn_id, message=message, data=dict(fatal))
             return
         yield TurnCompleted(turn_id=turn_id, usage=usage_total, stop_reason=stop_reason)
+
+    # -- handoff lifecycle (SPEC §11.3) ---------------------------------------
+
+    def _write_compaction_handoff(self, summary: Message) -> None:
+        """Append a handoff derived from a compaction summary. Best-effort and
+        decoupled: a ``None`` sink is a no-op, and an ``OSError`` (full disk, bad
+        path) is swallowed so the turn is never disturbed. The summary already
+        carries the five handoff sections, so ``handoff_from_summary`` just re-homes
+        them; a mechanical-fallback digest is wrapped whole into Context."""
+        if self.handoff_path is None:
+            return
+        handoff = handoff_from_summary(
+            self.handoff_author,
+            summary.content,
+            next_steps="resume this session to continue (ironcore --resume).",
+        )
+        try:
+            append_handoff(self.handoff_path, handoff)
+        except OSError:
+            pass  # persistence is best-effort; never crash the turn
+
+    def end_session(self) -> Handoff:
+        """Write a FINAL handoff for this session and return it (SPEC §11.3).
+
+        The TUI/CLI calls this once on quit. It never runs the model: the block is
+        built deterministically from the goal and last known state, so it is safe to
+        call with no activity at all (fresh state → a valid "nothing happened yet"
+        block). The write is best-effort (disabled when ``handoff_path`` is None,
+        ``OSError`` swallowed); the Handoff is returned either way so a caller can
+        still log or display it."""
+        state = self.state
+        context = (
+            f"Session ended at turn {state.turn_count} in {self.mode.value} mode. "
+            f"Goal: {state.goal or '(none recorded)'}."
+        )
+        working = ", ".join(state.working_set[:_WORKING_SET_MAX_FILES]) or "none"
+        changed = f"Working set (MRU): {working}."
+        if state.plan_steps:
+            done = min(state.plan_cursor, len(state.plan_steps))
+            changed += f" Plan: {done}/{len(state.plan_steps)} step(s) done."
+        notes: list[str] = []
+        if self._pending_flag is not Flag.NONE:
+            notes.append(f"last tool output flagged {self._pending_flag.name} for injection")
+        if state.plan_steps and state.plan_cursor < len(state.plan_steps):
+            notes.append("plan not complete")
+        handoff = Handoff(
+            author=self.handoff_author,
+            context=context,
+            changed=changed,
+            verified="not verified — session-end handoff (no verification run here)",
+            next_steps="resume this session to continue (ironcore --resume).",
+            gotchas="; ".join(notes) or "none",
+        )
+        if self.handoff_path is not None:
+            try:
+                append_handoff(self.handoff_path, handoff)
+            except OSError:
+                pass  # best-effort; quitting must not fail on a bad handoff path
+        return handoff
 
     # -- gate -----------------------------------------------------------------
 
