@@ -108,3 +108,19 @@ def test_invalid_mode_from_env_rejected(tmp_path: Path):
             user_config=tmp_path / "nope.toml",
             env={"IRONCORE_MODE": "yolo"},
         )
+
+
+def test_instant_seed_defaults_true(tmp_path: Path):
+    settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
+    assert settings.envelope.instant_seed is True
+    assert settings.envelope.auto_probe is True  # unchanged
+
+
+def test_project_config_can_disable_instant_seed(tmp_path: Path):
+    project = tmp_path / "proj"
+    (project / ".ironcore").mkdir(parents=True)
+    (project / ".ironcore" / "config.toml").write_text("[envelope]\ninstant_seed = false\n")
+
+    settings = Settings.load(project_dir=project, user_config=tmp_path / "nope.toml", env={})
+    assert settings.envelope.instant_seed is False
+    assert settings.envelope.auto_probe is True  # sibling key untouched

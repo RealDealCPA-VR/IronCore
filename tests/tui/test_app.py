@@ -370,3 +370,95 @@ def test_esc_interrupts_running_turn(tmp_path):
             assert not app._turn_running()
 
     asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------- #
+# (8) instant-on molding: SEED hot-swaps first, DEEP PROBE refines after
+# --------------------------------------------------------------------------- #
+
+
+def test_instant_seed_then_probe_hot_swaps_in_order(tmp_path, monkeypatch):
+    """With instant_seed + auto_probe on, mount SEEDs the profile from endpoint
+    introspection (hot-swap #1) and THEN deep-probes to measure it (hot-swap #2),
+    in that order. Both async calls are stubbed so the test is offline + fast."""
+    engine = _engine(tmp_path, [_text("hi")])
+    engine.provider.base_url = "http://localhost:11434/v1"  # endpoint-backed → seed runs
+
+    seed = CapabilityProfile(
+        model_id="mock",
+        source="seeded",
+        honest_context=32768,
+        tool_protocols={"native": 0.95},
+        edit_formats={"search_replace": 0.85},
+    )
+    measured = CapabilityProfile(
+        model_id="mock",
+        source="probed",
+        probed_at="2026-07-16T00:00:00Z",
+        honest_context=16384,
+        tool_protocols={"native": 1.0},
+    )
+    order: list[str] = []
+    probe_saw: list[CapabilityProfile] = []
+
+    async def fake_seed(provider, *, model_id, transport=None):
+        order.append("seed")
+        return seed
+
+    async def fake_probe(eng):
+        order.append("probe")
+        probe_saw.append(eng.profile)  # the seed must already be hot-swapped in
+        eng.profile = measured
+        return "Probe complete — mock profile updated."
+
+    monkeypatch.setattr("ironcore.envelope.seed.seed_profile", fake_seed)
+    monkeypatch.setattr("ironcore.commands.envelopecmd.probe_and_swap", fake_probe)
+
+    app = IronCoreApp(engine, build_cmds(), engine.settings, instant_seed=True, auto_probe=True)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            done = await _wait_for(pilot, lambda: app.engine.profile is measured)
+            assert done, "profile never hot-swapped to the measured one"
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # order matters: the seed ran and hot-swapped BEFORE the deep probe
+            assert order == ["seed", "probe"]
+            assert probe_saw == [seed]  # hot-swap #1 was in place when the probe ran
+            text = app.transcript_text()
+            assert "Seeded" in text and "32768" in text  # seed note (provisional)
+            assert "native" in text and "search_replace" in text
+            assert "Probe complete" in text  # deep-probe report (measured)
+
+    asyncio.run(scenario())
+
+
+def test_flags_off_neither_seed_nor_probe_fires(tmp_path, monkeypatch):
+    """The default injected-engine path (both flags off) must not seed or probe —
+    this is what keeps every other TUI test from touching the network."""
+    engine = _engine(tmp_path, [_text("hi")])
+    engine.provider.base_url = "http://localhost:11434/v1"  # even so, nothing should fire
+    fired: list[str] = []
+
+    async def fake_seed(provider, *, model_id, transport=None):
+        fired.append("seed")
+        return _profile()
+
+    async def fake_probe(eng):
+        fired.append("probe")
+        return "probed"
+
+    monkeypatch.setattr("ironcore.envelope.seed.seed_profile", fake_seed)
+    monkeypatch.setattr("ironcore.commands.envelopecmd.probe_and_swap", fake_probe)
+
+    app = _app(engine)  # defaults: instant_seed=False, auto_probe=False
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            assert fired == []
+            assert "Seeded" not in app.transcript_text()
+            assert "measuring it" not in app.transcript_text()
+
+    asyncio.run(scenario())

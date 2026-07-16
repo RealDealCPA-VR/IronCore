@@ -132,16 +132,16 @@ def cmd_doctor(
     from ironcore.envelope.profile import CapabilityProfile
 
     profile = CapabilityProfile.load(envelope_dir, settings.provider.model)
-    if profile is not None and profile.probed_at is not None:
+    if profile is not None and (profile.source == "probed" or profile.probed_at is not None):
         print(
-            f"[ok] model {settings.provider.model} probed "
+            f"[ok] model {settings.provider.model} measured "
             f"(tools: {profile.recommended_tool_protocol()}, edits: "
             f"{profile.recommended_edit_format()}, ctx: {profile.honest_context})"
         )
     else:
         print(
-            f"[--] model {settings.provider.model} is unprobed -- on floor defaults; "
-            "launch the app (auto-probes) or run /probe to adapt to it"
+            f"[--] model {settings.provider.model} unprobed -- the app instant-seeds it "
+            "from the endpoint in ~1s then measures in the background (or run /probe)"
         )
 
     return 0 if ok else 1

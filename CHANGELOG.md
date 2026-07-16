@@ -3,6 +3,19 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Instant-on profiling.** On first use of an unprobed model, IronCore now
+  seeds a *usable* capability profile in ~1 second from endpoint introspection
+  (Ollama `/api/show` for the real context window + capability detection) — the
+  first turn runs with the model's true window and native tool-calling instead
+  of the conservative floor — then deepens the measurement with the full probe
+  battery in the background and hot-swaps the refined profile in. A `source`
+  field (`default`/`seeded`/`probed`) makes the report card and `doctor` honest
+  about whether values are introspected guesses or measurements. Configurable
+  via `[envelope] instant_seed` / `auto_probe`.
+
 ## [0.1.0] — 2026-07-16
 
 The first release: a complete, interactive terminal coding agent built for

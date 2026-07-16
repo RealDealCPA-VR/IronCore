@@ -69,7 +69,8 @@ owns them, then freezes the *budget shares* here).
 
 **Frozen:**
 - `CapabilityProfile` field names (additive allowed); JSON persistence via
-  `save/load(envelope_dir, model_id)`; slug scheme.
+  `save/load(envelope_dir, model_id)`; slug scheme. `source` (`"default" | "seeded" |
+  "probed"`) is an additive provenance field, default `"default"`.
 - Ladder orders and thresholds: tool `native 0.95 / strict_json 0.90 / text floor`; edit
   `unified_diff 0.90 / search_replace 0.85 / whole_file floor`; `anchor_cadence` clamp
   [2, 12]. The engine selects protocols exclusively via `recommended_*`.

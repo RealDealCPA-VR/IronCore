@@ -185,13 +185,16 @@ class IronCoreApp(App):
         session_store: SessionStore | None = None,
         resume_id: str | None = None,
         auto_probe: bool = False,
+        instant_seed: bool = False,
     ) -> None:
         super().__init__()
         self.engine = engine
         self.registry = registry
         self.settings = settings
-        #: measure the model in the background on first launch (from_settings sets
-        #: this for an unprobed model when envelope.auto_probe is on).
+        #: mold the model in the background on first launch (from_settings sets both
+        #: for an unprobed model): ``_instant_seed`` introspects the endpoint into a
+        #: provisional-but-usable profile in ~1s; ``_auto_probe`` then measures it.
+        self._instant_seed = instant_seed
         self._auto_probe = auto_probe
         self.provider_registry = provider_registry
         self.workspace: Path = Path(engine.workspace)
@@ -240,24 +243,47 @@ class IronCoreApp(App):
                 self.push_screen(SessionPicker(self.session_store), self._on_session_picked)
             elif self._resume_id is not None:
                 self.call_later(self._resume_session, self._resume_id)
-        # First-use auto-probe (docs/MODELS.md): measure an unprobed model in the
-        # background so the engine molds to it — the user can work immediately on
-        # floor defaults and the profile hot-swaps when the probe finishes.
-        if self._auto_probe:
+        # First-use molding (docs/MODELS.md, instant-on-profiling): make an
+        # unprobed model usable immediately. The user works on floor defaults now;
+        # a background worker SEEDS the profile from endpoint introspection (~1s,
+        # hot-swap #1) then DEEP-PROBES to measure + refine it (hot-swap #2).
+        if self._instant_seed or self._auto_probe:
             self._post_note(
-                f"Model {self.settings.provider.model!r} is unprobed — running on "
-                "conservative defaults while I measure its real capabilities in the "
-                "background. The profile updates itself when that finishes (or run /probe)."
+                f"Model {self.settings.provider.model!r} is unprobed — measuring it "
+                "in the background so IronCore molds to it. You can work now on floor "
+                "defaults; the profile hot-swaps itself as measurements land (or /probe)."
             )
-            self.run_worker(self._auto_probe_task(), group="probe")
+            self.run_worker(self._mold_to_model(), group="probe")
 
-    async def _auto_probe_task(self) -> None:
-        """Background first-use probe: measure the model, hot-swap the profile,
-        and report. Never raises (probe_and_swap catches its own failures)."""
-        from ironcore.commands.envelopecmd import probe_and_swap
+    async def _mold_to_model(self) -> None:
+        """Background first-use molding: SEED the profile from endpoint
+        introspection (provisional, instant) then DEEP-PROBE to measure + refine
+        it. Each step hot-swaps ``engine.profile`` in order (seed before probe).
+        Never raises — a seed failure is noted and the probe still runs."""
+        # SEED (hot-swap #1): only for an endpoint-backed provider (Ollama et al.).
+        # seed_profile shouldn't raise, but a surprise must not crash mount.
+        if self._instant_seed and getattr(self.engine.provider, "base_url", None) is not None:
+            try:
+                from ironcore.envelope.seed import seed_profile
 
-        report = await probe_and_swap(self.engine)
-        await self.transcript.add_note(report)
+                model = self.engine.profile.model_id or self.settings.provider.model
+                seed = await seed_profile(self.engine.provider, model_id=model)
+                self.engine.profile = seed  # the next turn uses the real window + tools
+                await self.transcript.add_note(
+                    f"Seeded {model!r} from the endpoint: context {seed.honest_context}, "
+                    f"tools {seed.recommended_tool_protocol()!r}, "
+                    f"edits {seed.recommended_edit_format()!r} "
+                    "(provisional — measuring in the background)."
+                )
+            except Exception as exc:  # noqa: BLE001 — seeding must never crash mount
+                await self.transcript.add_note(f"[seed skipped] {exc}")
+        # DEEP PROBE (hot-swap #2): refines base=the seed (probe_and_swap catches
+        # its own failures, so this never raises).
+        if self._auto_probe:
+            from ironcore.commands.envelopecmd import probe_and_swap
+
+            report = await probe_and_swap(self.engine)
+            await self.transcript.add_note(report)
 
     # -- input handling -------------------------------------------------------
 
@@ -604,8 +630,13 @@ class IronCoreApp(App):
             mode,
             workspace=ws,
         )
-        # mold to the model on first use: probe an unprobed model unless disabled
-        auto_probe = settings.envelope.auto_probe and profile.probed_at is None
+        # mold to the model on first use (instant-on-profiling): for an unprobed
+        # model, seed instantly from endpoint introspection then deep-probe to
+        # refine — each disabled independently by config. ``instant_seed`` may not
+        # exist yet (Wave-2B owns settings.py); default it on via getattr.
+        unprobed = profile.probed_at is None
+        instant_seed = getattr(settings.envelope, "instant_seed", True) and unprobed
+        auto_probe = settings.envelope.auto_probe and unprobed
         return cls(
             engine,
             build_command_registry(),
@@ -614,6 +645,7 @@ class IronCoreApp(App):
             session_store=SessionStore(ws),
             resume_id=resume,
             auto_probe=auto_probe,
+            instant_seed=instant_seed,
         )
 
 

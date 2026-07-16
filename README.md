@@ -30,10 +30,12 @@ have, on hardware you actually own — no API keys, no data leaving the box.
 ## It measures your model, then adapts to it
 
 Most harnesses *assume* a model can do native tool calls and clean unified diffs, then break
-when it can't. IronCore assumes nothing. **The first time you point it at a model, it probes
-it** — a short battery that scores what the model can actually do, caches a profile under
-`~/.ironcore/envelopes/`, and reshapes the whole loop around the result. It runs in the
-background, so you start working immediately while the measurement lands and hot-swaps in.
+when it can't. IronCore assumes nothing. **The first time you point it at a model, it seeds a
+usable profile in ~1 second** from the endpoint's own introspection (Ollama's real context
+window via `/api/show` + capability detection) — so the very first turn already runs with the
+model's true window and native tool-calling, not a conservative floor. Then a fuller probe
+battery deepens the measurement **in the background** and hot-swaps the refined profile in.
+No cold-probe wait; the profile is cached under `~/.ironcore/envelopes/` for next time.
 
 | It measures… | …by | so it can pick |
 |---|---|---|
@@ -172,11 +174,9 @@ Plan-mode workflow escape) were caught and fixed exactly this way.
 
 ## 🌙 Moonshots — where we're aiming next
 
-v0.1 molds to your model. These are the bets that would make it mold *deeper*:
+v0.1 molds to your model — and now does it *instantly* (see above). These are the bets that
+would make it mold *deeper*:
 
-- **Instant-on profiling.** Seed a usable profile in ~1 second from the endpoint's own
-  introspection (Ollama `/api/show` context window + capability detection), then deepen the
-  measurement in the background — no cold-probe wait at all.
 - **Guided decoding.** Drive the strict-JSON rung with real server-side grammars
   (`response_format` / GBNF / vLLM guided decoding) so a mid-tier model gets *guaranteed*
   well-formed tool calls, not best-effort ones.

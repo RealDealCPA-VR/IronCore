@@ -58,8 +58,14 @@ async def probe_and_swap(engine: Any) -> str:
 
     model = _model_id(engine)
     try:
+        # base=current profile so the deep probe REFINES it: an introspected
+        # honest_context (from an instant-on seed) survives a probe failure
+        # instead of collapsing back to the 4096 floor.
         profile = await probe_model(
-            engine.provider, model_id=model, probed_at=datetime.now(UTC).isoformat()
+            engine.provider,
+            model_id=model,
+            probed_at=datetime.now(UTC).isoformat(),
+            base=engine.profile,
         )
     except Exception as exc:  # noqa: BLE001 — a probe failure must not kill the UI
         return f"[probe failed for {model!r}] {exc}"

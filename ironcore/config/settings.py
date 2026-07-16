@@ -68,6 +68,9 @@ class EnvelopeSettings(BaseModel):
     #: engine adapts automatically. Off = stay on floor defaults until /probe.
     auto_probe: bool = True
 
+    #: seed a usable profile from endpoint introspection in ~1s before the full probe runs
+    instant_seed: bool = True
+
 
 class Settings(BaseModel):
     provider: ProviderSettings = Field(default_factory=ProviderSettings)

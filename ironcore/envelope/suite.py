@@ -48,12 +48,15 @@ async def probe_model(
     envelope_dir: Path | None = None,
     probed_at: str,
     probes: list[Probe] | None = None,
+    base: CapabilityProfile | None = None,
 ) -> CapabilityProfile:
     """Measure ``model_id`` on ``provider`` and cache its profile.
 
     The caller stamps ``probed_at`` (this module is deterministic). Never
     aborts on a single probe failure — a failed measurement degrades that
-    field to its conservative floor (see ``run_probes``).
+    field to its conservative floor (see ``run_probes``). ``base`` (e.g. an
+    instant-on seed) is refined, not replaced: fields no probe measures keep
+    their base value instead of collapsing to the floor default.
     """
     return await probe_and_save(
         provider,
@@ -61,4 +64,5 @@ async def probe_model(
         model_id=model_id,
         envelope_dir=envelope_dir if envelope_dir is not None else default_envelope_dir(),
         probed_at=probed_at,
+        base=base,
     )

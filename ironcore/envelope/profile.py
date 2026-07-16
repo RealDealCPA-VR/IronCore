@@ -30,6 +30,9 @@ class CapabilityProfile(BaseModel):
 
     model_id: str
     probed_at: str | None = None  # ISO-8601; None = defaults, never probed
+    #: provenance of these values: "default" (floor), "seeded" (introspected,
+    #: provisional), "probed" (measured). Additive field — CONTRACTS.md §5.
+    source: str = "default"
 
     # Context
     context_window: int = 8192  # advertised

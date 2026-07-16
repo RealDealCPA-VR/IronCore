@@ -206,6 +206,7 @@ async def run_probes(
     else:
         profile = CapabilityProfile(model_id=model_id)
     profile.probed_at = probed_at
+    profile.source = "probed"  # a measured profile, whatever base it refined
 
     for result in await evaluate_probes(provider, probes):
         for path, value in result.scores.items():
@@ -250,12 +251,38 @@ def _rung_line(
     return f"  {marker} {rung:<15} floor (always works)"
 
 
+def _is_measured(profile: CapabilityProfile) -> bool:
+    """A profile carries real measurements once the deep probe has run: ``source``
+    is authoritative, and a stamped ``probed_at`` is honored for hand-built profiles.
+    A ``seeded`` profile is provisional (introspected, not measured) even though it,
+    too, has ``probed_at is None`` -- ``source`` is what distinguishes the two."""
+    return profile.source == "probed" or profile.probed_at is not None
+
+
+def _source_label(profile: CapabilityProfile) -> str:
+    """Honest provenance of the numbers so the user knows guesses from measurements."""
+    if profile.source == "seeded":
+        return "seeded (provisional - introspected, measuring in the background)"
+    if _is_measured(profile):
+        return "measured"
+    return "defaults (unprobed)"
+
+
 def _verdict(profile: CapabilityProfile, proto: str, edit: str) -> str:
-    if profile.probed_at is None:
-        return "unprobed - floor-conservative defaults (safe-slow until measured)"
-    if proto == TOOL_PROTOCOL_LADDER[-1] and edit == EDIT_FORMAT_LADDER[-1]:
-        return "floor-only - text protocol + whole-file edits (usable, slow but safe)"
-    return f"usable - {proto} tool calls, {edit} edits"
+    floor = proto == TOOL_PROTOCOL_LADDER[-1] and edit == EDIT_FORMAT_LADDER[-1]
+    if profile.source == "seeded":
+        # provisional-usable: reflects the SEED's ladders, not the floor. A seed with
+        # no native signal legitimately lands on the floor rungs -- say so honestly.
+        rungs = (
+            "floor protocol + whole-file edits" if floor
+            else f"{proto} tool calls, {edit} edits"
+        )
+        return f"seeded (provisional) - {rungs} (introspected, measuring in the background)"
+    if _is_measured(profile):
+        if floor:
+            return "floor-only - text protocol + whole-file edits (usable, slow but safe)"
+        return f"usable - {proto} tool calls, {edit} edits"
+    return "unprobed - floor-conservative defaults (safe-slow until measured)"
 
 
 def render_report_card(profile: CapabilityProfile) -> str:
@@ -268,13 +295,19 @@ def render_report_card(profile: CapabilityProfile) -> str:
     """
     proto = profile.recommended_tool_protocol()
     edit = profile.recommended_edit_format()
-    probed = profile.probed_at or "never (floor-conservative defaults)"
+    if profile.probed_at:
+        probed = profile.probed_at
+    elif profile.source == "seeded":
+        probed = "not yet - seeded from introspection, measuring in the background"
+    else:
+        probed = "never (floor-conservative defaults)"
     honest = profile.honest_context
     advertised = profile.context_window
     pct = f"{100 * honest / advertised:.0f}%" if advertised else "n/a"
 
     lines = [
         f"Model:            {profile.model_id}",
+        f"Source:           {_source_label(profile)}",
         f"Probed:           {probed}",
         f"Context:          honest {honest:,} / advertised {advertised:,} tokens ({pct})",
         "",

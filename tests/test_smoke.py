@@ -85,6 +85,34 @@ def test_doctor_warns_when_hosted_endpoint_and_network_tools(tmp_path, capsys):
     assert "leaves this machine" in out
 
 
+def test_doctor_reports_measured_profile(tmp_path, capsys):
+    # a probed profile cached under the injected envelope_dir -> the "measured" line
+    from ironcore.envelope.profile import CapabilityProfile
+
+    CapabilityProfile(
+        model_id="qwen3-coder:30b",  # the default provider model
+        source="probed",
+        probed_at="2026-07-15T00:00:00+00:00",
+        tool_protocols={"native": 0.97},
+        edit_formats={"unified_diff": 0.95},
+        honest_context=16384,
+    ).save(tmp_path / "envelopes")
+
+    assert _doctor(tmp_path, tmp_path / "nope.toml") == 0
+    out = capsys.readouterr().out
+    assert "qwen3-coder:30b measured" in out
+    assert "ctx: 16384" in out
+
+
+def test_doctor_unprobed_model_mentions_instant_seed(tmp_path, capsys):
+    # nothing cached -> the instant-seed wording, not the old "on floor defaults"
+    assert _doctor(tmp_path, tmp_path / "nope.toml") == 0
+    out = capsys.readouterr().out
+    assert "qwen3-coder:30b unprobed" in out
+    assert "instant-seeds" in out
+    assert out.isascii()
+
+
 def test_doctor_no_warning_for_localhost_or_network_tools_off(tmp_path, capsys):
     # localhost endpoint + network_tools on -> no warning
     user = tmp_path / "user.toml"
