@@ -1,0 +1,150 @@
+# Release — build, verify, and publish IronCore to PyPI on a version tag.
+#
+# Fires only when a tag like `v0.1.0` is pushed (SPEC §13: "CI publishes to PyPI on
+# tag"). The pipeline is three gated jobs:
+#
+#   build          -> `uv build` produces a pure-Python sdist + wheel; asserts the wheel
+#                     is `-py3-none-any` (the project has NO compiled deps and intends to
+#                     keep it that way), then uploads dist/ as an artifact.
+#   verify-install -> on ubuntu AND windows, installs the *built wheel* into a fresh venv
+#                     and runs `ironcore --version`. This is the real "does the package
+#                     install and its entry point run" gate — it uses the artifact, never
+#                     the checked-out source.
+#   publish        -> Trusted Publishing (OIDC) to PyPI. No API token is ever stored here.
+#
+# ─────────────────────────────────────────────────────────────────────────────────────
+# MAINTAINER SETUP REQUIRED — publishing is a NO-OP/FAILURE until this is done, BY DESIGN.
+# We deliberately never embed a PyPI token. Publishing uses PyPI Trusted Publishing:
+#   1. On PyPI, create (or claim) the `ironcore` project, then add a Trusted Publisher:
+#        Owner:        RealDealCPA-VR
+#        Repository:   IronCore
+#        Workflow:     release.yml
+#        Environment:  pypi
+#   2. In this repo's Settings → Environments, create an environment named `pypi`
+#      (optionally add required reviewers / a tag-name protection rule).
+# Until both exist, the `publish` job will fail its OIDC exchange. The `build` and
+# `verify-install` gates still run and prove the release is installable — publishing is
+# the only step that needs the one-time PyPI/GitHub configuration above.
+# ─────────────────────────────────────────────────────────────────────────────────────
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Least privilege by default; the publish job opts into `id-token: write` for OIDC.
+permissions:
+  contents: read
+
+# One release per tag; never cancel a publish that is already in flight.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv + Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      # Builds sdist + wheel into dist/. On a hatchling pure-Python project this yields
+      # ironcore-<ver>.tar.gz and ironcore-<ver>-py3-none-any.whl.
+      - name: Build
+        run: uv build
+
+      # Guard the project's headline property: no compiled deps => a pure-Python wheel.
+      # Fail if the expected -py3-none-any wheel is missing, or if any platform-specific
+      # wheel snuck in (which would mean a compiled dependency crept into the tree).
+      - name: Assert pure-Python wheel
+        shell: bash
+        run: |
+          ls -l dist/
+          if ! ls dist/*-py3-none-any.whl >/dev/null 2>&1; then
+            echo "ERROR: no pure-Python (-py3-none-any) wheel was produced"
+            exit 1
+          fi
+          if ls dist/*.whl | grep -v -- '-py3-none-any\.whl$'; then
+            echo "ERROR: a platform-specific wheel was produced (compiled dependency?)"
+            exit 1
+          fi
+          echo "OK: pure-Python wheel confirmed"
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  verify-install:
+    name: Verify install (${{ matrix.os }})
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install uv + Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # Install ONLY the built wheel into a throwaway venv and run the console entry
+      # point from it. `shell: bash` is available on all runners, so the glob and the
+      # bin/Scripts fallback work identically on Linux and Windows.
+      - name: Install wheel into a fresh venv and run the entry point
+        shell: bash
+        run: |
+          uv venv "$RUNNER_TEMP/relvenv"
+          uv pip install --python "$RUNNER_TEMP/relvenv" dist/*-py3-none-any.whl
+          BIN="$RUNNER_TEMP/relvenv/bin"
+          [ -d "$BIN" ] || BIN="$RUNNER_TEMP/relvenv/Scripts"
+          OUT="$("$BIN/ironcore" --version)"
+          echo "ironcore --version -> $OUT"
+          # Proves the packaged `ironcore = ironcore.cli:main` entry point runs from the
+          # wheel. Version is single-sourced from pyproject (SPEC §13), so we assert the
+          # prefix rather than pin a number that changes every release.
+          case "$OUT" in
+            "ironcore "*) echo "OK: entry point runs from the wheel" ;;
+            *) echo "ERROR: unexpected --version output: $OUT"; exit 1 ;;
+          esac
+
+  publish:
+    name: Publish to PyPI (Trusted Publishing)
+    needs: [build, verify-install]
+    runs-on: ubuntu-latest
+    # Redundant with the `v*` tag trigger, but makes the tag-only guard explicit so this
+    # job can never publish from a non-tag ref if the trigger is ever broadened.
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI Trusted Publishing — this is the ONLY secret path.
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # Trusted Publishing via OIDC — no username/password/API token anywhere. Requires
+      # the one-time PyPI + GitHub-environment setup described in the header comment;
+      # without it this step fails the OIDC exchange (by design, never a silent token).
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

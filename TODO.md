@@ -451,7 +451,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** valid fixtures load; 8 invalid fixtures produce pointed errors.
     **Verify:** `uv run --extra dev pytest tests/test_workflow_schema.py -q`
 
-- [~] **IC-903 · Orchestrator** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-903 · Orchestrator** *(done: fable-session, 2026-07-16 — WorkflowRunner: sequential phases, concurrent capped items (semaphore+ordered gather), per-item failure→null+note isolation, structural error→ok=False partial, apply_reduce (count/concat/list/markdown_table), WorkflowProgress callback; 16 tests)*
   - **Depends:** IC-901, IC-902 · **Spec:** SPEC §10
   - **Files:** `ironcore/workflows/engine.py`, `tests/test_workflow_engine.py` (new)
   - **Build:** execute phases sequentially, items concurrently (cap from settings); harness-
@@ -512,7 +512,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     cached installs, concurrency-cancel, badge already in README.
   - **Accept:** CI green on matrix with gates active. **Verify:** GitHub Actions run
 
-- [~] **IC-1102 · Packaging + release automation** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-1102 · Packaging + release automation** *(done: fable-session, 2026-07-16 — release.yml: tag v* → uv build (asserts pure-py wheel) → verify-install (ubuntu+windows, `ironcore --version` from the wheel) → PyPI trusted-publishing (OIDC, no token); dry-run verified ironcore-0.1.0-py3-none-any.whl installs+runs)*
   - **Depends:** IC-701 · **Spec:** SPEC §13
   - **Files:** `.github/workflows/release.yml` (new), `pyproject.toml`, `README.md`
   - **Build:** tag-triggered build + PyPI publish (trusted publishing); `uv tool install`
@@ -520,7 +520,7 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
   - **Accept:** dry-run release produces installable wheel; `ironcore --version` correct from
     wheel. **Verify:** release workflow dry-run
 
-- [~] **IC-1103 · Offline e2e demo** *(claimed: fable-session, 2026-07-16)*
+- [x] **IC-1103 · Offline e2e demo** *(done: fable-session, 2026-07-16 — `python -m demo` narrates a real scripted session (read→plan→edit_file→verify-green→done) via core.events, hermetic tempdir, run_demo(emit=) injectable; 7 tests)*
   - **Depends:** IC-701..704 · **Spec:** SPEC §14
   - **Files:** `demo/` (new), `tests/test_demo.py` (new)
   - **Build:** scripted MockProvider session (fixture transcript): user asks for a small
