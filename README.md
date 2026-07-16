@@ -2,7 +2,7 @@
 
 # ⚙️ IronCore
 
-**A frontier-grade terminal coding agent for open-source models.**
+**The terminal coding agent that molds itself to *your* local model.**
 
 *The intelligence is in the loop, not just the weights.*
 
@@ -10,51 +10,61 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Status: v0.1](https://img.shields.io/badge/status-v0.1-brightgreen.svg)](CHANGELOG.md)
+[![Tests: 1229](https://img.shields.io/badge/tests-1229%20offline-brightgreen.svg)](#built--proven)
 
 </div>
 
 ---
 
-Codex and Claude Code proved what a coding agent can be — when a frontier model is driving.
-Point the same harness at a 7B–70B open model and it falls apart: malformed tool calls,
-diffs that don't apply, goals forgotten by turn twelve.
+Codex and Claude Code proved what a coding agent can be — *when a frontier model is driving.*
+Point the same harness at a 7B–70B open model and it buckles: malformed tool calls, diffs that
+don't apply, goals forgotten by turn twelve.
 
-**IronCore starts from the opposite assumption: the model is limited, and that's fine.**
-Every job open models are unreliable at — remembering state, formatting protocols, applying
-patches, knowing when to stop — moves into deterministic code. What's left for the model is
-the thing it's actually good at: local reasoning over a well-framed context. The result is a
-terminal agent that gets frontier-*shaped* behavior out of the intelligence you actually have,
-running on hardware you actually own.
+**IronCore starts from the opposite assumption: your model is limited, and that's fine.** Every
+job open models are unreliable at — remembering state, formatting protocols, applying patches,
+knowing when to stop — moves into deterministic code. What's left for the model is the one
+thing it's genuinely good at: local reasoning over a well-framed context. The result is a
+terminal agent that squeezes frontier-*shaped* behavior out of the intelligence you actually
+have, on hardware you actually own — no API keys, no data leaving the box.
 
-## How it works: the Capability Envelope
+## It measures your model, then adapts to it
 
-IronCore never assumes what a model can do — it **measures**. On first use of any model, a
-~2-minute probe suite scores it and caches a capability profile:
+Most harnesses *assume* a model can do native tool calls and clean unified diffs, then break
+when it can't. IronCore assumes nothing. **The first time you point it at a model, it probes
+it** — a short battery that scores what the model can actually do, caches a profile under
+`~/.ironcore/envelopes/`, and reshapes the whole loop around the result. It runs in the
+background, so you start working immediately while the measurement lands and hot-swaps in.
 
-| Probe | Measures |
-|---|---|
-| `CTX-HONESTY` | the context depth where retrieval actually stays reliable (not the advertised window) |
-| `RETENTION` | how many turns before an instruction from turn 1 gets dropped |
-| `TOOL-FORM` | tool-call reliability per wire protocol |
-| `JSON-STRICT` | schema-conforming output under pressure |
-| `EDIT-FORMAT` | which edit format the model can emit that actually *applies* |
-| `CODE-SMOKE` | usability floor: small function + failing test → green |
+| It measures… | …by | so it can pick |
+|---|---|---|
+| **honest context** | needle-retrieval at rising depths (not the advertised window) | a context budget that won't silently truncate |
+| **instruction retention** | a constraint set on turn 1, checked at turns 3/6/9/12 | how often to re-anchor the goal & constraints |
+| **tool-call reliability** | N trials per wire protocol | native calls, strict JSON, or the IRONCALL text floor |
+| **edit-format reliability** | emit an edit; does the harness patcher *apply* it? | unified diff, search/replace, or whole-file |
+| **JSON adherence** | schema-conforming output under distraction | how hard to lean on structured output |
+| **code-smoke** | tiny function + failing test → green | the usability floor |
 
-The harness then adapts along **downgrade ladders** instead of failing:
+Then it walks **downgrade ladders** instead of failing — always landing on a format the model
+can actually produce:
 
 ```
-tool calls:  native function-calling → strict JSON → IRONCALL text protocol (+ repair loop)
-file edits:  unified diff → search/replace blocks → whole-file rewrite
-context:     budgeted composition, working-set files, honest-window limits
-memory:      anchor turns — goal & constraints re-injected every N turns, N from measured retention
+tool calls:  native function-calling  →  strict JSON  →  IRONCALL text protocol (+ repair loop)
+file edits:  unified diff  →  search/replace blocks  →  whole-file rewrite
+context:     budgeted composition against the MEASURED honest window, working-set files
+anchoring:   goal + constraints re-injected every N turns — N from measured retention
 ```
 
-And because the harness owns all state, every model call is nearly stateless: the model never
-has to *remember* — IronCore **re-presents**. Small models drift; IronCore doesn't let them.
+A capable 30B gets native tool calls and unified diffs. A scrappy 7B gets the IRONCALL text
+protocol, whole-file edits, and an anchor every other turn — and *still finishes the task*.
+Run `/envelope` to see the report card; run `/probe` anytime to re-measure. **You point; it
+molds.**
+
+> Because the harness owns all state, every model call is nearly stateless: the model never has
+> to *remember* — IronCore **re-presents**. Small models drift; IronCore doesn't let them.
 
 ## Safety, baked in — not bolted on
 
-Four operating modes, cycled with **Shift+Tab**:
+Four operating modes, cycled live with **Shift+Tab**:
 
 | Mode | Reads | File edits | Commands | Network |
 |---|---|---|---|---|
@@ -63,118 +73,132 @@ Four operating modes, cycled with **Shift+Tab**:
 | ✏️ **Accept Edits** | ✅ | ✅ | ask | ask |
 | 🚀 **Auto** | ✅ | ✅ | ✅ sandboxed | ask |
 
-- **No tool executes without a policy decision** — there is no other path to a tool.
-- **Network is never auto-allowed**, even in Auto mode.
-- Workspace path jail, command deny-lists, secret redaction, prompt-injection guards on tool
-  output (open models are *more* injectable — IronCore treats every tool result as untrusted).
-- Git snapshot **undo** for every change set, and an append-only audit log of every action.
+- **No tool executes without a policy decision** — there is no other path to a tool, and the
+  engine literally can't construct one.
+- **Network is never auto-allowed**, even in Auto. Plan mode *cannot* mutate — the gate denies
+  it, so a confused (or scheming) model simply can't act.
+- Workspace **path jail**, command **deny-lists** (in every mode), **secret redaction** before
+  anything reaches the model or the logs, and **prompt-injection guards** on every tool result
+  (open models are *more* injectable — IronCore treats tool output as untrusted data).
+- Byte-exact **git-snapshot undo** for every change set, and an "is-it-really-done?"
+  **verification loop** — IronCore refuses to report unverified work as done.
 
-## Slash commands
+## The interactive terminal app
+
+A streaming **Textual** UI, and a thin client over the engine's event stream — the engine
+itself never prints or prompts.
+
+- Live **streaming transcript** with tool cards (name · risk chip · gate decision · result).
+- An **approval modal** with a colored **diff viewer** — see the exact edit before it lands.
+- A **slash-command palette** with completion, and **resumable sessions** (`--resume`).
 
 | Command | What it does |
 |---|---|
+| `/probe` · `/envelope` | Measure the live model and adapt to it · show its capability report card |
 | `/goal <objective>` | Set a persistent objective — IronCore won't call itself done until a stop-condition check passes |
+| `/workflow <name>` | Deterministic multi-agent orchestration (fan-out → verify → reduce) — the *harness* drives the flow, never the model |
+| `/model` · `/init` | List/switch models · scan the repo into `IRONCORE.md` project memory |
 | `/loop [5m] <prompt>` | Run a prompt on an interval, or let the agent self-pace |
-| `/workflow <name>` | Deterministic multi-agent orchestration (fan-out, pipeline, verify) — the *harness* controls the flow, never the model |
-| `/mode` | Cycle Plan → Manual → Accept Edits → Auto |
-| `/model` | Switch models; list what your endpoint serves |
-| `/envelope` · `/probe` | Show / re-measure the current model's capability profile |
-| `/init` | Scan the repo and generate `IRONCORE.md` project memory |
-| `/compact` · `/undo` · `/review` · `/memory` · `/help` | The usual suspects, done right |
+| `/undo` · `/redo` · `/compact` · `/review` · `/memory` | Snapshot undo · history compaction · diff review · project memory |
 
 ## Works with what you run
 
-One OpenAI-compatible client covers **Ollama, vLLM, llama.cpp server, LM Studio, OpenRouter,
-Together, and Groq** — plus native Ollama extras (model discovery, real context-length
-introspection). Optional per-role routing: let a 70B plan while a 7B executes, or the reverse.
+Built for **Ollama** first — it keeps your model resident between turns (`keep_alive`, no
+reload stalls). One OpenAI-compatible client also covers **vLLM, llama.cpp server, LM Studio,
+OpenRouter, Together, and Groq**. Configure it in one TOML file:
+
+```toml
+# ~/.ironcore/config.toml  (or <project>/.ironcore/config.toml)
+[provider]
+base_url = "http://localhost:11434/v1"
+model    = "qwen3-coder:30b"
+
+[safety]
+mode = "manual"          # plan | manual | accept-edits | auto
+```
 
 ## Quickstart
 
-> ✅ **v0.1 — feature-complete.** Every phase of the build plan is shipped, adversarially
-> validated, and proof-tested end-to-end (**1223 tests**, all offline). What's in the box:
-> the **interactive terminal app** — a streaming Textual UI with live tool cards, an approval
-> modal with a colored diff viewer, Shift+Tab mode switching, a slash-command palette, and
-> resumable sessions; the full set of **slash commands** (`/goal`, `/loop`, `/model`,
-> `/init`, `/compact`, `/undo`, `/review`, `/memory`, `/workflow`, …); the full **turn
-> engine** (compose → call → parse → gate → execute → observe → verify → done) with
-> malformed-output repair, an evidence-based "done" that refuses to lie about unverified
-> work, budget/runaway protection, and micro-stepping + history compaction; the complete
-> **safety kernel** (mode & command policy, path jail, secret redaction, injection guard,
-> git-snapshot undo, approvals); the complete **tool suite** (read/write/edit with a fuzzy
-> patcher, cross-platform shell, search, gated network fetch); the **capability envelope** —
-> measured probes that pick the tool protocol, edit format, and context budget per model,
-> including the IRONCALL floor protocol for weak models; **deterministic multi-agent
-> workflows** (fanout/foreach/reduce with three built-ins) whose subagents inherit the
-> session mode; and the full **provider layer** (streaming OpenAI-compatible client, Ollama
-> introspection, role routing). Point it at a local Ollama and drive real coding work through
-> a fully gated loop. See the [CHANGELOG](CHANGELOG.md), or run `python -m demo` for a fully
-> offline walkthrough.
-
 ```bash
 # install (Python 3.11+) — once published to PyPI:
-pip install ironcore     # or:  uv tool install ironcore  /  pipx install ironcore
+pip install ironcore        # or:  uv tool install ironcore  /  pipx install ironcore
 # latest from source:
 pip install git+https://github.com/RealDealCPA-VR/IronCore.git
 
-# check your environment (finds your local Ollama if it's running)
-ironcore doctor
+ironcore doctor             # checks python, config, your endpoint, and probe status
+ironcore                    # launch the TUI (auto-probes your model on first run)
+ironcore --resume           # pick up a past session
 
-# launch the interactive TUI (point it at a local model via ~/.ironcore/config.toml)
-ironcore                 # resume a past session with:  ironcore --resume
+python -m demo              # a fully offline, no-model walkthrough of a real session
+```
 
-# development setup
+Developing on IronCore itself:
+
+```bash
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q     # everything runs offline — no model, no network
+uv run --extra dev pytest -q   # 1229 tests, all offline — no model, no network
 ```
 
 ## Architecture at a glance
 
 ```mermaid
 graph TD
-    TUI["TUI (Textual)<br/>streaming · tool cards · Shift+Tab modes"] -->|events + approvals| CORE
-    CORE["Turn Engine<br/>compose → call → parse → gate → execute → verify"] --> SAFETY
-    CORE --> ENV["Capability Envelope<br/>probes · profiles · adapter ladders"]
-    CORE --> TOOLS["Tools<br/>read · edit · shell · search"]
-    CORE --> PROV["Providers<br/>OpenAI-compatible · Ollama"]
-    SAFETY["Safety Kernel<br/>modes · policy · jail · audit"]
+    TUI["TUI (Textual)<br/>streaming · tool cards · approval + diff · Shift+Tab modes"] -->|events + approvals| CORE
+    CORE["Turn Engine<br/>compose → call → parse → gate → execute → observe → verify → done"] --> SAFETY
+    CORE --> ENV["Capability Envelope<br/>probe · profile · adapter ladders"]
+    CORE --> TOOLS["Tools<br/>read · edit (fuzzy patcher) · shell · search · fetch"]
+    CORE --> PROV["Providers<br/>Ollama · OpenAI-compatible"]
+    CORE --> WF["Workflows<br/>fan-out · foreach · reduce (subagents)"]
+    SAFETY["Safety Kernel<br/>modes · policy · jail · redaction · injection · undo · audit"]
     TOOLS --> SAFETY
+    WF --> CORE
 ```
 
-Strict dependency rule: the safety kernel imports nothing; everything imports the safety
-kernel. The TUI is a thin client over an event stream — the engine never prints, never prompts.
+Strict dependency rule: the **safety kernel imports nothing; everything imports it.** The TUI
+is a thin client over an event stream — swap it for a headless runner and the engine doesn't
+notice.
 
-## Project status & roadmap
+## Built & proven
 
-All eleven build phases are shipped (v0.1). Each was validated the same way: a full offline
-test suite, an independent adversarial review with execution-verified probes, and real proof
-tests against files, subprocesses, git, and the headless UI — evidence, not claims.
+All eleven build phases are shipped (**v0.1**). Every phase was validated the same way: a full
+offline test suite, an *independent adversarial review* that verifies findings by execution,
+and real proof tests against files, subprocesses, git, and the headless UI — **evidence, not
+claims.** Multiple real bugs (a redaction ReDoS, a false-"done", a compaction secret-leak, a
+Plan-mode workflow escape) were caught and fixed exactly this way.
 
-| Phase | What lands | Status |
-|---|---|---|
-| 0 | Scaffold, safety kernel, envelope ladders, CI | ✅ shipped |
-| 1 | Foundation: config hardening, session state, append-only audit trail, mock failure injection | ✅ shipped · 2026-07-15 |
-| 2 | Providers: streaming OpenAI-compat client (fragment-safe tool calls, retries, key redaction), Ollama extras, registry + role routing, capability detection | ✅ shipped · 2026-07-15 · 195 tests, 7 validator findings fixed, real-server proofs |
-| 3 | Tool suite: read/list/glob/grep, fuzzy patcher + jailed atomic writes, cross-platform shell (process-tree kill), gated network fetch, registry assembly | ✅ shipped · 2026-07-15 |
-| 4 | Safety kernel: path jail, command policy, approval broker, secret redaction, git-snapshot undo, injection guard | ✅ shipped · 2026-07-15 · 753 tests, ReDoS blocker fixed, real-fs/git/subprocess proofs |
-| 5 | Turn engine: context composer, gated state machine, repair loops, verification loop, budgets, micro-stepping + compaction | ✅ shipped · 2026-07-16 |
-| 6 | Capability envelope: probe runner + CTX/RETENTION/TOOL-FORM/JSON/EDIT/CODE-SMOKE probes, adapter wiring, IRONCALL protocol, sampling | ✅ shipped · 2026-07-16 · 989 tests, 2 blockers fixed (compaction redaction leak, false-success stop), real-engine proofs |
-| 7 | Textual TUI: streaming transcript + tool cards, Shift+Tab modes, approval modal + diff viewer, slash palette, session picker + resume | ✅ shipped · 2026-07-16 |
-| 8 | Slash commands: /model, /init, /goal, /loop, /compact, /undo, /redo, /review, /memory | ✅ shipped · 2026-07-16 · 1099 tests, validator SHIP (2 majors fixed), real-app + real-git proofs |
-| 9 | Workflows: subagent runner, YAML schema, orchestrator, /workflow command + progress UI, built-ins (review/migrate/explain-repo) | ✅ shipped · 2026-07-16 |
-| 10 | Memory: session store + resume, handoff lifecycle, IRONCORE.md injection | ✅ shipped · 2026-07-16 |
-| 11 | Distribution: CI coverage gate, packaging + PyPI release automation, offline demo, **v0.1** | ✅ shipped · 2026-07-16 · 1223 tests, validator FIX-FIRST→clean (1 blocker + 2 majors fixed), wheel + real-workflow proofs |
+- 📖 [`docs/SPEC.md`](docs/SPEC.md) — the full specification · 🏗️ [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers & dependency rules
+- 🛡️ [`docs/SAFETY.md`](docs/SAFETY.md) — threat model & controls · 🧠 [`docs/MODELS.md`](docs/MODELS.md) — the envelope in depth
+- 📝 [`CHANGELOG.md`](CHANGELOG.md) — what's in v0.1
 
-- 📖 [`docs/SPEC.md`](docs/SPEC.md) — the full specification
-- 🏗️ [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers, module map, dependency rules
-- 🤝 [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md) — hand-off / pick-up protocol for contributors
-- ✅ [`TODO.md`](TODO.md) — the build plan: every task sized for one pass
+## 🌙 Moonshots — where we're aiming next
+
+v0.1 molds to your model. These are the bets that would make it mold *deeper*:
+
+- **Instant-on profiling.** Seed a usable profile in ~1 second from the endpoint's own
+  introspection (Ollama `/api/show` context window + capability detection), then deepen the
+  measurement in the background — no cold-probe wait at all.
+- **Guided decoding.** Drive the strict-JSON rung with real server-side grammars
+  (`response_format` / GBNF / vLLM guided decoding) so a mid-tier model gets *guaranteed*
+  well-formed tool calls, not best-effort ones.
+- **A model per role, each measured.** Route planning to a 70B and execution to a fast 7B (or
+  the reverse), with a separate capability envelope per role — pick the right brain for each
+  step of the loop.
+- **Live model swaps.** Re-point the running provider and re-probe on `/model <name>` mid-session, with an on-disk envelope cache that remembers every model you've measured.
+- **Model-aware tokenization.** Replace the universal `chars/4` estimate with a per-model
+  measured chars-per-token ratio, so the budget respects the *exact* window the probe found.
+- **Best-of-N escape hatches.** When a weak model dead-ends on a step that has a mechanical
+  verifier (patch applies / test passes), resample and race candidates instead of failing.
+- **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
+  entry-point plugins — extend IronCore without touching core.
+- **Beyond text.** Vision for screenshots/diagrams, MCP tool servers, and a self-improvement
+  loop that learns each model's quirks across sessions and tunes the ladders automatically.
 
 ## Contributing (humans *and* agents)
 
 IronCore is built the way it works: state lives in the repo, not in anyone's head. Start with
-[`AGENTS.md`](AGENTS.md), claim a task in [`TODO.md`](TODO.md), follow the pickup ritual in
-[`docs/PROTOCOLS.md`](docs/PROTOCOLS.md), and leave a handoff block when you stop. Interfaces
-in [`docs/CONTRACTS.md`](docs/CONTRACTS.md) are frozen — change the contract first or don't.
+[`AGENTS.md`](AGENTS.md), follow the pickup ritual in [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md),
+and leave a handoff block when you stop. Interfaces in [`docs/CONTRACTS.md`](docs/CONTRACTS.md)
+are frozen — change the contract first, or don't.
 
 ## License
 
