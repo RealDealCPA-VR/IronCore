@@ -182,8 +182,6 @@ Plan-mode workflow escape) were caught and fixed exactly this way.
 v0.1 molds to your model — instantly (above), and the strict-JSON rung is now real
 server-side guided decoding (above). These are the bets that would make it mold *deeper*:
 
-- **Best-of-N escape hatches.** When a weak model dead-ends on a step that has a mechanical
-  verifier (patch applies / test passes), resample and race candidates instead of failing.
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
   entry-point plugins — extend IronCore without touching core.
 - **Beyond text.** Vision for screenshots/diagrams, MCP tool servers, and a self-improvement
@@ -204,6 +202,11 @@ server-side guided decoding (above). These are the bets that would make it mold 
   summarizer — each with *its own* capability envelope from the shared cache, so every routed
   call uses that model's measured wire protocol, context window, and sampling (floor defaults,
   honestly, until a role model is measured; `/envelope` shows per-role status).
+- **Best-of-N escape hatches.** When the model dead-ends at a seam with a *mechanical*
+  verifier — a tool call that won't parse, a patch that won't apply — the engine resamples
+  up to `[engine] best_of_n` candidates at raised temperature and races them: the first one
+  that parses / applies in-memory re-enters the normal safety gate and executes; losers are
+  discarded, every candidate is charged to the turn budget. Off by default (`best_of_n = 1`).
 
 ## Contributing (humans *and* agents)
 

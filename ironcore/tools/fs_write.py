@@ -245,7 +245,16 @@ class EditFileTool(_FsWriteTool):
         result = _APPLIERS[fmt](original, edit)
         if not result.ok:
             # NOTHING was written; the reason is mechanical, for the repair loop.
-            return ToolResult(ok=False, output="", error=result.reason)
+            # `data` (harness-only, CONTRACTS §3) marks this as a PATCH failure —
+            # the apply itself failed against readable current text, so a raced
+            # best-of-N candidate could fix it (MS-4). Missing-file / binary /
+            # jail refusals above never carry it and never trigger resampling.
+            return ToolResult(
+                ok=False,
+                output="",
+                error=result.reason,
+                data={"patch_failure": True, "format": fmt},
+            )
         if result.no_op:
             return ToolResult(
                 ok=True,

@@ -625,6 +625,45 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/test_engine_roles.py tests/test_cmd_lifecycle.py tests/test_envelope_wiring.py
     tests/test_cmd_workflow.py -q` + full suite + ruff
 
+- [x] **MS-4 · Best-of-N escape hatches** *(done: fable-ms4, 2026-07-17 — resample-and-race
+  at the two mechanically-verified seams: parse-seam GIVE_UP + edit-seam `patch_failure`
+  both rescued by raced candidates through the UNCHANGED gate; `[engine] best_of_n`
+  default 1 = off; 1382 tests green (24 new), ruff clean; proof: a bad-diff turn ended
+  `done` with the candidate's edit on disk, and the default-config rerun made zero extra
+  provider calls with the file byte-unchanged)*
+  - **Depends:** MS-3, IC-503, IC-607 · **Spec:** README Moonshots; CONTRACTS §3/§4/§7;
+    docs/MODELS.md §6
+  - **Files:** `ironcore/core/resample.py` (new), `ironcore/core/engine.py`,
+    `ironcore/core/events.py`, `ironcore/config/settings.py`, `ironcore/tools/fs_write.py`,
+    `ironcore/tui/app.py`, `docs/CONTRACTS.md`, `README.md`, `tests/test_resample.py` (new),
+    `tests/test_engine_resample.py` (new), `tests/test_config.py`
+  - **Build:** resample-and-race at the two seams that already have a MECHANICAL verifier.
+    NEW `core/resample.py`: `Candidate` + `generate_candidate` (one `provider.complete`
+    against the MS-3 ACTIVE (provider, profile) binding, parsed per rung — native
+    tool_calls / `ironcall.parse` / `guided.parse_guided_tool_call` with `response_format`
+    forwarded; `ProviderError` becomes a failed candidate, never a raise),
+    `verify_tool_candidate` (every call names a registered tool), `verify_edit_candidate`
+    (exactly one `edit_file` call on the SAME path, builtin format only, pure applier
+    passes in-memory — nothing written), `reissue_edit_prompt` + `render_call_echo`.
+    Engine: per-turn `resamples_left = best_of_n - 1` shared across both seams, each
+    candidate gated by `budget.should_continue()` and charged via `record_call`; parse
+    seam = the `RepairAction.GIVE_UP` branch (first verified candidate's calls fall
+    through to the UNCHANGED gate; exhausted → `stop_reason="error"` as today); edit seam
+    = the for-call loop becomes a WORK QUEUE and a `patch_failure` edit races candidates
+    sampled at `resolve_sampling(kind="edit", attempt=k)` — the winner re-enters the queue
+    FRONT (gate/snapshot/execute path unchanged; MANUAL still asks). Losers never enter
+    history. `fs_write` failure branch gains `data={'patch_failure': True, 'format': fmt}`
+    (the discriminator; missing-file/binary/jail refusals never resample). Additive
+    `ResampleProgress(turn_id, seam, attempt, total)` event + `[engine] best_of_n`
+    (default 1 = off, 1..5). TUI renders a `[resampling k/n]` note.
+  - **Accept:** default config makes zero extra provider calls (existing 1358-test suite
+    is the regression harness); a bad-diff turn is rescued on disk by a raced candidate
+    through the real gate; exhaustion behaves exactly like today; parse-seam GIVE_UP
+    rescued to a completed turn; budget stops the race early; MANUAL deny still blocks the
+    winner; losers absent from `_conversation`. **Verify:** `uv run --extra dev pytest
+    tests/test_resample.py tests/test_engine_resample.py tests/test_config.py
+    tests/tools/test_patch.py tests/test_engine.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map

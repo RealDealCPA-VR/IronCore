@@ -110,6 +110,27 @@ def test_invalid_mode_from_env_rejected(tmp_path: Path):
         )
 
 
+def test_engine_best_of_n_defaults_to_one_disabled(tmp_path: Path):
+    settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
+    assert settings.engine.best_of_n == 1  # resampling off by default
+
+
+def test_engine_best_of_n_parses_from_toml(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text("[engine]\nbest_of_n = 3\n")
+    settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
+    assert settings.engine.best_of_n == 3
+
+
+def test_engine_best_of_n_rejects_out_of_range_values(tmp_path: Path):
+    for bad in (0, 6):
+        user = tmp_path / "user.toml"
+        user.write_text(f"[engine]\nbest_of_n = {bad}\n")
+        with pytest.raises(ConfigError) as excinfo:
+            Settings.load(project_dir=tmp_path, user_config=user, env={})
+        assert "engine.best_of_n" in str(excinfo.value)
+
+
 def test_instant_seed_defaults_true(tmp_path: Path):
     settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
     assert settings.envelope.instant_seed is True

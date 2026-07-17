@@ -74,6 +74,7 @@ from ironcore.core.engine import TurnEngine
 from ironcore.core.events import (
     ApprovalRequired,
     Event,
+    ResampleProgress,
     TextDelta,
     ToolCallFinished,
     ToolCallRequested,
@@ -484,6 +485,8 @@ class IronCoreApp(App):
             card = t.card(event.call.id)
             if card is not None:
                 card.set_finished(event.result)
+        elif isinstance(event, ResampleProgress):
+            await t.add_note(f"[resampling {event.attempt}/{event.total}]")
         elif isinstance(event, TurnCompleted):
             t.end_assistant()
             self.status_bar.record_turn(event.usage)

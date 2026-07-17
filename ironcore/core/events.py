@@ -66,6 +66,17 @@ class TurnError:
     data: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class ResampleProgress:
+    """Additive (MS-4): emitted while racing best-of-N candidates at a
+    mechanically-verified seam. Front ends may ignore it."""
+
+    turn_id: str
+    seam: str  # "parse" | "edit"
+    attempt: int  # 1-based candidate number within this seam encounter
+    total: int  # candidates budgeted when the race started
+
+
 Event = (
     TurnStarted
     | TextDelta
@@ -74,4 +85,5 @@ Event = (
     | ToolCallFinished
     | TurnCompleted
     | TurnError
+    | ResampleProgress
 )

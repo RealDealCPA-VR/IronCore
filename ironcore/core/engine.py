@@ -50,6 +50,7 @@ from ironcore.core.composer import RESPONSE_HEADROOM_SHARE, compose, load_projec
 from ironcore.core.events import (
     ApprovalRequired,
     Event,
+    ResampleProgress,
     TextDelta,
     ToolCallFinished,
     ToolCallRequested,
@@ -65,6 +66,13 @@ from ironcore.core.protocols import (
     Verifier,
 )
 from ironcore.core.repair import LadderRepairPolicy, frame_error
+from ironcore.core.resample import (
+    generate_candidate,
+    reissue_edit_prompt,
+    render_call_echo,
+    verify_edit_candidate,
+    verify_tool_candidate,
+)
 from ironcore.core.sampling import resolve_sampling
 from ironcore.core.state import SessionState, state_path
 from ironcore.core.steps import PlanStepPlanner
@@ -246,6 +254,11 @@ class TurnEngine:
         loop_role = "planner" if self.mode is Mode.PLAN else "coder"
         provider, profile = self._binding(loop_role)
         protocol = profile.recommended_tool_protocol()
+        # Best-of-N escape hatches (MS-4): the per-turn candidate budget SHARED
+        # across both mechanically-verified seams (parse + edit). best_of_n=1
+        # (the default) makes both resample branches dead code — zero extra
+        # provider calls, byte-identical turns.
+        resamples_left = max(0, self.settings.engine.best_of_n - 1)
         repair_attempt = 0
         any_executed = False
         any_denied = False
@@ -394,18 +407,83 @@ class TurnEngine:
                     )
                     yield TextDelta(turn_id=turn_id, text=f"\n[repair] {repair_error}\n")
                     if action == RepairAction.GIVE_UP:
-                        stop_reason = "error"
-                        break
-                    if action == RepairAction.LADDER_DOWN:
-                        protocol = "text_protocol"
-                    repair_attempt += 1
-                    self._conversation.append(
-                        Message(
-                            role="user",
-                            content=frame_error(repair_error, repair_raw, protocol),
+                        # Parse-seam escape hatch (MS-4): before surfacing
+                        # stop_reason="error", race fresh candidates at raised
+                        # temperature against the ACTIVE (provider, profile)
+                        # binding. The first candidate whose calls ALL name
+                        # registered tools wins and falls through to the
+                        # UNCHANGED gate below; losers never enter history.
+                        rescued: list[ToolCall] | None = None
+                        if resamples_left > 0:
+                            known = {t.name for t in self.tools.all()}
+                            feedback = Message(
+                                role="user",
+                                content=frame_error(repair_error, repair_raw, protocol),
+                            )
+                            total = resamples_left
+                            attempt = 0
+                            while resamples_left > 0 and self.budget.should_continue():
+                                attempt += 1
+                                resamples_left -= 1
+                                yield ResampleProgress(
+                                    turn_id=turn_id, seam="parse", attempt=attempt, total=total
+                                )
+                                r_sampling = resolve_sampling(
+                                    profile, kind="tool", attempt=repair_attempt + attempt
+                                )
+                                r_sampling = replace(
+                                    r_sampling, max_tokens=self._headroom_tokens(profile)
+                                )
+                                candidate = await generate_candidate(
+                                    provider,
+                                    [*messages, feedback],
+                                    protocol=protocol,
+                                    tool_specs=tool_specs,
+                                    sampling=r_sampling,
+                                    response_format=response_format,
+                                )
+                                self.budget.record_call(candidate.tokens)
+                                if verify_tool_candidate(candidate, known):
+                                    rescued = candidate.calls
+                                    # only the WINNER's assistant message enters
+                                    # history (context hygiene on weak models).
+                                    self._conversation.append(
+                                        Message(
+                                            role="assistant",
+                                            content=candidate.text,
+                                            tool_calls=(
+                                                list(candidate.calls)
+                                                if not text_frame
+                                                else []
+                                            ),
+                                        )
+                                    )
+                                    yield TextDelta(
+                                        turn_id=turn_id,
+                                        text=f"\n[resample] candidate {attempt}/{total} "
+                                        "parsed cleanly\n",
+                                    )
+                                    break
+                            if rescued is None:
+                                yield TextDelta(
+                                    turn_id=turn_id,
+                                    text="\n[resample] no candidate parsed cleanly\n",
+                                )
+                        if rescued is None:
+                            stop_reason = "error"
+                            break
+                        calls = rescued  # fall through to GATE with the winner
+                    else:
+                        if action == RepairAction.LADDER_DOWN:
+                            protocol = "text_protocol"
+                        repair_attempt += 1
+                        self._conversation.append(
+                            Message(
+                                role="user",
+                                content=frame_error(repair_error, repair_raw, protocol),
+                            )
                         )
-                    )
-                    continue
+                        continue
 
                 # -- no tool calls → the model wants to stop -----------------
                 if not calls:
@@ -440,8 +518,14 @@ class TurnEngine:
                     break
 
                 # -- GATE + EXECUTE each requested call -----------------------
+                # A WORK QUEUE rather than a plain for-loop (MS-4): a raced
+                # edit-candidate winner re-enters at the FRONT and flows through
+                # this identical gate + snapshot + execute path — no bypass is
+                # possible by construction.
                 loop_stop = False
-                for call in calls:
+                queue: list[ToolCall] = list(calls)
+                while queue:
+                    call = queue.pop(0)
                     reason = self.budget.note_tool(call.name, call.arguments)
                     if reason is not None:
                         stop_reason = reason
@@ -505,10 +589,89 @@ class TurnEngine:
                     raw_output = result.output or ""
                     self._pending_flag = detect_injection(raw_output)
                     wrapped = wrap_untrusted(self._truncate(raw_output), source=tool.name)
-                    self._conversation.append(
-                        self._tool_message(call, wrapped, text_frame, ok=result.ok)
-                    )
+                    fed_back = self._tool_message(call, wrapped, text_frame, ok=result.ok)
+                    self._conversation.append(fed_back)
                     yield ToolCallFinished(turn_id=turn_id, call=call, result=result)
+
+                    # Edit-seam escape hatch (MS-4): a PATCH failure — the apply
+                    # itself failed against readable text (`patch_failure`, set
+                    # only by edit_file's apply branch) — races candidates whose
+                    # patch must apply IN MEMORY against the file's current
+                    # text. The winner is queued at the front: it goes through
+                    # budget.note_tool, the gate (MANUAL still asks), snapshot,
+                    # and the real tool exactly like any model-issued call.
+                    if (
+                        tool.name == "edit_file"
+                        and not result.ok
+                        and result.data.get("patch_failure")
+                        and resamples_left > 0
+                    ):
+                        current_text = self._current_file_text(call.arguments.get("path"))
+                        if current_text is not None:
+                            winner = None
+                            total = resamples_left
+                            attempt = 0
+                            failing_echo = Message(
+                                role="assistant",
+                                content=render_call_echo(call, protocol),
+                                tool_calls=[] if text_frame else [call],
+                            )
+                            reissue = Message(
+                                role="user",
+                                content=reissue_edit_prompt(call, result.error or ""),
+                            )
+                            while resamples_left > 0 and self.budget.should_continue():
+                                attempt += 1
+                                resamples_left -= 1
+                                yield ResampleProgress(
+                                    turn_id=turn_id, seam="edit", attempt=attempt, total=total
+                                )
+                                r_sampling = resolve_sampling(
+                                    profile, kind="edit", attempt=attempt
+                                )
+                                r_sampling = replace(
+                                    r_sampling, max_tokens=self._headroom_tokens(profile)
+                                )
+                                candidate = await generate_candidate(
+                                    provider,
+                                    [*messages, failing_echo, fed_back, reissue],
+                                    protocol=protocol,
+                                    tool_specs=tool_specs,
+                                    sampling=r_sampling,
+                                    response_format=response_format,
+                                )
+                                self.budget.record_call(candidate.tokens)
+                                applies, _why = verify_edit_candidate(
+                                    candidate,
+                                    current_text,
+                                    expected_path=call.arguments.get("path"),
+                                )
+                                if applies:
+                                    winner = candidate
+                                    break
+                            if winner is not None:
+                                # only the WINNER's assistant message enters
+                                # history; losers are discarded entirely.
+                                self._conversation.append(
+                                    Message(
+                                        role="assistant",
+                                        content=winner.text,
+                                        tool_calls=(
+                                            list(winner.calls) if not text_frame else []
+                                        ),
+                                    )
+                                )
+                                queue.insert(0, winner.calls[0])
+                                yield TextDelta(
+                                    turn_id=turn_id,
+                                    text=f"\n[resample] candidate {attempt}/{total} applies "
+                                    "— retrying the edit\n",
+                                )
+                            else:
+                                yield TextDelta(
+                                    turn_id=turn_id,
+                                    text="\n[resample] no candidate patch applied cleanly\n",
+                                )
 
                 if loop_stop:
                     break
@@ -678,6 +841,18 @@ class TurnEngine:
                 continue
             ws[Path(rel).as_posix()] = text[:_WORKING_SET_MAX_BYTES]
         return ws
+
+    def _current_file_text(self, path: object) -> str | None:
+        """UTF-8 text of a jailed workspace file for the edit-seam pre-check
+        (MS-4), or ``None`` — unreadable/out-of-jail files simply don't resample
+        (their failures aren't patch failures a candidate could fix anyway)."""
+        if not isinstance(path, str) or not path:
+            return None
+        try:
+            target = resolve_jailed(self.workspace, path)
+            return target.read_text(encoding="utf-8")
+        except (JailViolation, OSError, UnicodeDecodeError):
+            return None
 
     def _relpath(self, path: object) -> str | None:
         """Workspace-relative posix path if ``path`` is inside the jail, else None."""

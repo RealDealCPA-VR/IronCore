@@ -72,11 +72,23 @@ class EnvelopeSettings(BaseModel):
     instant_seed: bool = True
 
 
+class EngineSettings(BaseModel):
+    """Turn-engine knobs (the additive ``[engine]`` TOML section, MS-4)."""
+
+    #: Best-of-N escape hatches: the TOTAL candidate budget per turn at the
+    #: mechanically-verified seams (a tool call that will not parse, an edit
+    #: that will not apply). 1 = disabled — no extra provider calls, the
+    #: default; N races up to N-1 resampled candidates per turn, each still
+    #: passing the safety gate and charged to the turn budget.
+    best_of_n: int = Field(default=1, ge=1, le=5)
+
+
 class Settings(BaseModel):
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
     roles: RoleModels = Field(default_factory=RoleModels)
     safety: SafetySettings = Field(default_factory=SafetySettings)
     envelope: EnvelopeSettings = Field(default_factory=EnvelopeSettings)
+    engine: EngineSettings = Field(default_factory=EngineSettings)
 
     @classmethod
     def load(

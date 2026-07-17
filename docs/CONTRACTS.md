@@ -83,6 +83,11 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
   selection still goes exclusively via the ACTIVE profile's `recommended_*` (§5).
   *Migration:* none — existing constructors pass no `roles` and stay byte-identical;
   routing degrades to the primary pair (never an error) when a role cannot resolve.
+- *Additive (MS-4):* `ResampleProgress(turn_id, seam, attempt, total)` is an additive event
+  emitted while racing best-of-N candidates at a mechanically-verified seam (`seam` is
+  `"parse"` or `"edit"`); front ends may ignore it. Raced winners still pass the §1 gate —
+  `decide()` remains the only path to a tool. *Migration:* none — the event vocabulary is
+  additive-only, and the default config (`[engine] best_of_n = 1`, §7) never emits it.
 
 **Not frozen:** internal state-machine implementation; context-composer heuristics (IC-501
 owns them, then freezes the *budget shares* here).
@@ -122,6 +127,11 @@ owns them, then freezes the *budget shares* here).
 - Precedence: defaults ← user toml ← project toml ← env. Env names `IRONCORE_BASE_URL`,
   `IRONCORE_MODEL`, `IRONCORE_API_KEY`, `IRONCORE_MODE`.
 - Section/key names shown in SPEC §12 (additive allowed).
+- *Additive (MS-4):* `[engine] best_of_n` (int, default 1 = disabled, validated 1..5) is an
+  additive section/key: up to N-1 extra candidates are raced per turn when a mechanical
+  verifier fails (a tool call the repair ladder gives up on; an `edit_file` patch that does
+  not apply), each charged to the turn budget. Resampled candidates still pass the §1 gate.
+  *Migration:* none — configs without `[engine]` behave byte-identically.
 - Project config may never *raise* autonomy above the user-config ceiling (SAFETY.md T8).
   🔒 `tests/test_config.py` (ceiling test lands with IC-402)
 
