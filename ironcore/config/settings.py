@@ -124,6 +124,17 @@ class MCPSettings(BaseModel):
     servers: dict[str, MCPServerSettings] = Field(default_factory=dict)
 
 
+class PluginSettings(BaseModel):
+    """Entry-point plugin discovery (the additive ``[plugins]`` TOML section, MS-5).
+
+    Default ON: installing a plugin distribution into IronCore's environment
+    already executed arbitrary code (pip install), so installation — not
+    discovery — is the consent moment (docs/SAFETY.md T9). ``enabled = false``
+    is the hardened-setup switch: discovery is skipped entirely."""
+
+    enabled: bool = True
+
+
 class Settings(BaseModel):
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
     roles: RoleModels = Field(default_factory=RoleModels)
@@ -131,6 +142,7 @@ class Settings(BaseModel):
     envelope: EnvelopeSettings = Field(default_factory=EnvelopeSettings)
     engine: EngineSettings = Field(default_factory=EngineSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
+    plugins: PluginSettings = Field(default_factory=PluginSettings)
 
     @classmethod
     def load(

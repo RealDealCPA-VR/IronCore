@@ -489,3 +489,62 @@ def test_edit_file_refuses_binary_and_non_utf8(tmp_path):
     assert not latin.ok
     assert "UTF-8" in latin.error
     assert (tmp_path / "latin.txt").read_bytes() == b"caf\xe9\n"
+
+
+# --- edit_file extra_formats (MS-5 plugin edit formats) --------------------------
+
+
+def test_edit_file_extra_format_spec_and_apply(tmp_path):
+    def shout(original: str, edit: str) -> PatchResult:
+        return PatchResult(ok=True, new_text=original.upper())
+
+    tool = EditFileTool(tmp_path, extra_formats={"shout": shout})
+    # instance-level snapshot advertises the plugin format; the CLASS default
+    # (plain introspection) still shows exactly the builtin ladder.
+    assert tool.parameters["properties"]["format"]["enum"] == [*EDIT_FORMATS, "shout"]
+    assert EditFileTool.parameters["properties"]["format"]["enum"] == list(EDIT_FORMATS)
+    (tmp_path / "f.txt").write_text("hello\n", encoding="utf-8")
+    result = run(tool, path="f.txt", format="shout", edit="ignored")
+    assert result.ok
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "HELLO\n"
+    assert result.data["format"] == "shout"
+
+
+def test_edit_file_without_extras_keeps_class_level_parameters(tmp_path):
+    assert EditFileTool(tmp_path).parameters is EditFileTool.parameters
+
+
+def test_edit_file_extra_format_crash_is_mechanical_failure_file_unchanged(tmp_path):
+    def boom(original: str, edit: str) -> PatchResult:
+        raise RuntimeError("plugin exploded")
+
+    tool = EditFileTool(tmp_path, extra_formats={"boom": boom})
+    (tmp_path / "f.txt").write_text("keep me\n", encoding="utf-8")
+    result = run(tool, path="f.txt", format="boom", edit="x")
+    assert not result.ok
+    assert "RuntimeError" in result.error and "boom" in result.error
+    # same patch_failure payload as a builtin apply failure (MS-4/MS-8 read it;
+    # plugin formats are still never pre-verified by resampling nor tuned)
+    assert result.data == {"patch_failure": True, "format": "boom"}
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_edit_file_extra_format_non_patchresult_return_fails_safe(tmp_path):
+    tool = EditFileTool(tmp_path, extra_formats={"liar": lambda o, e: "not a PatchResult"})
+    (tmp_path / "f.txt").write_text("keep me\n", encoding="utf-8")
+    result = run(tool, path="f.txt", format="liar", edit="x")
+    assert not result.ok
+    assert "not a PatchResult" in result.error
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_edit_file_extra_format_cannot_shadow_a_builtin(tmp_path):
+    def hijack(original: str, edit: str) -> PatchResult:  # pragma: no cover - never runs
+        return PatchResult(ok=True, new_text="hijacked\n")
+
+    tool = EditFileTool(tmp_path, extra_formats={"whole_file": hijack})
+    assert tool.parameters["properties"]["format"]["enum"] == list(EDIT_FORMATS)
+    (tmp_path / "f.txt").write_text("old\n", encoding="utf-8")
+    result = run(tool, path="f.txt", format="whole_file", edit="new\n")
+    assert result.ok
+    assert (tmp_path / "f.txt").read_text(encoding="utf-8") == "new\n"  # builtin applied

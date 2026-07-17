@@ -151,3 +151,29 @@ def test_doctor_no_warning_for_localhost_or_network_tools_off(tmp_path, capsys):
     user.write_text('[provider]\nbase_url = "https://hosted.example.com/v1"\n')
     assert _doctor(tmp_path, user) == 0
     assert "[!!]" not in capsys.readouterr().out
+
+
+def test_doctor_plugins_line_on_clean_env(tmp_path, capsys):
+    # a clean dev env has no ironcore.* entry points installed
+    assert _doctor(tmp_path, tmp_path / "nope.toml") == 0
+    out = capsys.readouterr().out
+    assert "[ok] plugins: none loaded" in out
+    assert out.isascii()
+
+
+def test_doctor_plugins_disabled_line(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text("[plugins]\nenabled = false\n")
+    assert _doctor(tmp_path, user) == 0
+    out = capsys.readouterr().out
+    assert "[--] plugins: disabled" in out
+    assert "[ok] plugins:" not in out
+
+
+def test_doctor_warns_when_provider_type_matches_nothing(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text('[provider]\ntype = "mystery"\n')
+    assert _doctor(tmp_path, user) == 0  # a warning, not a failure
+    out = capsys.readouterr().out
+    assert "[!!] provider.type 'mystery'" in out
+    assert "auto" in out

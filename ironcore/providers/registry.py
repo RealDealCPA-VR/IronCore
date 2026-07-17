@@ -32,7 +32,7 @@ from ironcore.providers.base import Provider
 from ironcore.providers.openai_compat import OpenAICompatProvider
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     import httpx
 
@@ -43,7 +43,11 @@ if TYPE_CHECKING:
 VALID_ROLES: tuple[str, ...] = ("planner", "coder", "summarizer", "verifier")
 
 
-def select_provider_factory(settings: Settings) -> Callable[..., Provider]:
+def select_provider_factory(
+    settings: Settings,
+    *,
+    plugin_factories: Mapping[str, Callable[..., Provider]] | None = None,
+) -> Callable[..., Provider]:
     """Pick the client class from ``settings.provider.type``.
 
     Local models are overwhelmingly Ollama; ``"auto"`` builds an
@@ -51,10 +55,18 @@ def select_provider_factory(settings: Settings) -> Callable[..., Provider]:
     model resident via ``keep_alive`` and exposes ``/api`` introspection —
     a real win for local UX) and the generic OpenAI-compatible client
     otherwise. ``"ollama"``/``"openai"`` force the choice.
+
+    ``plugin_factories`` (additive, MS-5) is consulted FIRST: when
+    ``provider.type`` equals an ``ironcore.providers`` entry-point name that
+    plugin's factory wins. Built-in behavior is otherwise unchanged — an
+    unknown type still falls through to auto (``doctor`` warns, boot never
+    breaks).
     """
     from ironcore.providers.ollama import OllamaProvider
 
     ptype = getattr(settings.provider, "type", "auto")
+    if plugin_factories and ptype in plugin_factories:
+        return plugin_factories[ptype]
     if ptype == "openai":
         return OpenAICompatProvider
     if ptype == "ollama":
@@ -89,9 +101,16 @@ class ProviderRegistry:
         settings: Settings,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        provider_factory: Callable[..., Provider] | None = None,
     ) -> ProviderRegistry:
-        """The boot path (IC-502): default provider from ``settings.provider``."""
-        return cls(settings, transport=transport)
+        """The boot path (IC-502): default provider from ``settings.provider``.
+
+        ``provider_factory`` (additive, MS-5) pre-selects the client factory —
+        the app passes ``select_provider_factory(settings, plugin_factories=…)``
+        so a plugin provider flows through the one ``_build`` path (and thus
+        ``for_role``/``for_model`` construct plugin providers too). ``None``
+        keeps today's built-in selection."""
+        return cls(settings, transport=transport, provider_factory=provider_factory)
 
     def _ensure_open(self) -> None:
         # handing out an already-closed provider fails far from the cause

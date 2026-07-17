@@ -180,10 +180,8 @@ Plan-mode workflow escape) were caught and fixed exactly this way.
 ## 🌙 Moonshots — where we're aiming next
 
 v0.1 molds to your model — instantly (above), and the strict-JSON rung is now real
-server-side guided decoding (above). These are the bets that would make it mold *deeper*:
-
-- **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
-  entry-point plugins — extend IronCore without touching core.
+server-side guided decoding (above). These were the bets that would make it mold
+*deeper* — every one of them has landed:
 
 **Shipped:**
 
@@ -231,6 +229,16 @@ server-side guided decoding (above). These are the bets that would make it mold 
   output rides the same UNTRUSTED fence and injection scan as every tool, servers
   connect in the background at launch (tools appear on the next turn), and
   `ironcore doctor` reports the configured lineup honestly.
+- **Drop-in extensibility.** Providers, tools, slash commands, probes, and edit formats
+  now plug in as standard Python entry points (`ironcore.providers` / `ironcore.tools` /
+  `ironcore.commands` / `ironcore.probes` / `ironcore.edit_formats`): `pip install` a
+  plugin distribution next to IronCore and its tools register behind the *same* safety
+  gate (an honest `ToolRisk` per tool; NET stays off unless `safety.network_tools`), its
+  provider builds when `provider.type` names it (role routing and `/model` swaps
+  included), its probes join `/probe`'s battery, and its edit formats join `edit_file`.
+  Built-ins win every name clash, a broken plugin is skipped and reported by
+  `ironcore doctor` — never a crashed boot — and `[plugins] enabled = false` turns
+  discovery off. Author guide: [`docs/PLUGINS.md`](docs/PLUGINS.md).
 
 ## Contributing (humans *and* agents)
 

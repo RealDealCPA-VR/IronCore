@@ -202,3 +202,16 @@ def test_auto_tune_parses_from_toml(tmp_path: Path):
     settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
     assert settings.envelope.auto_tune is False
     assert settings.envelope.auto_probe is True  # sibling keys untouched
+
+
+def test_plugins_enabled_defaults_true(tmp_path: Path):
+    settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
+    assert settings.plugins.enabled is True
+
+
+def test_plugins_enabled_parses_from_toml(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text("[plugins]\nenabled = false\n")
+    settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
+    assert settings.plugins.enabled is False
+    assert settings.safety.network_tools is False  # sibling sections untouched

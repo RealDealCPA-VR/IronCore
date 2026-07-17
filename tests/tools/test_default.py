@@ -200,3 +200,44 @@ def test_fetch_empty_body_is_reported_honestly():
     result = run(FetchUrlTool(httpx.MockTransport(handler)), url="https://example.com/none")
     assert result.ok
     assert result.output == "(empty response body)"
+
+
+# --- plugin registration (MS-5): after builtins, builtins win -------------------
+
+
+def _plugin_tool(tool_name: str):
+    from ironcore.tools.base import Tool, ToolResult
+
+    class _T(Tool):
+        name = tool_name
+        description = f"plugin tool. Example: {tool_name}()"
+        risk = ToolRisk.READ
+        parameters = {"type": "object", "properties": {}, "required": []}
+
+        async def run(self, **kwargs):
+            return ToolResult(ok=True, output="plugin ran")
+
+    return _T()
+
+
+def test_plugin_tools_append_after_builtins_and_builtins_win(tmp_path):
+    from ironcore.plugins import LoadedPlugins
+
+    extra = _plugin_tool("extra_tool")
+    shadow = _plugin_tool("read_file")
+    lp = LoadedPlugins(tools=[extra, shadow])
+    registry = build_default_registry(Settings(), tmp_path, plugins=lp)
+    assert registry.get("extra_tool") is extra
+    assert registry.get("read_file") is not shadow  # the builtin kept its slot
+    assert {t.name for t in registry.all()} == LOCAL_TOOLS | {"extra_tool"}
+    assert [(s.name, "built-ins win" in s.reason) for s in lp.skipped] == [("read_file", True)]
+
+
+def test_plugin_edit_formats_reach_edit_file_spec(tmp_path):
+    from ironcore.plugins import LoadedPlugins
+    from ironcore.tools.patch import PatchResult
+
+    lp = LoadedPlugins(edit_formats={"rot13": lambda o, e: PatchResult(ok=True, new_text=o)})
+    registry = build_default_registry(Settings(), tmp_path, plugins=lp)
+    enum = registry.get("edit_file").parameters["properties"]["format"]["enum"]
+    assert enum == ["unified_diff", "search_replace", "whole_file", "rot13"]

@@ -156,6 +156,29 @@ def cmd_doctor(
                 "are NET-risk and stay unregistered until safety.network_tools = true"
             )
 
+    # Entry-point plugins (MS-5) -- what discovery would load at boot. This
+    # RUNS installed plugin factories (installation is the consent moment,
+    # SAFETY.md T9); load_plugins never raises, skips are listed with reasons.
+    from ironcore.plugins import load_plugins
+
+    plugin_provider_types: set[str] = set()
+    if not settings.plugins.enabled:
+        print("[--] plugins: disabled ([plugins] enabled = false)")
+    else:
+        loaded = load_plugins(settings, project_dir if project_dir is not None else Path.cwd())
+        print(f"[ok] plugins: {loaded.summary()}")
+        for skip in loaded.skipped:
+            print(f"[--] plugin skipped: {skip.group}:{skip.name} -- {skip.reason}")
+        plugin_provider_types = set(loaded.provider_factories)
+    ptype = settings.provider.type
+    if ptype not in ("auto", "ollama", "openai") and ptype not in plugin_provider_types:
+        # boot keeps the pinned unknown-type -> auto fallthrough; say so here
+        # instead of silently building the wrong client.
+        print(
+            f"[!!] provider.type {ptype!r} matches no built-in or plugin provider "
+            "factory; boot falls back to auto-selection"
+        )
+
     return 0 if ok else 1
 
 

@@ -21,15 +21,22 @@ RULES (SPEC §4.3, §6.1; CONTRACTS §3; SAFETY §2 T2)
 
 from __future__ import annotations
 
+import copy
 import os
 import tempfile
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from ironcore.safety.jail import JailViolation, resolve_jailed
 from ironcore.safety.risk import ToolRisk
 from ironcore.tools.base import Tool, ToolResult
-from ironcore.tools.patch import apply_search_replace, apply_unified_diff, apply_whole_file
+from ironcore.tools.patch import (
+    PatchResult,
+    apply_search_replace,
+    apply_unified_diff,
+    apply_whole_file,
+)
 
 #: Bytes sniffed from the head of a file to detect binary content (null byte).
 _BINARY_SNIFF_BYTES = 8192
@@ -41,6 +48,38 @@ _APPLIERS = {
     "search_replace": apply_search_replace,
     "whole_file": apply_whole_file,
 }
+
+
+def _guarded_applier(
+    name: str, applier: Callable[[str, str], PatchResult]
+) -> Callable[[str, str], PatchResult]:
+    """Wrap a plugin applier (MS-5) so a defect stays a MECHANICAL failure:
+    an exception or a non-PatchResult return becomes ``PatchResult(ok=False)``
+    and the file stays byte-unchanged. The failure then flows through the
+    same ``patch_failure`` branch builtin formats use — but plugin formats
+    are never auto-recommended (§5 ladders are closed), never pre-verified
+    by best-of-N resampling (a winner must be in a built-in format), and
+    never tuned (the tuner reads ladder rungs only)."""
+
+    def _apply(original: str, edit: str) -> PatchResult:
+        try:
+            result = applier(original, edit)
+        except Exception as exc:  # noqa: BLE001 — a plugin crash must not escape the tool
+            return PatchResult(
+                ok=False,
+                reason=f"plugin edit format {name!r} raised {type(exc).__name__}: {exc}",
+            )
+        if not isinstance(result, PatchResult):
+            return PatchResult(
+                ok=False,
+                reason=(
+                    f"plugin edit format {name!r} returned "
+                    f"{type(result).__name__}, not a PatchResult"
+                ),
+            )
+        return result
+
+    return _apply
 
 
 def _atomic_write(target: Path, data: bytes) -> None:
@@ -190,16 +229,38 @@ class EditFileTool(_FsWriteTool):
         "required": ["path", "format", "edit"],
     }
 
+    def __init__(
+        self,
+        workspace: Path,
+        extra_formats: Mapping[str, Callable[[str, str], PatchResult]] | None = None,
+    ) -> None:
+        """``extra_formats`` (additive, MS-5) merges plugin appliers into the
+        dispatch — builtins WIN a name clash (a plugin can never shadow the
+        ladder rungs resampling verifies and tuning reads). When any plugin
+        format lands, ``parameters`` becomes an instance-level snapshot whose
+        ``format`` enum advertises it (schemas are not frozen, CONTRACTS §3);
+        the class attribute stays intact for plain introspection."""
+        super().__init__(workspace)
+        self._appliers: dict[str, Callable[[str, str], PatchResult]] = dict(_APPLIERS)
+        if extra_formats:
+            for name, applier in extra_formats.items():
+                if name in self._appliers:
+                    continue  # builtins win; loaders refuse these names anyway
+                self._appliers[name] = _guarded_applier(name, applier)
+            params = copy.deepcopy(type(self).parameters)
+            params["properties"]["format"]["enum"] = list(self._appliers)
+            self.parameters = params
+
     async def run(self, **kwargs: Any) -> ToolResult:
         path = kwargs.get("path")
         if not isinstance(path, str) or not path:
             return ToolResult(ok=False, output="", error="'path' (string) is required")
         fmt = kwargs.get("format")
-        if fmt not in _APPLIERS:
+        if fmt not in self._appliers:
             return ToolResult(
                 ok=False,
                 output="",
-                error=f"'format' must be one of {', '.join(EDIT_FORMATS)}; got {fmt!r}",
+                error=f"'format' must be one of {', '.join(self._appliers)}; got {fmt!r}",
             )
         edit = kwargs.get("edit")
         if not isinstance(edit, str):
@@ -242,7 +303,7 @@ class EditFileTool(_FsWriteTool):
                 "a lossy decode would corrupt it on write-back",
             )
 
-        result = _APPLIERS[fmt](original, edit)
+        result = self._appliers[fmt](original, edit)
         if not result.ok:
             # NOTHING was written; the reason is mechanical, for the repair loop.
             # `data` (harness-only, CONTRACTS §3) marks this as a PATCH failure —

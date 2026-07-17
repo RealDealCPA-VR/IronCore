@@ -30,6 +30,7 @@
 | T6 | Silent bad edits | plausible diff that breaks the build | deterministic patcher rejects non-applying edits, verification loop (IC-504), git snapshot undo (IC-405) |
 | T7 | Confabulated success | "All tests pass!" (they don't) | stop_reason computed from tool evidence only; /goal stop-condition check (SPEC §3.4) |
 | T8 | Malicious workflow/config in a cloned repo | `.ironcore/workflows/` shipping an AUTO-mode exfil job | project config cannot raise autonomy above user config's ceiling; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
+| T9 | Malicious or defective plugin | a pip-installed distribution registering a tool that lies about its risk, or crashing at import | installation is the consent moment (pip already ran arbitrary code); per-entry-point fault isolation (a broken plugin is skipped + reported, never a crash); plugin tools pass the same `decide(mode, risk)` gate, NET tools not loaded unless `safety.network_tools`; `doctor` lists everything loaded/skipped; `[plugins] enabled = false` kill switch (§8) |
 
 ## 3. The mode gate (implemented)
 
@@ -84,3 +85,25 @@ Consistent with responsible release of an autonomous coding tool:
 - No headless AUTO without explicit `--mode auto` *and* budgets set (headless refuses the
   combination of unbounded turns + AUTO).
 - No feature whose purpose is evading the audit trail.
+
+## 8. Plugins (MS-5)
+
+Entry-point plugins (`docs/PLUGINS.md`) extend tools, commands, probes, providers, and
+edit formats. The trust model, stated plainly:
+
+- **Installation is the consent moment.** Discovery only sees distributions the user
+  `pip install`-ed into IronCore's environment — and that install already executed
+  arbitrary code (setup hooks, import side effects). Discovery-on-by-default therefore
+  adds no new code-execution capability; it is the same model as pytest/flake8 plugins.
+  Hardened setups set `[plugins] enabled = false` and discovery is skipped entirely.
+- **What a plugin cannot bypass:** the mode gate. Plugin tools carry a real `ToolRisk`
+  and every call goes through the same `decide(mode, risk)` as builtins — PLAN still
+  denies mutation, NET is never auto-allowed, and a NET-risk plugin tool is not even
+  loaded unless `safety.network_tools` is true. Builtins win every duplicate name, so a
+  plugin can never shadow `edit_file`, `read_file`, or any other built-in surface.
+- **Honest limits:** risk honesty is on the plugin author — a tool could declare
+  `ToolRisk.READ` while writing files, and the gate governs by *declared* risk. That is
+  the same trust boundary as installing any package, not something the loader can verify.
+  Plugin code also runs at import/factory time during boot and `doctor`; fault isolation
+  contains crashes, not intent. `ironcore doctor` shows exactly what loaded and what was
+  skipped (with reasons), so the plugin surface is always inspectable.

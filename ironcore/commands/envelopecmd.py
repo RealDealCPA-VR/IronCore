@@ -14,6 +14,7 @@ a synchronous read of the current profile. Every ``ctx.extra`` key is optional.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -87,7 +88,10 @@ def _cmd_probe(ctx: CommandContext, args: str) -> str:
     if schedule is None:
         return "Probing needs the scheduler (not available here)."
     model = _model_id(engine)
-    schedule(probe_and_swap(engine))
+    # plugin_probes (MS-5) is an OPTIONAL extras key like every other: fronts
+    # that don't populate it simply probe with the default battery.
+    extra_probes = ctx.extra.get("plugin_probes") or None
+    schedule(probe_and_swap(engine, extra_probes=extra_probes))
     return (
         f"Probing {model!r}… measuring context depth, tool-calling, and edit formats "
         "(~1-2 min of model calls). The profile hot-swaps when it finishes."
@@ -98,15 +102,25 @@ def _model_id(engine: Any) -> str:
     return getattr(engine.profile, "model_id", "") or engine.settings.provider.model
 
 
-async def probe_and_swap(engine: Any, *, envelope_dir: Path | None = None) -> str:
+async def probe_and_swap(
+    engine: Any,
+    *,
+    envelope_dir: Path | None = None,
+    extra_probes: Sequence[Any] | None = None,
+) -> str:
     """Measure the live model, cache it, hot-swap ``engine.profile``, and return
     the new report card. Any failure is caught so the UI never crashes.
     ``envelope_dir`` (additive, MS-2) pins where the profile is cached so a
     ``/model`` swap's lookup and this deepen's write agree on one directory;
-    ``None`` keeps the ``default_envelope_dir()`` behavior."""
-    from ironcore.envelope.suite import probe_model
+    ``None`` keeps the ``default_envelope_dir()`` behavior.
+    ``extra_probes`` (additive, MS-5) appends plugin probes AFTER the default
+    battery — they only FILL profile fields via the runner's dotted-path merge
+    (a failing plugin probe degrades its own targets, nothing else); protocol
+    selection stays ``recommended_*``. ``None``/empty keeps the default suite."""
+    from ironcore.envelope.suite import default_probe_suite, probe_model
 
     model = _model_id(engine)
+    probes = [*default_probe_suite(), *extra_probes] if extra_probes else None
     try:
         # base=current profile so the deep probe REFINES it: an introspected
         # honest_context (from an instant-on seed) survives a probe failure
@@ -116,6 +130,7 @@ async def probe_and_swap(engine: Any, *, envelope_dir: Path | None = None) -> st
             model_id=model,
             envelope_dir=envelope_dir,
             probed_at=datetime.now(UTC).isoformat(),
+            probes=probes,
             base=engine.profile,
         )
     except Exception as exc:  # noqa: BLE001 — a probe failure must not kill the UI

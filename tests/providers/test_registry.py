@@ -230,3 +230,59 @@ def test_for_model_on_closed_registry_raises():
     asyncio.run(registry.close_all())
     with pytest.raises(RuntimeError, match="closed"):
         registry.for_model("model-b")
+
+
+# --- plugin provider factories (MS-5) ----------------------------------------
+
+
+def _plugin_settings(ptype: str) -> Settings:
+    return Settings(
+        provider=ProviderSettings(
+            base_url="http://testserver/v1", api_key="sk-unit-test",
+            model="default-model", type=ptype,
+        )
+    )
+
+
+def test_select_provider_factory_prefers_a_plugin_type_match():
+    from ironcore.providers.registry import select_provider_factory
+
+    def myprov(**kwargs):  # pragma: no cover - selection only, never called
+        raise NotImplementedError
+
+    chosen = select_provider_factory(
+        _plugin_settings("myprov"), plugin_factories={"myprov": myprov}
+    )
+    assert chosen is myprov
+
+
+def test_select_provider_factory_unknown_type_still_falls_through_to_auto():
+    from ironcore.providers.registry import select_provider_factory
+
+    # pinned behavior: an unmatched type never breaks boot — auto selection
+    # (non-:11434 endpoint -> the generic OpenAI-compatible client)
+    chosen = select_provider_factory(_plugin_settings("mystery"), plugin_factories={})
+    assert chosen is OpenAICompatProvider
+
+
+def test_from_settings_provider_factory_passthrough_feeds_the_one_build_path():
+    created: list[FakeProvider] = []
+
+    def factory(**kwargs):
+        provider = FakeProvider(**kwargs)
+        created.append(provider)
+        return provider
+
+    settings = Settings(
+        provider=ProviderSettings(
+            base_url="http://testserver/v1", api_key="sk-unit-test", model="default-model"
+        ),
+        roles=RoleModels(planner="big-model"),
+    )
+    registry = ProviderRegistry.from_settings(settings, provider_factory=factory)
+    assert registry.default is created[0]
+    # for_role and for_model construct through the SAME injected factory
+    assert registry.for_role("planner").model == "big-model"
+    assert registry.for_model("model-b").model == "model-b"
+    assert len(created) == 3
+    assert all(isinstance(p, FakeProvider) for p in created)

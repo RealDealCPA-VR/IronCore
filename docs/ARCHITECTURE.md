@@ -56,6 +56,7 @@ graph TD
 | `workflows/` | deterministic orchestration | `WorkflowRunner` | core and below |
 | `memory/` | sessions, compaction, handoff, project memory | `Handoff` | config |
 | `tui/` | Textual front end | (IC-701) | core events + commands ONLY |
+| `plugins.py` | entry-point plugin discovery (MS-5) | `LoadedPlugins`, `load_plugins()` | anything except tui (only the app/cli layer imports it; registries take a `plugins=` value) |
 | `cli.py` | entry point, doctor | — | anything |
 
 ## 3. One turn, end to end
@@ -119,3 +120,25 @@ The model owns **nothing**. Any state the model needs is re-presented at COMPOSE
 - **New slash command**: `SlashCommand` in `commands/`; handlers stay synchronous and delegate
   long work to the engine/scheduler.
 - **New workflow**: YAML in `.ironcore/workflows/` — no code changes at all.
+
+Everything above can also ship as a **pip-installable plugin** (MS-5, CONTRACTS §11,
+author guide in [PLUGINS.md](PLUGINS.md)) — declare entry points in the plugin's
+pyproject.toml, no IronCore changes at all:
+
+```toml
+[project.entry-points."ironcore.tools"]        # factory(settings, workspace) -> Tool(s)
+mytool = "my_pkg.tools:build"
+[project.entry-points."ironcore.commands"]     # SlashCommand | Sequence[SlashCommand]
+mycmds = "my_pkg.commands:COMMANDS"
+[project.entry-points."ironcore.probes"]       # zero-arg factory -> Probe(s)
+myprobe = "my_pkg.probes:build"
+[project.entry-points."ironcore.providers"]    # factory(base_url=, api_key=, model=)
+myprov = "my_pkg.provider:MyProvider"          # selected by provider.type = "myprov"
+[project.entry-points."ironcore.edit_formats"] # apply(original, edit) -> PatchResult
+myfmt = "my_pkg.formats:apply_myfmt"
+```
+
+`ironcore.plugins.load_plugins` discovers these at boot (fail-safe: broken plugins are
+skipped + reported, `doctor` shows the list) and the app threads the result into the
+tool/command/provider registries and the probe battery. Builtins win duplicate names;
+the safety gate applies to plugin tools unchanged.

@@ -209,3 +209,51 @@ built-in workflow set (IC-905); `WorkflowRunner` execution semantics.
 **Frozen after IC-606 lands.** Already binding: fenced ```` ```ironcall ```` blocks with a
 JSON body `{"tool": ..., "args": {...}}`; one call per block; results return in
 ```` ```ironresult ```` blocks; parser is fence-regex + `json.loads` + bounded repair.
+
+## 11. Plugin entry points — `ironcore/plugins.py`
+
+**Frozen (MS-5):**
+- The five entry-point group names: `ironcore.providers`, `ironcore.tools`,
+  `ironcore.commands`, `ironcore.probes`, `ironcore.edit_formats`.
+- What each group's entry point must resolve to:
+  - `ironcore.tools` — `factory(settings, workspace) -> Tool | Sequence[Tool]`; every
+    produced tool must be a `Tool` (§3) with a nonempty `name`, a real `ToolRisk` member
+    as `risk`, and a dict `parameters` whose `spec()` does not raise.
+  - `ironcore.commands` — a `SlashCommand` or sequence of them (the repo's `COMMANDS`
+    tuple convention; the entry point IS the object, no factory call).
+  - `ironcore.probes` — a ZERO-ARG factory returning `Probe | Sequence[Probe]`
+    (duck-typed: str `id`/`title`, `targets` list/tuple of dotted profile paths, async
+    `run(provider)`). Plugin probes only *fill* profile fields via the runner's
+    dotted-path merge; protocol/format selection stays `recommended_*` (§5), and the
+    seven built-in probe ids are reserved.
+  - `ironcore.providers` — `factory(base_url=, api_key=, model=[, transport=]) ->
+    Provider`, selected when `provider.type` equals the entry-point name
+    (`auto`/`ollama`/`openai` are reserved). It is constructed through the registry's
+    single `_build` path, so `for_role` (MS-3) and `for_model` (MS-2) construct plugin
+    providers too; an unmatched `provider.type` keeps the pinned unknown-type → auto
+    fallthrough (`doctor` warns, boot never breaks).
+  - `ironcore.edit_formats` — `apply(original_text, edit) -> PatchResult`, registered
+    under the entry-point name (`^[a-z][a-z0-9_-]{0,31}$`; the built-in ladder rungs are
+    reserved and always win a clash).
+- Fail-safe rules: a broken plugin is skipped and recorded (`ironcore doctor` lists each
+  skip with its reason), never a boot crash; discovery order is deterministic (sorted by
+  entry-point name). Built-ins win every duplicate-name clash (tools — including
+  `read_image` — commands, and edit formats). The safety kernel is NOT extensible:
+  plugin tools pass the same `decide(mode, risk)` gate (§1), and NET-risk plugin tools
+  are not even loaded unless `safety.network_tools` (the `fetch_url` rule).
+- Plugin edit formats: a mechanical apply failure flows through `edit_file`'s normal
+  failure branch and carries the same `data={"patch_failure": True, "format": …}`
+  payload built-in formats emit — but in v0.x plugin formats are **never
+  auto-recommended** (the §5 ladders are closed), **never pre-verified by best-of-N
+  resampling** (§4 — a resample winner must be in a built-in format), and **never
+  tuned** (§5 — the tuner reads ladder rungs only).
+- `[plugins] enabled = false` (an additive §7 section, default `true`) disables
+  discovery entirely — `entry_points` is never consulted. 🔒 `tests/test_plugins.py`
+
+**Not frozen:** validation internals and skip-reason wording; `LoadedPlugins`' exact
+shape; doctor output formatting.
+
+*Migration:* none — with no plugin distributions installed every surface behaves
+byte-identically: `plugins=` / `extra_probes=` / `provider_factory=` / `extra_formats=`
+are additive parameters defaulting to None/absent, and configs without `[plugins]`
+load as `enabled = true` via the pydantic default.

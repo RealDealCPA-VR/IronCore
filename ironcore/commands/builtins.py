@@ -10,6 +10,8 @@ remaining stubs.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ironcore import __version__
 from ironcore.commands.base import CommandContext, CommandRegistry, SlashCommand
 from ironcore.commands.envelopecmd import COMMANDS as _ENVELOPE_COMMANDS
@@ -22,6 +24,9 @@ from ironcore.commands.modelcmd import COMMANDS as _MODEL_COMMANDS
 from ironcore.commands.reviewcmd import COMMANDS as _REVIEW_COMMANDS
 from ironcore.commands.workflowcmd import COMMANDS as _WORKFLOW_COMMANDS
 from ironcore.safety.modes import CYCLE, DESCRIPTIONS, Mode, next_mode
+
+if TYPE_CHECKING:
+    from ironcore.plugins import LoadedPlugins
 
 #: Every real command, in a stable display-friendly order.
 _REAL_COMMANDS: tuple[SlashCommand, ...] = (
@@ -64,7 +69,7 @@ def _cmd_mode(ctx: CommandContext, args: str) -> str:
     return f"Mode: {ctx.mode.value} — {DESCRIPTIONS[ctx.mode]}"
 
 
-def build_default_registry() -> CommandRegistry:
+def build_default_registry(plugins: LoadedPlugins | None = None) -> CommandRegistry:
     registry = CommandRegistry()
     mode_usage = "/mode [plan|manual|accept-edits|auto]"
     registry.register(SlashCommand("help", "list commands", "/help", _cmd_help))
@@ -74,4 +79,16 @@ def build_default_registry() -> CommandRegistry:
     )
     for command in _REAL_COMMANDS:
         registry.register(command)
+    if plugins is not None:
+        # Plugin commands (MS-5) register after every builtin; builtins win a
+        # name clash, and the skip is recorded for doctor/boot-note visibility.
+        for command in plugins.commands:
+            if registry.get(command.name) is not None:
+                plugins.note_skip(
+                    "ironcore.commands",
+                    command.name,
+                    f"duplicate of built-in command /{command.name}; built-ins win",
+                )
+                continue
+            registry.register(command)
     return registry

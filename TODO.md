@@ -793,6 +793,57 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/tools/test_mcp_tool.py tests/tools/test_mcp_engine.py tests/test_config.py
     tests/test_smoke.py tests/tui/test_app.py -q` + full suite + ruff
 
+- [x] **MS-5 · Drop-in extensibility — entry-point plugins** *(done: fable-ms5, 2026-07-17
+  — `plugins.py` loader (5 groups, sorted-deterministic, per-entry-point fault isolation,
+  NET gating, reserved names) + `LoadedPlugins` threaded through tool/command/provider
+  registries + probe battery + EditFileTool extra_formats + doctor block; CONTRACTS NEW
+  §11; 1546 tests green (35 new: 20 plugins + 5 patch + 3 registry + 2 default + 2 config
+  + 3 smoke), ruff clean; proof: REAL distribution built+installed from scratchpad —
+  doctor flipped "none loaded" → "1 tool, 1 edit format", hello_plugin registered+ran,
+  edit_file enum grew "shout", uninstall → clean; fail-safe proof: crashing factory /
+  broken metadata backend → skips, exit 0)*
+  - **Depends:** MS-1, MS-2, MS-3, MS-4, MS-6, MS-7, IC-304, IC-502 · **Spec:** README
+    Moonshots; CONTRACTS §1/§2/§3/§5/§6/§7 + NEW §11
+  - **Files:** `ironcore/plugins.py` (new), `ironcore/config/settings.py`,
+    `ironcore/providers/registry.py`, `ironcore/tools/default.py`,
+    `ironcore/tools/fs_write.py`, `ironcore/commands/builtins.py`,
+    `ironcore/commands/envelopecmd.py`, `ironcore/tui/app.py`, `ironcore/cli.py`,
+    `docs/CONTRACTS.md`, `docs/SAFETY.md`, `docs/ARCHITECTURE.md`, `docs/PLUGINS.md` (new),
+    `README.md`, `tests/test_plugins.py` (new), `tests/tools/test_default.py`,
+    `tests/tools/test_patch.py`, `tests/providers/test_registry.py`, `tests/test_config.py`,
+    `tests/test_smoke.py`
+  - **Build:** NEW `plugins.py`: `load_plugins(settings, workspace, *, entry_points_fn=...)`
+    discovers five entry-point groups (`ironcore.tools` factory(settings, workspace) ->
+    Tool|Sequence; `ironcore.commands` SlashCommand|Sequence; `ironcore.probes` zero-arg
+    factory -> Probe|Sequence; `ironcore.providers` factory(base_url=, api_key=, model=
+    [, transport=]) keyed by entry-point name, auto/ollama/openai reserved;
+    `ironcore.edit_formats` apply(original, edit) -> PatchResult, builtin rungs + bad
+    names rejected) into a `LoadedPlugins` dataclass; deterministic (name, value) order;
+    every load/factory/validation failure -> `SkippedPlugin`, never a crash; NET-risk
+    plugin tools skipped unless `safety.network_tools`; `[plugins] enabled = false`
+    short-circuits. Wiring: `build_default_registry(plugins=)` (tools — builtins win,
+    `read_image` included; commands — builtins win), `EditFileTool(extra_formats=)`
+    instance-level format enum + guarded appliers (exception/non-PatchResult ->
+    PatchResult(ok=False) through the SAME patch_failure branch; plugin formats are never
+    auto-recommended, never pre-verified by MS-4, not tuned by MS-8),
+    `select_provider_factory(plugin_factories=)` + `from_settings(provider_factory=)`
+    (single `_build` path so MS-2 for_model / MS-3 for_role construct plugin providers),
+    `probe_and_swap(extra_probes=)` preserving MS-2's envelope_dir threading, app
+    `from_settings` loads plugins BEFORE any registry + stashes probes in
+    `ctx.extra["plugin_probes"]`, doctor plugins block AFTER MS-7's mcp block. CONTRACTS
+    NEW §11 freezes the final surfaces (same commit).
+  - **Accept:** a faked entry-point tool registers behind the same decide() gate (PLAN
+    denies it by execution); a broken plugin is skipped with a reason and boot survives;
+    builtins win every duplicate (read_file, read_image, /help, unified_diff); NET plugin
+    tool gated by network_tools; plugin probe fills profile fields but `recommended_*`
+    still returns only ladder rungs; plugin provider factory builds via for_model/for_role;
+    plugin edit-format failure leaves the file byte-unchanged and carries the
+    patch_failure payload; `[plugins] enabled=false` never touches entry points; doctor
+    shows the plugins line; zero-plugin behavior byte-identical. **Verify:**
+    `uv run --extra dev pytest tests/test_plugins.py tests/tools/test_default.py
+    tests/tools/test_patch.py tests/providers/test_registry.py tests/test_config.py
+    tests/test_smoke.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map

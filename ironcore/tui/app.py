@@ -40,6 +40,8 @@ carries exactly these keys — future handlers (IC-801..807) consume them:
                            construction (MS-2); ``/model`` lookups and background
                            deepens share it, and later per-role / outcome
                            consumers must reuse the same resolution
+    ``plugin_probes``      entry-point plugin probes (MS-5) for ``/probe`` to
+                           append to the default battery; may be empty
     ``schedule``           ``Callable[[Coroutine], None]`` — see ``_schedule``:
                            runs the coroutine as a background worker and posts
                            its (string) result to the transcript. Handlers that
@@ -50,7 +52,7 @@ carries exactly these keys — future handlers (IC-801..807) consume them:
 from __future__ import annotations
 
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Sequence
 from datetime import datetime
 from difflib import get_close_matches
 from pathlib import Path
@@ -87,7 +89,8 @@ from ironcore.envelope.outcomes import OutcomeLedger, apply_tuning
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.envelope.suite import default_envelope_dir
 from ironcore.memory.sessions import SessionStore
-from ironcore.providers.registry import ProviderRegistry
+from ironcore.plugins import load_plugins
+from ironcore.providers.registry import ProviderRegistry, select_provider_factory
 from ironcore.safety.modes import DESCRIPTIONS, Mode, next_mode
 from ironcore.tools.default import build_default_registry as build_tool_registry
 from ironcore.tools.mcp import MCPManager
@@ -198,6 +201,7 @@ class IronCoreApp(App):
         envelope_dir: Path | None = None,
         boot_notes: tuple[str, ...] = (),
         mcp_manager: MCPManager | None = None,
+        plugin_probes: Sequence[object] = (),
     ) -> None:
         super().__init__()
         self.engine = engine
@@ -220,6 +224,9 @@ class IronCoreApp(App):
         #: MCP tool servers (MS-7): connected by a background worker at mount,
         #: closed at unmount. None = no servers configured (or NET tools off).
         self._mcp_manager = mcp_manager
+        #: plugin probes (MS-5): appended to the default battery by the
+        #: auto-probe path and exposed to /probe via ctx.extra["plugin_probes"].
+        self._plugin_probes: tuple[object, ...] = tuple(plugin_probes)
         self.provider_registry = provider_registry
         self.workspace: Path = Path(engine.workspace)
         self._goal: str | None = engine.state.goal
@@ -331,8 +338,15 @@ class IronCoreApp(App):
             from ironcore.commands.envelopecmd import probe_and_swap
 
             # envelope_dir: the app-wide resolution (MS-2) so this deepen's write
-            # lands where /model swap lookups will read it.
-            report = await probe_and_swap(self.engine, envelope_dir=self.envelope_dir)
+            # lands where /model swap lookups will read it. Plugin probes (MS-5)
+            # join the default battery here exactly as they do for /probe — the
+            # kwarg is passed only when plugins supplied probes, so the
+            # zero-plugin call stays byte-identical (and substitute probe
+            # functions need not accept it).
+            kwargs: dict[str, object] = {"envelope_dir": self.envelope_dir}
+            if self._plugin_probes:
+                kwargs["extra_probes"] = self._plugin_probes
+            report = await probe_and_swap(self.engine, **kwargs)
             await self.transcript.add_note(report)
 
     # -- input handling -------------------------------------------------------
@@ -418,6 +432,7 @@ class IronCoreApp(App):
             "provider_registry": self.provider_registry,
             "settings": self.settings,
             "envelope_dir": self.envelope_dir,
+            "plugin_probes": self._plugin_probes,
             "schedule": self._schedule,
         }
         return ctx
@@ -668,8 +683,18 @@ class IronCoreApp(App):
         ws = Path(workspace) if workspace is not None else Path.cwd()
         if settings is None:
             settings = Settings.load(project_dir=ws)
-        provider_registry = ProviderRegistry.from_settings(settings)
-        tools = build_tool_registry(settings, ws)
+        # Entry-point plugins (MS-5): discovered ONCE, before ANY registry is
+        # built, so plugin providers/tools/commands/probes feed every
+        # construction below. load_plugins never raises — broken plugins are
+        # skipped and surfaced as boot notes (and by `ironcore doctor`).
+        plugins = load_plugins(settings, ws)
+        provider_registry = ProviderRegistry.from_settings(
+            settings,
+            provider_factory=select_provider_factory(
+                settings, plugin_factories=plugins.provider_factories
+            ),
+        )
+        tools = build_tool_registry(settings, ws, plugins=plugins)
         model = settings.provider.model
         # resolved ONCE (MS-2): the boot profile load, /model swap lookups, and
         # background deepen writes all share this one directory.
@@ -729,9 +754,17 @@ class IronCoreApp(App):
         unprobed = profile.probed_at is None
         instant_seed = getattr(settings.envelope, "instant_seed", True) and unprobed
         auto_probe = settings.envelope.auto_probe and unprobed
+        # command registry built LAST among the registries so its duplicate
+        # skips (like the tool registry's) land in plugins.skipped before the
+        # boot notes are frozen below.
+        command_registry = build_command_registry(plugins=plugins)
+        if plugins.skipped:
+            boot_notes.extend(
+                f"[plugins] skipped {s.group}:{s.name} - {s.reason}" for s in plugins.skipped
+            )
         return cls(
             engine,
-            build_command_registry(),
+            command_registry,
             settings,
             provider_registry=provider_registry,
             session_store=SessionStore(ws),
@@ -741,6 +774,7 @@ class IronCoreApp(App):
             envelope_dir=envelope_dir,
             boot_notes=tuple(boot_notes),
             mcp_manager=mcp_manager,
+            plugin_probes=tuple(plugins.probes),
         )
 
 
