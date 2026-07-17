@@ -510,3 +510,66 @@ def test_model_swap_updates_status_bar_and_repoints(tmp_path):
             assert "cache" in app.transcript_text()
 
     asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------- #
+# (11) boot-time envelope tuning (MS-8)
+# --------------------------------------------------------------------------- #
+
+
+def _seed_tuning_evidence(env, model: str) -> None:
+    """A measured cached profile + a threshold-crossing outcome ledger for it."""
+    from ironcore.envelope.outcomes import Counter, OutcomeLedger, generation_stamp
+
+    profile = CapabilityProfile(
+        model_id=model,
+        probed_at="2026-07-16T00:00:00Z",
+        source="probed",
+        tool_protocols={"native": 1.0, "strict_json": 0.95},
+    )
+    profile.save(env)
+    ledger = OutcomeLedger(model_id=model, profile_stamp=generation_stamp(profile))
+    ledger.tool_protocols["native"] = Counter(attempts=20, failures=4)  # live rate 0.8
+    ledger.save(env)
+
+
+def test_from_settings_applies_outcome_tuning_at_boot(tmp_path, monkeypatch):
+    """MS-8: a threshold-crossing ledger next to the envelope cache downgrades
+    the boot profile (source='tuned', ladder flipped by the frozen recommended_*)
+    and wires the ledger + boot notes into the app."""
+    env = tmp_path / "env"
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: env)
+    settings = Settings()
+    _seed_tuning_evidence(env, settings.provider.model)
+    app = IronCoreApp.from_settings(settings, tmp_path)
+    assert app.engine.profile.source == "tuned"
+    assert app.engine.profile.tool_protocols["native"] == 0.8  # lowered, never raised
+    assert app.engine.profile.recommended_tool_protocol() == "strict_json"
+    assert app.engine.outcomes is not None
+    assert app.engine.outcomes.model_id == settings.provider.model
+    assert app._boot_notes and any("tuned" in n.lower() for n in app._boot_notes)
+    # the CACHED profile keeps the honest measurement — tuning is never persisted
+    on_disk = CapabilityProfile.load(env, settings.provider.model)
+    assert on_disk is not None and on_disk.source == "probed"
+    assert on_disk.tool_protocols["native"] == 1.0
+
+
+def test_from_settings_auto_tune_off_wires_nothing(tmp_path, monkeypatch):
+    env = tmp_path / "env"
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: env)
+    settings = Settings.model_validate({"envelope": {"auto_tune": False}})
+    _seed_tuning_evidence(env, settings.provider.model)
+    app = IronCoreApp.from_settings(settings, tmp_path)
+    assert app.engine.profile.source == "probed"  # the raw cache, untouched
+    assert app.engine.profile.recommended_tool_protocol() == "native"
+    assert app.engine.outcomes is None  # recording disabled with tuning
+    assert app._boot_notes == ()
+
+
+def test_from_settings_without_evidence_boots_unchanged(tmp_path, monkeypatch):
+    env = tmp_path / "env"
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: env)
+    app = IronCoreApp.from_settings(Settings(), tmp_path)
+    assert app.engine.profile.source == "default"  # no cache, no ledger: floor boot
+    assert app.engine.outcomes is not None  # ... but recording is armed
+    assert app._boot_notes == ()

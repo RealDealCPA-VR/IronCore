@@ -71,6 +71,11 @@ class EnvelopeSettings(BaseModel):
     #: seed a usable profile from endpoint introspection in ~1s before the full probe runs
     instant_seed: bool = True
 
+    #: self-improvement loop (MS-8): record live-session outcomes per model and
+    #: conservatively LOWER any ladder score the evidence contradicts at session
+    #: start (downgrade-only; /probe re-measures). Off = no recording, no tuning.
+    auto_tune: bool = True
+
 
 class EngineSettings(BaseModel):
     """Turn-engine knobs (the additive ``[engine]`` TOML section, MS-4)."""

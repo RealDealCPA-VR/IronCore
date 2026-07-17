@@ -97,7 +97,7 @@ owns them, then freezes the *budget shares* here).
 **Frozen:**
 - `CapabilityProfile` field names (additive allowed); JSON persistence via
   `save/load(envelope_dir, model_id)`; slug scheme. `source` (`"default" | "seeded" |
-  "probed"`) is an additive provenance field, default `"default"`.
+  "probed" | "tuned"`) is an additive provenance field, default `"default"`.
   `chars_per_token` (`float`, default `4.0`) is an additive measured field: the composer's
   token estimator divides character counts by it; unprobed and seeded profiles keep the
   `4.0` default. *Migration (MS-1):* envelope JSONs cached before this field load as `4.0`
@@ -107,6 +107,17 @@ owns them, then freezes the *budget shares* here).
   [2, 12]. The engine selects protocols exclusively via `recommended_*`.
   🔒 `tests/test_envelope.py`
 - Unprobed models get floor-conservative defaults.
+- *Additive (MS-8):* `source` value `"tuned"` — a measured profile whose ladder scores were
+  conservatively LOWERED from live-session evidence (`envelope/outcomes.py`). The tuner may
+  only lower scores / `coherence_horizon`, never raise them; `probed_at` is preserved; and
+  the ladder orders/thresholds above stay the sole selection mechanism (tuning only edits
+  the *scores* the frozen `recommended_*` functions read). Evidence persists in a sibling
+  `<slug>.outcomes.json` sidecar (`OutcomeLedger`) next to the envelope JSON; a missing or
+  corrupt sidecar loads as a fresh ledger — reads never raise. The tuned overlay is
+  recomputed at load time and never written back to the envelope JSON (the cached profile
+  stays the honest measurement). *Migration:* none — existing envelope JSONs and ledgers
+  need no changes; profiles never persist `source="tuned"`, and consumers matching on
+  `source` should treat `"tuned"` as measured-and-adjusted, not unprobed.
 
 **Not frozen:** probe implementations and trial counts (must only *fill* these fields).
 

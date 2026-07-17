@@ -184,8 +184,7 @@ server-side guided decoding (above). These are the bets that would make it mold 
 
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
   entry-point plugins — extend IronCore without touching core.
-- **Beyond text.** Vision for screenshots/diagrams, MCP tool servers, and a self-improvement
-  loop that learns each model's quirks across sessions and tunes the ladders automatically.
+- **Beyond text.** Vision for screenshots/diagrams and MCP tool servers.
 
 **Shipped:**
 
@@ -207,6 +206,14 @@ server-side guided decoding (above). These are the bets that would make it mold 
   up to `[engine] best_of_n` candidates at raised temperature and races them: the first one
   that parses / applies in-memory re-enters the normal safety gate and executes; losers are
   discarded, every candidate is charged to the turn budget. Off by default (`best_of_n = 1`).
+- **The self-improvement loop.** Every session records mechanical evidence per model — did
+  tool calls parse at the active rung, did edits apply in the chosen format, did
+  verification pass, did the turn drift — into a per-model outcome ledger next to the
+  envelope cache, and at session start a deterministic tuner conservatively *lowers* any
+  ladder score the live evidence contradicts (downgrade-only: upgrades are never applied,
+  they earn a "run `/probe`" hint), so each model's real-world quirks reshape the ladders
+  across sessions. The report card and `/envelope` say `tuned` honestly; off switch:
+  `[envelope] auto_tune = false`.
 
 ## Contributing (humans *and* agents)
 

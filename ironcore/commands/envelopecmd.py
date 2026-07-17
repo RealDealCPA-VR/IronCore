@@ -31,7 +31,7 @@ def _cmd_envelope(ctx: CommandContext, args: str) -> str:
     card = render_report_card(profile)
     if profile.probed_at is None:
         card += "\n\nThis model is UNPROBED (floor defaults). Run /probe to measure + adapt to it."
-    return card + _roles_tail(engine)
+    return card + _roles_tail(engine) + _tuned_tail(profile)
 
 
 def _roles_tail(engine: Any) -> str:
@@ -64,6 +64,18 @@ def _roles_tail(engine: Any) -> str:
         + "\n".join(lines)
         + "\n(a role model is measured into the shared envelope cache by switching to it "
         "once with /model <role-model>, then /model back)"
+    )
+
+
+def _tuned_tail(profile: Any) -> str:
+    """MS-8 footer, appended suffix-only AFTER the roles tail: a ``tuned``
+    profile was adjusted (lowered only, never raised) from live-session
+    evidence — say so, and point at /probe as the honest way back up."""
+    if getattr(profile, "source", "") != "tuned":
+        return ""
+    return (
+        "\n\nTuned: ladder scores were adjusted from live-session evidence "
+        "(lowered only, never raised) — run /probe to re-measure."
     )
 
 

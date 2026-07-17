@@ -167,6 +167,42 @@ def test_envelope_command_appends_the_roles_tail(tmp_path):
     assert "/model" in out  # how a role model gets measured into the shared cache
 
 
+def test_envelope_command_appends_the_tuned_footer_last(tmp_path):
+    """MS-8: a tuned profile gets an honest footer AFTER the roles tail — both
+    suffix-only, so the primary card and MS-3's tail survive verbatim."""
+    from ironcore.core.roles import RoleRouter
+
+    settings = Settings.model_validate({"roles": {"planner": "deep-70b"}})
+    router = RoleRouter(
+        settings,
+        providers={"planner": MockProvider()},
+        profiles={"deep-70b": CapabilityProfile(model_id="deep-70b")},
+    )
+    engine = _engine(
+        tmp_path,
+        MockProvider([]),
+        CapabilityProfile(
+            model_id="mock",
+            source="tuned",
+            probed_at="2026-07-16T00:00:00Z",
+            tool_protocols={"strict_json": 0.95},
+        ),
+    )
+    engine.roles = router
+    ctx = CommandContext(settings=settings, extra={"engine": engine})
+    out = build_cmds().dispatch("/envelope", ctx)
+    assert "Roles (routed models):" in out
+    assert "Tuned:" in out and "/probe" in out
+    assert out.index("Tuned:") > out.index("Roles (routed models):")  # footer is LAST
+
+
+def test_envelope_command_has_no_tuned_footer_for_untuned_profiles(tmp_path):
+    engine = _engine(tmp_path, MockProvider([]), _profile(tool_protocols={"native": 1.0}))
+    ctx = CommandContext(settings=Settings(), extra={"engine": engine})
+    out = build_cmds().dispatch("/envelope", ctx)
+    assert "Tuned:" not in out
+
+
 # --- edit-format steering: the engine tells the model the measured format ---
 
 

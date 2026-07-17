@@ -83,6 +83,7 @@ from ironcore.core.events import (
     TurnStarted,
 )
 from ironcore.core.roles import RoleRouter
+from ironcore.envelope.outcomes import OutcomeLedger, apply_tuning
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.envelope.suite import default_envelope_dir
 from ironcore.memory.sessions import SessionStore
@@ -194,6 +195,7 @@ class IronCoreApp(App):
         auto_probe: bool = False,
         instant_seed: bool = False,
         envelope_dir: Path | None = None,
+        boot_notes: tuple[str, ...] = (),
     ) -> None:
         super().__init__()
         self.engine = engine
@@ -210,6 +212,9 @@ class IronCoreApp(App):
         #: provisional-but-usable profile in ~1s; ``_auto_probe`` then measures it.
         self._instant_seed = instant_seed
         self._auto_probe = auto_probe
+        #: one-shot notes posted at mount (MS-8: envelope-tuning adjustments +
+        #: re-probe hints from ``from_settings``; empty for injected engines).
+        self._boot_notes: tuple[str, ...] = tuple(boot_notes)
         self.provider_registry = provider_registry
         self.workspace: Path = Path(engine.workspace)
         self._goal: str | None = engine.state.goal
@@ -250,6 +255,8 @@ class IronCoreApp(App):
             "IronCore ready. Type a message or /help. "
             "Shift+Tab cycles mode · Esc interrupts."
         )
+        for note in self._boot_notes:  # MS-8: tuning adjustments / re-probe hints
+            self._post_note(note)
         # Resume flow (IC-706): a picker for a bare --resume, a direct rehydrate
         # for --resume <id>. Both are no-ops without a store.
         if self.session_store is not None:
@@ -641,6 +648,22 @@ class IronCoreApp(App):
         # background deepen writes all share this one directory.
         envelope_dir = default_envelope_dir()
         profile = CapabilityProfile.load(envelope_dir, model) or CapabilityProfile(model_id=model)
+        # Self-improvement loop (MS-8): the model's outcome ledger lives in the
+        # SAME envelope dir; live-session evidence may conservatively LOWER
+        # ladder scores (downgrade-only — /probe re-measures). auto_tune=false
+        # wires neither the tuning nor the in-engine recording.
+        outcomes: OutcomeLedger | None = None
+        boot_notes: list[str] = []
+        if settings.envelope.auto_tune:
+            outcomes = OutcomeLedger.load(envelope_dir, model)
+            tuning = apply_tuning(profile, outcomes)
+            if tuning.adjustments:
+                profile = tuning.profile
+                boot_notes.append(
+                    "Envelope tuned from live-session evidence (run /probe to re-measure):"
+                )
+                boot_notes.extend(f"  - {note}" for note in tuning.adjustments)
+            boot_notes.extend(f"[envelope] {hint}" for hint in tuning.reprobe_hints)
         try:
             mode = Mode(settings.safety.mode)
         except ValueError:
@@ -657,6 +680,7 @@ class IronCoreApp(App):
             mode,
             workspace=ws,
             roles=roles,
+            outcomes=outcomes,
         )
         # mold to the model on first use (instant-on-profiling): for an unprobed
         # model, seed instantly from endpoint introspection then deep-probe to
@@ -675,6 +699,7 @@ class IronCoreApp(App):
             auto_probe=auto_probe,
             instant_seed=instant_seed,
             envelope_dir=envelope_dir,
+            boot_notes=tuple(boot_notes),
         )
 
 

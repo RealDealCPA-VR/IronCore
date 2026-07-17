@@ -145,3 +145,16 @@ def test_project_config_can_disable_instant_seed(tmp_path: Path):
     settings = Settings.load(project_dir=project, user_config=tmp_path / "nope.toml", env={})
     assert settings.envelope.instant_seed is False
     assert settings.envelope.auto_probe is True  # sibling key untouched
+
+
+def test_auto_tune_defaults_true(tmp_path: Path):
+    settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
+    assert settings.envelope.auto_tune is True
+
+
+def test_auto_tune_parses_from_toml(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text("[envelope]\nauto_tune = false\n")
+    settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
+    assert settings.envelope.auto_tune is False
+    assert settings.envelope.auto_probe is True  # sibling keys untouched

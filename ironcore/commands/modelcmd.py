@@ -94,12 +94,16 @@ def _switch_model(ctx: CommandContext, name: str) -> str:
 
     cached = _load_measured(envelope_dir, name)
     if cached is not None:
-        # cache HIT: instant hot-swap to the measured profile, no background work.
-        engine.repoint(provider, cached)
+        # cache HIT: instant hot-swap to the measured profile, no background
+        # work. The same MS-8 tuning boot applies runs here too, so a swap
+        # lands on the evidence-adjusted ladders, not the raw cache.
+        profile, tuned_note = _apply_outcome_tuning(settings, envelope_dir, cached)
+        engine.repoint(provider, profile)
         return (
             f"Switched to {name!r} (was {current!r}) — envelope loaded from cache "
-            f"(measured; tools={cached.recommended_tool_protocol()}, "
-            f"edits={cached.recommended_edit_format()}, ctx={cached.honest_context})."
+            f"(measured; tools={profile.recommended_tool_protocol()}, "
+            f"edits={profile.recommended_edit_format()}, ctx={profile.honest_context})."
+            + tuned_note
         )
 
     # cache MISS: usable immediately on floor defaults, measured in the background.
@@ -142,6 +146,23 @@ async def _seed_then_deepen(engine, name: str, schedule, envelope_dir: Path) -> 
             note = f"[seed skipped for {name!r}] {exc}"
     schedule(probe_and_swap(engine, envelope_dir=envelope_dir))
     return note
+
+
+def _apply_outcome_tuning(
+    settings, envelope_dir: Path, cached: CapabilityProfile
+) -> tuple[CapabilityProfile, str]:
+    """MS-8: a cache-hit swap gets the same downgrade-only tuning the session
+    boot applies — the model's outcome ledger (sidecar in the SAME envelope
+    dir) may lower ladder scores live evidence contradicts. Disabled by
+    ``[envelope] auto_tune = false``; never raises (evidence is optional)."""
+    if not getattr(getattr(settings, "envelope", None), "auto_tune", True):
+        return cached, ""
+    from ironcore.envelope.outcomes import OutcomeLedger, apply_tuning
+
+    tuning = apply_tuning(cached, OutcomeLedger.load(Path(envelope_dir), cached.model_id))
+    if not tuning.adjustments:
+        return cached, ""
+    return tuning.profile, " Tuned from live-session evidence (run /probe to re-measure)."
 
 
 def _load_measured(envelope_dir: Path, model: str) -> CapabilityProfile | None:

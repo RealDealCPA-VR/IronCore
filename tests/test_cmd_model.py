@@ -221,6 +221,51 @@ def test_live_switch_cache_miss_floors_now_and_deepens_in_background(tmp_path, m
     assert CapabilityProfile.load(env, "qwen3:8b") is not None
 
 
+def test_live_switch_cache_hit_applies_outcome_tuning(tmp_path):
+    """MS-8: a cache-hit swap lands on the evidence-adjusted ladders, same as a
+    session boot — the new model's outcome ledger may lower scores, never raise."""
+    from ironcore.envelope.outcomes import Counter, OutcomeLedger, generation_stamp
+
+    env = tmp_path / "env"
+    profile = _measured_profile("qwen3:8b")
+    profile.save(env)
+    ledger = OutcomeLedger(
+        model_id="qwen3:8b", profile_stamp=generation_stamp(profile)
+    )
+    ledger.tool_protocols["native"] = Counter(attempts=20, failures=10)  # live rate 0.5
+    ledger.save(env)
+    engine = _engine(tmp_path)
+    schedule, queue = _queue_schedule()
+    ctx = _ctx(engine=engine, provider_registry=SwapRegistry(), envelope_dir=env,
+               schedule=schedule)
+    out = _cmd_model(ctx, "qwen3:8b")
+    assert queue == []  # still an instant hit — tuning is pure, no background work
+    assert engine.profile.source == "tuned"
+    assert engine.profile.recommended_tool_protocol() == "text_protocol"  # native lowered
+    assert "Tuned from live-session evidence" in out
+    assert "cache" in out and "measured" in out  # MS-2 wording survives (suffix-only)
+
+
+def test_live_switch_cache_hit_skips_tuning_when_auto_tune_off(tmp_path):
+    from ironcore.envelope.outcomes import Counter, OutcomeLedger, generation_stamp
+
+    env = tmp_path / "env"
+    profile = _measured_profile("qwen3:8b")
+    profile.save(env)
+    ledger = OutcomeLedger(model_id="qwen3:8b", profile_stamp=generation_stamp(profile))
+    ledger.tool_protocols["native"] = Counter(attempts=20, failures=10)
+    ledger.save(env)
+    engine = _engine(tmp_path)
+    schedule, _queue = _queue_schedule()
+    ctx = _ctx(engine=engine, provider_registry=SwapRegistry(), envelope_dir=env,
+               schedule=schedule)
+    ctx.settings.envelope.auto_tune = False
+    out = _cmd_model(ctx, "qwen3:8b")
+    assert engine.profile.source == "probed"  # the raw cache, untouched
+    assert engine.profile.recommended_tool_protocol() == "native"
+    assert "Tuned" not in out
+
+
 def test_switch_refused_while_a_turn_runs(tmp_path):
     engine = _engine(tmp_path)
     provider_before = engine.provider

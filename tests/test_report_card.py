@@ -95,3 +95,35 @@ def test_card_labels_the_default_ratio_honestly():
     assert "4.0 chars/token" in card
     assert "(default)" in card
     assert card.isascii()
+
+
+# -- source == "tuned" (MS-8): measured, then lowered from live evidence --------
+
+
+def _tuned() -> CapabilityProfile:
+    # what apply_tuning emits: a probed base whose native score live evidence
+    # lowered below its threshold — the frozen ladder now picks strict_json.
+    return CapabilityProfile(
+        model_id="qwen3-coder:30b",
+        source="tuned",
+        probed_at="2026-07-15T00:00:00+00:00",
+        tool_protocols={"native": 0.80, "strict_json": 0.95},
+        edit_formats={"unified_diff": 0.95},
+    )
+
+
+def test_tuned_card_says_tuned_and_shows_the_lowered_ladders():
+    card = render_report_card(_tuned())
+    lower = card.lower()
+    assert "tuned" in lower
+    assert "live-session evidence" in lower
+    assert "/probe" in card  # the honest way back up the ladders
+    assert "strict_json" in card and "unified_diff" in card  # the ACTIVE rungs
+    assert "unprobed" not in lower  # a tuned profile is measured, never floor-default
+    assert "seeded" not in lower
+    assert card.isascii()
+
+
+def test_tuned_card_keeps_the_probe_timestamp():
+    card = render_report_card(_tuned())
+    assert "2026-07-15T00:00:00+00:00" in card  # the base measurement stands

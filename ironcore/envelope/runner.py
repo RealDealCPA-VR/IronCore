@@ -264,7 +264,11 @@ def _is_measured(profile: CapabilityProfile) -> bool:
 
 
 def _source_label(profile: CapabilityProfile) -> str:
-    """Honest provenance of the numbers so the user knows guesses from measurements."""
+    """Honest provenance of the numbers so the user knows guesses from measurements.
+    The ``tuned`` branch comes FIRST: a tuned profile is measured-then-adjusted and
+    must never be mislabeled plain-measured (or, worse, unprobed)."""
+    if profile.source == "tuned":
+        return "tuned (measured, then lowered from live-session evidence)"
     if profile.source == "seeded":
         return "seeded (provisional - introspected, measuring in the background)"
     if _is_measured(profile):
@@ -274,6 +278,13 @@ def _source_label(profile: CapabilityProfile) -> str:
 
 def _verdict(profile: CapabilityProfile, proto: str, edit: str) -> str:
     floor = proto == TOOL_PROTOCOL_LADDER[-1] and edit == EDIT_FORMAT_LADDER[-1]
+    if profile.source == "tuned":
+        # measured base, ladders conservatively lowered by live evidence (MS-8).
+        rungs = (
+            "floor protocol + whole-file edits" if floor
+            else f"{proto} tool calls, {edit} edits"
+        )
+        return f"tuned - {rungs} (lowered from live-session evidence; run /probe to re-measure)"
     if profile.source == "seeded":
         # provisional-usable: reflects the SEED's ladders, not the floor. A seed with
         # no native signal legitimately lands on the floor rungs -- say so honestly.

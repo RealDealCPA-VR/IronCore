@@ -77,6 +77,7 @@ from ironcore.core.sampling import resolve_sampling
 from ironcore.core.state import SessionState, state_path
 from ironcore.core.steps import PlanStepPlanner
 from ironcore.core.verify import CommandVerifier
+from ironcore.envelope.outcomes import OutcomeLedger, generation_stamp
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.memory.handoff import Handoff, append_handoff, handoff_from_summary
 from ironcore.providers.base import Message, Provider, ToolCall
@@ -169,6 +170,7 @@ class TurnEngine:
         handoff_path: str | Path | None = _AUTO_HANDOFF,  # type: ignore[assignment]
         author: str | None = None,
         roles: RoleRouter | None = None,
+        outcomes: OutcomeLedger | None = None,
     ) -> None:
         self.provider = provider
         self.tools = tools
@@ -178,6 +180,9 @@ class TurnEngine:
         #: per-role (provider, profile) routing (MS-3, additive — CONTRACTS §4);
         #: None (the default) keeps every call on the primary pair.
         self.roles = roles
+        #: live-session outcome evidence (MS-8, additive — CONTRACTS §5); None
+        #: (the default) disables all recording — a strict no-op for every hook.
+        self.outcomes = outcomes
         self.workspace = Path(workspace)
         self.approvals = approvals if approvals is not None else ApprovalBroker()
         self.snapshots = snapshots
@@ -212,7 +217,9 @@ class TurnEngine:
         model in ``handoff_author``. Protocol selection still flows exclusively
         through ``profile.recommended_*`` (read at turn start). The OLD provider
         stays open by design — the ``ProviderRegistry`` owns provider lifecycle
-        (``close_all``), and a kept instance makes swap-back instant."""
+        (``close_all``), and a kept instance makes swap-back instant. The
+        outcome ledger (MS-8) follows at the next turn start: ``_sync_outcomes``
+        sees the model_id change and swaps in the new model's sidecar."""
         self.provider = provider
         self.profile = profile
         self.handoff_author = f"ironcore/{profile.model_id or 'unknown'}"
@@ -229,6 +236,23 @@ class TurnEngine:
             if routed is not None:
                 return routed
         return self.provider, self.profile
+
+    def _sync_outcomes(self, profile: CapabilityProfile) -> OutcomeLedger | None:
+        """The outcome ledger matching the ACTIVE profile (MS-8), or ``None``.
+
+        Follows a ``repoint`` (a ``/model`` swap): a model_id mismatch swaps in
+        the NEW model's ledger from the same envelope dir (``for_model``).
+        ``ensure_stamp`` then resets stale counters whenever the profile
+        GENERATION changed (a fresh probe or seed hot-swap), so old evidence
+        can never re-downgrade a freshly measured profile."""
+        ledger = self.outcomes
+        if ledger is None:
+            return None
+        if ledger.model_id != profile.model_id:
+            ledger = ledger.for_model(profile.model_id)
+            self.outcomes = ledger
+        ledger.ensure_stamp(generation_stamp(profile))
+        return ledger
 
     # -- the loop -------------------------------------------------------------
 
@@ -253,6 +277,11 @@ class TurnEngine:
         # role runs on ITS measured envelope, not the primary model's.
         loop_role = "planner" if self.mode is Mode.PLAN else "coder"
         provider, profile = self._binding(loop_role)
+        # Outcome evidence (MS-8): recorded ONLY when the loop role resolved to
+        # the PRIMARY pair — a routed role runs a different model, and its
+        # evidence must not tune this model's ledger (v1 keeps one ledger, keyed
+        # to the primary model; per-role ledgers are deliberate follow-up scope).
+        outcomes = self._sync_outcomes(profile) if profile is self.profile else None
         protocol = profile.recommended_tool_protocol()
         # Best-of-N escape hatches (MS-4): the per-turn candidate budget SHARED
         # across both mechanically-verified seams (parse + edit). best_of_n=1
@@ -392,6 +421,12 @@ class TurnEngine:
                 else:
                     calls = native_calls
 
+                # Every provider CALL is one tool-protocol sample at the ACTIVE
+                # rung (MS-8); a non-repairable transport error broke out above
+                # and is never counted as protocol evidence.
+                if outcomes is not None:
+                    outcomes.record_tool_attempt(protocol, ok=repair_error is None)
+
                 self._conversation.append(
                     Message(
                         role="assistant",
@@ -496,6 +531,8 @@ class TurnEngine:
                         vr = await self.verifier.verify(
                             self.workspace, self.settings, state, did_mutate
                         )
+                        if outcomes is not None:  # verification evidence (MS-8)
+                            outcomes.record_verify(vr.ok)
                         if not vr.ok:
                             yield TextDelta(turn_id=turn_id, text=f"\n[verify] {vr.summary}\n")
                             if not verify_fed_back:
@@ -592,6 +629,19 @@ class TurnEngine:
                     fed_back = self._tool_message(call, wrapped, text_frame, ok=result.ok)
                     self._conversation.append(fed_back)
                     yield ToolCallFinished(turn_id=turn_id, call=call, result=result)
+
+                    # Edit-format evidence (MS-8): count only REAL apply
+                    # outcomes — a success or a mechanical `patch_failure`
+                    # (MS-4's canonical key). Missing-file / binary / argument
+                    # refusals never poison a format's stats.
+                    if (
+                        outcomes is not None
+                        and tool.name == "edit_file"
+                        and (result.ok or result.data.get("patch_failure"))
+                    ):
+                        fmt = result.data.get("format") or call.arguments.get("format")
+                        if isinstance(fmt, str):
+                            outcomes.record_edit_attempt(fmt, ok=result.ok)
 
                     # Edit-seam escape hatch (MS-4): a PATCH failure — the apply
                     # itself failed against readable text (`patch_failure`, set
@@ -690,6 +740,17 @@ class TurnEngine:
             state.save(state_path(self.workspace))
         except OSError:
             pass  # state persistence is best-effort; a full disk must not crash the turn
+
+        # Outcome persistence (MS-8): best-effort, like state.save. A transport-
+        # fatal turn is not a coherence sample (no record_turn), but evidence
+        # recorded before the failure is still real and still saved.
+        if outcomes is not None:
+            if fatal is None:
+                outcomes.record_turn(drift=stop_reason == "goal-unmet")
+            try:
+                outcomes.save()
+            except OSError:
+                pass
 
         if fatal is not None:
             message = str(fatal.get("message") or fatal.get("reason") or "provider error")

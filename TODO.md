@@ -664,6 +664,51 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/test_resample.py tests/test_engine_resample.py tests/test_config.py
     tests/tools/test_patch.py tests/test_engine.py -q` + full suite + ruff
 
+- [x] **MS-8 · Self-improvement loop** *(done: fable-ms8, 2026-07-17 — OutcomeLedger
+  sidecar (`<slug>.outcomes.json`) + pure downgrade-only `apply_tuning` through the FROZEN
+  ladders; 5 engine recording hooks (primary-pair-only, `patch_failure`-gated edit
+  samples, generation-stamped resets, `for_model` repoint follow); boot + `/model`
+  cache-hit tuning with `source="tuned"` honesty in the report card + `/envelope`; 1430 tests green
+  (48 new), ruff clean; proof: live 4/20 native failures flipped recommended native →
+  strict_json via scores only, 5-sample hysteresis held, 100/100 clean run emitted a
+  /probe hint and changed nothing)*
+  - **Depends:** MS-2, MS-3, MS-4, IC-601, IC-608 · **Spec:** README Moonshots;
+    CONTRACTS §5; docs/MODELS.md §2
+  - **Files:** `ironcore/envelope/outcomes.py` (new), `ironcore/envelope/__init__.py`,
+    `ironcore/envelope/runner.py`, `ironcore/core/engine.py`, `ironcore/config/settings.py`,
+    `ironcore/tui/app.py`, `ironcore/commands/envelopecmd.py`, `ironcore/commands/modelcmd.py`,
+    `docs/CONTRACTS.md`, `README.md`, `tests/test_outcomes.py` (new),
+    `tests/test_engine_outcomes.py` (new), `tests/test_config.py`, `tests/test_report_card.py`,
+    `tests/test_envelope_wiring.py`, `tests/test_cmd_model.py`, `tests/tui/test_app.py`
+  - **Build:** NEW `envelope/outcomes.py`: `Counter` (attempts/failures, halving decay past
+    200), `OutcomeLedger` (per-model `<slug>.outcomes.json` sidecar next to the envelope
+    cache; tool-protocol + edit-format counters, turns/drift, verify runs/failures;
+    `ensure_stamp` resets counters when the profile GENERATION changes; missing/corrupt →
+    fresh, reads never raise; `for_model` follows `/model` swaps), and pure
+    `apply_tuning(profile, ledger) -> TuningResult` — downgrade-ONLY: with enough samples,
+    a live success rate below a rung's FROZEN threshold lowers that rung's stored score so
+    the frozen `recommended_*` ladders fall to the next rung; ≥25% drift lowers
+    `coherence_horizon` by 2 (min 2); upgrades are never applied — a clean live rate plus a
+    below-threshold higher rung emits a "run /probe" hint only; adjusted profiles get
+    additive `source="tuned"` (CONTRACTS §5, same commit). Engine: additive keyword-only
+    `outcomes=` + 5 hooks (ensure_stamp/ledger-swap at turn start — recording only when the
+    loop role resolved to the PRIMARY pair; one tool-protocol sample per provider CALL at
+    the ACTIVE rung; edit-format samples only on real apply outcomes — `result.ok` or MS-4's
+    `patch_failure`; verify outcomes; turn + drift + best-effort save in DONE).
+    `[envelope] auto_tune = true` gates recording AND tuning. Boot wiring in
+    `from_settings` (+ `boot_notes` posted at mount) and on the `/model` cache-HIT path.
+    Report card `_source_label`/`_verdict` "tuned" branches; `/envelope` tuned footer after
+    the roles tail.
+  - **Accept:** a threshold-crossing ledger flips `recommended_tool_protocol()` via scores
+    only (input profile unmutated); below-min-samples/stamp-mismatch/unmeasured → no
+    change; live rates never raise scores; a real engine turn records native/text
+    attempts+failures, edit-format outcomes (not file-not-found), verify failures, drift,
+    and writes the sidecar; `outcomes=None` and `auto_tune=false` are byte-identical to
+    today; a `/model` swap re-keys the ledger. **Verify:** `uv run --extra dev pytest
+    tests/test_outcomes.py tests/test_engine_outcomes.py tests/test_config.py
+    tests/test_report_card.py tests/test_envelope_wiring.py tests/test_cmd_model.py
+    tests/tui/test_app.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map
