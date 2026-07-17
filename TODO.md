@@ -750,6 +750,49 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/test_composer.py tests/test_envelope_seed.py tests/test_report_card.py -q`
     + full suite + ruff
 
+- [x] **MS-7 · MCP tool servers** *(done: fable-ms7, 2026-07-17 — hand-rolled stdlib stdio
+  MCP client (NDJSON JSON-RPC, lazy spawn via `shutil.which` never a shell, 2024-11-05
+  handshake, cursor-bounded tools/list, noise-tolerant reads, stdin-close→terminate→kill)
+  + `MCPTool` adapter (`mcp__<server>__<tool>`, `ToolRisk.NET`, 50k cap, never raises) +
+  `MCPManager` fault-isolated registration; `[mcp.servers.<name>]` config + doctor block +
+  TUI background connect/unmount close; 1511 tests green (44 new), ruff clean; proof: real
+  subprocess spawn→initialize→list→call→clean shutdown, doctor `[--]`/`[ok]` flip observed,
+  PLAN-deny by execution)*
+  - **Depends:** MS-2, IC-304, IC-502, IC-701 · **Spec:** README Moonshots;
+    CONTRACTS §1/§3/§7; SPEC §12
+  - **Files:** `ironcore/tools/mcp.py` (new), `ironcore/config/settings.py`,
+    `ironcore/tools/__init__.py`, `ironcore/tui/app.py`, `ironcore/cli.py`,
+    `docs/SPEC.md`, `docs/CONTRACTS.md`, `README.md`, `CHANGELOG.md`,
+    `tests/tools/fake_mcp_server.py` (new), `tests/tools/test_mcp_client.py` (new),
+    `tests/tools/test_mcp_tool.py` (new), `tests/tools/test_mcp_engine.py` (new),
+    `tests/test_config.py`, `tests/test_smoke.py`, `tests/tui/test_app.py`
+  - **Build:** NEW `tools/mcp.py`: `MCPClient` — a lazy, hand-rolled stdio MCP client
+    (stdlib asyncio only; NDJSON JSON-RPC 2.0; `initialize` handshake pinned to
+    protocolVersion 2024-11-05; `tools/list` follows `nextCursor` bounded to 16 pages;
+    `shutil.which` resolves Windows launcher shims, never a shell; non-JSON stdout noise
+    skipped; 5MB line limit; `aclose()` stdin-close → terminate → kill ladder).
+    `MCPTool(Tool)` adapter: `mcp__<server>__<tool>` names (sanitized), `ToolRisk.NET`
+    (worst-case honest — arbitrary subprocess proxying remote APIs; never auto-allowed),
+    remote `inputSchema` as `parameters`, text content concatenated (non-text →
+    `[<type> content omitted]`), 50k output cap, all failures → `ToolResult(ok=False)`.
+    `MCPManager.from_settings` builds clients from `[mcp.servers.<name>]` (skips
+    `enabled=false`; url-only skipped with a note — stdio only in v1);
+    `register_into(registry)` is per-server fault-isolated, duplicate names skipped.
+    Config: additive `MCPServerSettings`/`MCPSettings` + `Settings.mcp` (CONTRACTS §7 +
+    SPEC §12, same commit). Wiring: `from_settings` builds the manager only when servers
+    are configured AND `safety.network_tools` (NET tools stay unregistered otherwise —
+    a boot note explains); `on_mount` background worker registers late (specs are
+    recomputed per CALL); `on_unmount` closes servers. `cmd_doctor` prints a
+    settings-only `[ok]`/`[--]` mcp block.
+  - **Accept:** real-subprocess client roundtrip (spawn → initialize → list → call →
+    clean shutdown) against a stdlib fake server; timeout/garbage-stdout/dead-server →
+    `MCPError`, tool run never raises; engine gates `mcp__*` as NET (MANUAL asks, PLAN
+    denies, AUTO still asks) and OBSERVE wraps output `[UNTRUSTED source=mcp__...]`;
+    zero-config settings byte-identical; doctor lines honest.
+    **Verify:** `uv run --extra dev pytest tests/tools/test_mcp_client.py
+    tests/tools/test_mcp_tool.py tests/tools/test_mcp_engine.py tests/test_config.py
+    tests/test_smoke.py tests/tui/test_app.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map

@@ -20,7 +20,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from ironcore.safety.modes import Mode  # config may import safety; safety imports stdlib only
 
@@ -93,12 +93,44 @@ class EngineSettings(BaseModel):
     best_of_n: int = Field(default=1, ge=1, le=5)
 
 
+class MCPServerSettings(BaseModel):
+    """One MCP tool server (an additive ``[mcp.servers.<name>]`` TOML table, MS-7).
+
+    v1 speaks the stdio transport only: ``command`` (+ ``args``/``env``) spawns
+    the server as a child process, resolved via PATH but never through a shell —
+    so on Windows launcher shims need their real name (``command = "npx.cmd"``).
+    ``url`` is accepted so http-transport configs parse, but such entries are
+    skipped with a note until an http client ships."""
+
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    url: str | None = None
+    timeout_s: float = Field(default=30.0, gt=0)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def _require_transport(self) -> MCPServerSettings:
+        if not self.command and not self.url:
+            raise ValueError("an MCP server needs 'command' (stdio) or 'url'")
+        return self
+
+
+class MCPSettings(BaseModel):
+    """MCP integration (the additive ``[mcp]`` TOML section, MS-7). Tools from
+    these servers are NET-risk: they are never even registered unless
+    ``safety.network_tools`` is true."""
+
+    servers: dict[str, MCPServerSettings] = Field(default_factory=dict)
+
+
 class Settings(BaseModel):
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
     roles: RoleModels = Field(default_factory=RoleModels)
     safety: SafetySettings = Field(default_factory=SafetySettings)
     envelope: EnvelopeSettings = Field(default_factory=EnvelopeSettings)
     engine: EngineSettings = Field(default_factory=EngineSettings)
+    mcp: MCPSettings = Field(default_factory=MCPSettings)
 
     @classmethod
     def load(

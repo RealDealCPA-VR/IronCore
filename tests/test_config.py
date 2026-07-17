@@ -147,6 +147,50 @@ def test_project_config_can_disable_instant_seed(tmp_path: Path):
     assert settings.envelope.auto_probe is True  # sibling key untouched
 
 
+def test_mcp_defaults_to_no_servers(tmp_path: Path):
+    settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
+    assert settings.mcp.servers == {}
+
+
+def test_mcp_server_parses_from_toml(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        "[mcp.servers.gh]\n"
+        'command = "npx.cmd"\n'
+        'args = ["-y", "@modelcontextprotocol/server-github"]\n'
+        "timeout_s = 12.5\n"
+        "[mcp.servers.gh.env]\n"
+        'GITHUB_TOKEN = "placeholder"\n'
+    )
+    settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
+    server = settings.mcp.servers["gh"]
+    assert server.command == "npx.cmd"
+    assert server.args == ["-y", "@modelcontextprotocol/server-github"]
+    assert server.env == {"GITHUB_TOKEN": "placeholder"}
+    assert server.timeout_s == 12.5
+    assert server.enabled is True  # default
+    assert server.url is None
+
+
+def test_mcp_url_only_entry_parses(tmp_path: Path):
+    # the schema accepts url-only entries (skipped at wiring time: stdio-only v1)
+    user = tmp_path / "user.toml"
+    user.write_text('[mcp.servers.remote]\nurl = "https://example.com/mcp"\n')
+    settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
+    assert settings.mcp.servers["remote"].url == "https://example.com/mcp"
+    assert settings.mcp.servers["remote"].command is None
+
+
+def test_mcp_server_requires_command_or_url(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text("[mcp.servers.gh]\nenabled = true\n")
+    with pytest.raises(ConfigError) as excinfo:
+        Settings.load(project_dir=tmp_path, user_config=user, env={})
+    message = str(excinfo.value)
+    assert "mcp.servers.gh" in message  # names the offending entry
+    assert "command" in message
+
+
 def test_auto_tune_defaults_true(tmp_path: Path):
     settings = Settings.load(project_dir=tmp_path, user_config=tmp_path / "nope.toml", env={})
     assert settings.envelope.auto_tune is True

@@ -113,6 +113,33 @@ def test_doctor_unprobed_model_mentions_instant_seed(tmp_path, capsys):
     assert out.isascii()
 
 
+def test_doctor_mcp_silent_without_servers(tmp_path, capsys):
+    assert _doctor(tmp_path, tmp_path / "nope.toml") == 0
+    assert "] mcp:" not in capsys.readouterr().out
+
+
+def test_doctor_mcp_hints_when_network_tools_off(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text('[mcp.servers.gh]\ncommand = "npx.cmd"\n')
+    assert _doctor(tmp_path, user) == 0  # a hint, not a failure
+    out = capsys.readouterr().out
+    assert "[--] mcp: 1 server(s) configured (gh)" in out
+    assert "network_tools" in out
+    assert out.isascii()
+
+
+def test_doctor_mcp_ok_when_network_tools_on(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        '[mcp.servers.gh]\ncommand = "npx.cmd"\n'
+        '[mcp.servers.off]\ncommand = "x"\nenabled = false\n'
+        "[safety]\nnetwork_tools = true\n"
+    )
+    assert _doctor(tmp_path, user) == 0
+    out = capsys.readouterr().out
+    assert "[ok] mcp: 1 server(s) configured (gh)" in out  # disabled entries not counted
+
+
 def test_doctor_no_warning_for_localhost_or_network_tools_off(tmp_path, capsys):
     # localhost endpoint + network_tools on -> no warning
     user = tmp_path / "user.toml"

@@ -6,6 +6,12 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Added
+- **MCP tool servers.** `[mcp.servers.<name>]` config entries connect stdio
+  MCP servers through a dependency-free JSON-RPC client (spawned directly,
+  never via a shell); their tools register as `mcp__<server>__<tool>` at NET
+  risk — never auto-approved, denied in Plan mode, and only present at all
+  when `safety.network_tools = true`. Output is fenced UNTRUSTED like every
+  tool, and `ironcore doctor` reports the configured server lineup.
 - **Guided decoding — the real `strict_json` rung.** A model the envelope routes
   to `strict_json` is now driven with server-side constrained decoding: the
   engine sends `response_format` (a json-schema pinning output to one

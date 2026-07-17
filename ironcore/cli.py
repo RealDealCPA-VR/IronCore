@@ -144,6 +144,18 @@ def cmd_doctor(
             "from the endpoint in ~1s then measures in the background (or run /probe)"
         )
 
+    # MCP tool servers (MS-7) -- settings-only status, no processes spawned here
+    mcp_enabled = sorted(name for name, srv in settings.mcp.servers.items() if srv.enabled)
+    if mcp_enabled:
+        names = ", ".join(mcp_enabled)
+        if settings.safety.network_tools:
+            print(f"[ok] mcp: {len(mcp_enabled)} server(s) configured ({names})")
+        else:
+            print(
+                f"[--] mcp: {len(mcp_enabled)} server(s) configured ({names}) but MCP tools "
+                "are NET-risk and stay unregistered until safety.network_tools = true"
+            )
+
     return 0 if ok else 1
 
 

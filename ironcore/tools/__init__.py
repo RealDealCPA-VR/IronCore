@@ -4,6 +4,8 @@ The base contract and registry are frozen in docs/CONTRACTS.md §3.
 Concrete tools: fs_read (READ), fs_write (WRITE), shell (EXEC),
 fetch (NET — registered only when safety.network_tools is true).
 ``build_default_registry`` assembles the standard lineup per SPEC §6.1.
+MCP tool servers (MS-7) surface as ``mcp__<server>__<tool>`` NET tools,
+registered under the same network_tools condition.
 """
 
 from ironcore.tools.base import Tool, ToolRegistry, ToolResult
@@ -11,6 +13,7 @@ from ironcore.tools.default import build_default_registry
 from ironcore.tools.fetch import FetchUrlTool
 from ironcore.tools.fs_read import GlobTool, GrepTool, ListDirTool, ReadFileTool
 from ironcore.tools.fs_write import EditFileTool, WriteFileTool
+from ironcore.tools.mcp import MCPClient, MCPError, MCPManager, MCPTool
 from ironcore.tools.shell import ShellTool
 
 __all__ = [
@@ -19,6 +22,10 @@ __all__ = [
     "GlobTool",
     "GrepTool",
     "ListDirTool",
+    "MCPClient",
+    "MCPError",
+    "MCPManager",
+    "MCPTool",
     "ReadFileTool",
     "ShellTool",
     "Tool",

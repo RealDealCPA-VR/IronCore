@@ -184,7 +184,6 @@ server-side guided decoding (above). These are the bets that would make it mold 
 
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
   entry-point plugins — extend IronCore without touching core.
-- **Beyond text.** MCP tool servers (vision shipped — see below).
 
 **Shipped:**
 
@@ -223,6 +222,15 @@ server-side guided decoding (above). These are the bets that would make it mold 
   instead of a hallucination. The context composer budgets attached images (flat
   512-token charge each) and keeps only the newest two, stripping older ones with an
   honest marker; the report card gained a `Vision: yes|no` line.
+- **MCP tool servers.** Any stdio MCP server now plugs its tools straight into the gated
+  registry: a dependency-free JSON-RPC client spawns each `[mcp.servers.<name>]` entry
+  from config (resolved via PATH, never through a shell) and registers every remote tool
+  as `mcp__<server>__<tool>` at **NET risk** — the strictest class, so nothing an MCP
+  server exposes is ever auto-approved, and Plan mode denies it outright. Like the
+  built-in `fetch_url`, MCP tools exist only when `safety.network_tools = true`; their
+  output rides the same UNTRUSTED fence and injection scan as every tool, servers
+  connect in the background at launch (tools appear on the next turn), and
+  `ironcore doctor` reports the configured lineup honestly.
 
 ## Contributing (humans *and* agents)
 

@@ -90,6 +90,7 @@ from ironcore.memory.sessions import SessionStore
 from ironcore.providers.registry import ProviderRegistry
 from ironcore.safety.modes import DESCRIPTIONS, Mode, next_mode
 from ironcore.tools.default import build_default_registry as build_tool_registry
+from ironcore.tools.mcp import MCPManager
 from ironcore.tui.screens.approval import ApprovalScreen
 from ironcore.tui.screens.sessions import SessionPicker
 from ironcore.tui.widgets import InputBar, StatusBar, Transcript
@@ -196,6 +197,7 @@ class IronCoreApp(App):
         instant_seed: bool = False,
         envelope_dir: Path | None = None,
         boot_notes: tuple[str, ...] = (),
+        mcp_manager: MCPManager | None = None,
     ) -> None:
         super().__init__()
         self.engine = engine
@@ -215,6 +217,9 @@ class IronCoreApp(App):
         #: one-shot notes posted at mount (MS-8: envelope-tuning adjustments +
         #: re-probe hints from ``from_settings``; empty for injected engines).
         self._boot_notes: tuple[str, ...] = tuple(boot_notes)
+        #: MCP tool servers (MS-7): connected by a background worker at mount,
+        #: closed at unmount. None = no servers configured (or NET tools off).
+        self._mcp_manager = mcp_manager
         self.provider_registry = provider_registry
         self.workspace: Path = Path(engine.workspace)
         self._goal: str | None = engine.state.goal
@@ -275,6 +280,28 @@ class IronCoreApp(App):
                 "defaults; the profile hot-swaps itself as measurements land (or /probe)."
             )
             self.run_worker(self._mold_to_model(), group="probe")
+        # MCP tool servers (MS-7): connect in the background and register their
+        # tools into the LIVE registry. Late registration is safe — the engine
+        # recomputes ``tools.specs()`` per CALL, so new tools simply appear on
+        # the next provider call; a note line reports each server's outcome.
+        if self._mcp_manager is not None:
+            self.run_worker(self._connect_mcp(), group="mcp")
+
+    async def _connect_mcp(self) -> None:
+        """Background MCP registration: post the manager's note lines. Never
+        raises — ``register_into`` is per-server fault-isolated, and a surprise
+        must not crash mount."""
+        try:
+            notes = await self._mcp_manager.register_into(self.engine.tools)
+        except Exception as exc:  # noqa: BLE001 — a defect must not kill the app
+            notes = [f"[mcp] connect failed: {exc}"]
+        for note in notes:
+            await self.transcript.add_note(note)
+
+    async def on_unmount(self) -> None:
+        """App shutdown: close MCP server subprocesses (best-effort)."""
+        if self._mcp_manager is not None:
+            await self._mcp_manager.aclose()
 
     async def _mold_to_model(self) -> None:
         """Background first-use molding: SEED the profile from endpoint
@@ -664,6 +691,19 @@ class IronCoreApp(App):
                 )
                 boot_notes.extend(f"  - {note}" for note in tuning.adjustments)
             boot_notes.extend(f"[envelope] {hint}" for hint in tuning.reprobe_hints)
+        # MCP tool servers (MS-7): built only when servers are configured AND
+        # NET tools are enabled — an off NET tool is never registered, so with
+        # network_tools false the servers are not even spawned; one boot note
+        # says why. Connection happens in an on_mount background worker.
+        mcp_manager: MCPManager | None = None
+        if settings.mcp.servers:
+            if settings.safety.network_tools:
+                mcp_manager = MCPManager.from_settings(settings)
+            else:
+                boot_notes.append(
+                    f"[mcp] {len(settings.mcp.servers)} server(s) configured but MCP tools "
+                    "are NET-risk and stay unregistered until [safety] network_tools = true."
+                )
         try:
             mode = Mode(settings.safety.mode)
         except ValueError:
@@ -700,6 +740,7 @@ class IronCoreApp(App):
             instant_seed=instant_seed,
             envelope_dir=envelope_dir,
             boot_notes=tuple(boot_notes),
+            mcp_manager=mcp_manager,
         )
 
 

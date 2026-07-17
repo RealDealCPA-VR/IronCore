@@ -573,3 +573,62 @@ def test_from_settings_without_evidence_boots_unchanged(tmp_path, monkeypatch):
     assert app.engine.profile.source == "default"  # no cache, no ledger: floor boot
     assert app.engine.outcomes is not None  # ... but recording is armed
     assert app._boot_notes == ()
+
+
+# --------------------------------------------------------------------------- #
+# MCP tool servers (MS-7): from_settings gating + mount worker + unmount close
+# --------------------------------------------------------------------------- #
+
+
+def test_from_settings_mcp_requires_network_tools(tmp_path, monkeypatch):
+    """MS-7: with servers configured but NET tools off, no manager is built
+    (servers are not even spawned) and one boot note says why; enabling
+    safety.network_tools wires the manager."""
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: tmp_path / "env")
+    servers = {"mcp": {"servers": {"gh": {"command": "npx.cmd"}}}}
+
+    off = IronCoreApp.from_settings(Settings.model_validate(servers), tmp_path)
+    assert off._mcp_manager is None
+    assert any("[mcp]" in n and "network_tools" in n for n in off._boot_notes)
+
+    on = IronCoreApp.from_settings(
+        Settings.model_validate({**servers, "safety": {"network_tools": True}}), tmp_path
+    )
+    assert on._mcp_manager is not None
+    assert [c.server for c in on._mcp_manager.clients] == ["gh"]
+    assert not any("[mcp]" in n for n in on._boot_notes)
+
+
+def test_mcp_worker_registers_tools_and_unmount_closes(tmp_path):
+    """MS-7: on_mount's background worker registers MCP tools into the LIVE
+    registry (note posted to the transcript); leaving the app closes servers."""
+    from ironcore.tools.mcp import MCPManager
+
+    class FakeMCPClient:
+        server = "fake"
+        closed = False
+
+        async def list_tools(self):
+            return [{"name": "echo", "description": "Echo.", "inputSchema": {"type": "object"}}]
+
+        async def call_tool(self, name, arguments):  # pragma: no cover — not driven here
+            return {"content": []}
+
+        async def aclose(self):
+            self.closed = True
+
+    client = FakeMCPClient()
+    engine = _engine(tmp_path, [_text("hi")])
+    app = IronCoreApp(
+        engine, build_cmds(), engine.settings, mcp_manager=MCPManager([client])
+    )
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert engine.tools.get("mcp__fake__echo") is not None  # live registry grew
+            assert "1 tool(s) registered" in app.transcript_text()
+
+    asyncio.run(scenario())
+    assert client.closed  # on_unmount closed the server subprocess

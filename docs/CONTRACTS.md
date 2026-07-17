@@ -158,6 +158,14 @@ owns them, then freezes the *budget shares* here).
   verifier fails (a tool call the repair ladder gives up on; an `edit_file` patch that does
   not apply), each charged to the turn budget. Resampled candidates still pass the §1 gate.
   *Migration:* none — configs without `[engine]` behave byte-identically.
+- *Additive (MS-7):* `[mcp]` — `[mcp.servers.<name>]` tables (`command`, `args`, `env`,
+  `url`, `timeout_s`, `enabled`; `command` or `url` required) configure MCP tool servers;
+  the reference block lives in SPEC §12. v1 connects stdio (`command`) servers only —
+  url-only entries parse but are skipped with a note. Their tools register as
+  `mcp__<server>__<tool>` at `ToolRisk.NET` (no new risk value): like every NET tool they
+  are never registered unless `safety.network_tools` is true, and §1 gating applies
+  unchanged (NET never auto-allowed, denied in PLAN). *Migration:* none — configs without
+  `[mcp]` behave byte-identically, and no existing key changes meaning.
 - Project config may never *raise* autonomy above the user-config ceiling (SAFETY.md T8).
   🔒 `tests/test_config.py` (ceiling test lands with IC-402)
 

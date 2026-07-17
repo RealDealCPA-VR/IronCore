@@ -352,6 +352,14 @@ summarizer = "qwen3:8b"
 mode = "manual"              # boot mode
 workspace_only = true
 network_tools = false
+
+[mcp.servers.github]         # optional MCP tool servers (stdio; tools are NET-risk,
+command = "npx.cmd"          # registered only when safety.network_tools = true).
+args = ["-y", "@modelcontextprotocol/server-github"]  # command resolved via PATH,
+env = {}                     # never a shell -- on Windows name the real shim (npx.cmd)
+timeout_s = 30.0
+enabled = true
+# url = "https://..."        # accepted but skipped: http transport not shipped yet
 ```
 
 ## 13. Distribution
