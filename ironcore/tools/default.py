@@ -21,6 +21,7 @@ from ironcore.tools.base import ToolRegistry
 from ironcore.tools.fetch import FetchUrlTool
 from ironcore.tools.fs_read import GlobTool, GrepTool, ListDirTool, ReadFileTool
 from ironcore.tools.fs_write import EditFileTool, WriteFileTool
+from ironcore.tools.image import ReadImageTool
 from ironcore.tools.shell import ShellTool
 
 
@@ -35,6 +36,10 @@ def build_default_registry(settings: Settings, workspace: Path) -> ToolRegistry:
         WriteFileTool(workspace),
         EditFileTool(workspace),
         ShellTool(workspace),
+        # read_image is registered UNCONDITIONALLY (the lineup is not frozen):
+        # on a text-only model its vision_check degrade returns an honest error
+        # instead of leaving the model to hallucinate what a file "shows".
+        ReadImageTool(workspace),
     ):
         registry.register(tool)
     if settings.safety.network_tools:

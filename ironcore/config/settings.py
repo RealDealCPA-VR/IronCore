@@ -76,6 +76,11 @@ class EnvelopeSettings(BaseModel):
     #: start (downgrade-only; /probe re-measures). Off = no recording, no tuning.
     auto_tune: bool = True
 
+    #: vision override (MS-6): force image attachment on/off for endpoints
+    #: without introspection (e.g. vLLM serving a VL model). None (the default)
+    #: trusts the CapabilityProfile's seeded/measured ``vision`` flag.
+    vision: bool | None = None
+
 
 class EngineSettings(BaseModel):
     """Turn-engine knobs (the additive ``[engine]`` TOML section, MS-4)."""

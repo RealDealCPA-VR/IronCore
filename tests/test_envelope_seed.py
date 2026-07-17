@@ -233,6 +233,46 @@ def test_base_refine_merges_measurement_over_seed():
     assert profile.source == "probed"
 
 
+# --- vision seeding (MS-6) ---------------------------------------------------
+
+
+def test_seed_sets_vision_from_show_capabilities():
+    show = dict(SHOW_JSON, capabilities=["completion", "vision"])
+    provider, transport = _ollama(_ollama_handler(show=show))
+    profile = _seed(provider, transport)
+    assert profile.vision is True
+
+
+def test_seed_without_vision_capability_stays_false():
+    provider, transport = _ollama(_ollama_handler())  # SHOW_JSON has no capabilities
+    profile = _seed(provider, transport)
+    assert profile.vision is False
+
+
+def test_seed_show_failure_keeps_vision_floor_default():
+    provider, transport = _ollama(_ollama_handler(show=None))
+    profile = _seed(provider, transport)
+    assert profile.vision is False
+
+
+def test_base_refine_preserves_seeded_vision():
+    # run_probes deep-copies the base and merges only dotted-path scores, so a
+    # seeded vision=True survives deep-probe refinement untouched.
+    seed = CapabilityProfile(model_id="m", vision=True, source="seeded")
+    profile = asyncio.run(
+        run_probes(
+            MockProvider([]), [_NativeProbe()], model_id="m", base=seed, probed_at="t"
+        )
+    )
+    assert profile.vision is True
+    assert profile.source == "probed"
+
+
+def test_legacy_profile_json_loads_vision_false():
+    legacy = {"model_id": "m"}  # an envelope JSON written before the field existed
+    assert CapabilityProfile.model_validate(legacy).vision is False
+
+
 # --- source roundtrips through save/load -------------------------------------
 
 

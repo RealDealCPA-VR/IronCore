@@ -319,13 +319,22 @@ def test_snapshot_is_transparent_to_the_users_git_state(tmp_path):
 def test_default_registry_roster_and_network_gating(tmp_path):
     local = build_default_registry(Settings(), tmp_path)
     names = {t.name for t in local.all()}
-    assert names == {"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "shell"}
+    assert names == {
+        "read_file",
+        "list_dir",
+        "glob",
+        "grep",
+        "write_file",
+        "edit_file",
+        "shell",
+        "read_image",  # MS-6: always registered; degrade is an honest tool error
+    }
 
     net_settings = Settings()
     net_settings.safety.network_tools = True
     with_net = build_default_registry(net_settings, tmp_path)
     assert with_net.get("fetch_url") is not None
-    assert len(with_net.all()) == 8
+    assert len(with_net.all()) == 9
 
     # every tool is model-ready: named, described, JSON-schema params
     for tool in with_net.all():

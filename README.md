@@ -184,7 +184,7 @@ server-side guided decoding (above). These are the bets that would make it mold 
 
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
   entry-point plugins — extend IronCore without touching core.
-- **Beyond text.** Vision for screenshots/diagrams and MCP tool servers.
+- **Beyond text.** MCP tool servers (vision shipped — see below).
 
 **Shipped:**
 
@@ -214,6 +214,15 @@ server-side guided decoding (above). These are the bets that would make it mold 
   they earn a "run `/probe`" hint), so each model's real-world quirks reshape the ladders
   across sessions. The report card and `/envelope` say `tuned` honestly; off switch:
   `[envelope] auto_tune = false`.
+- **Vision — image inputs for screenshots/diagrams.** A new `read_image` tool lets the
+  model actually look at a workspace PNG/JPEG/GIF/WEBP: the bytes ride the conversation
+  as OpenAI image content-parts (base64 data URIs, so Ollama and vLLM vision models both
+  work). The capability is *measured, not assumed*: seeded from Ollama's `/api/show`
+  `capabilities` (`[envelope] vision = true` overrides for endpoints without
+  introspection), and a text-only model gets an honest "no vision capability" error
+  instead of a hallucination. The context composer budgets attached images (flat
+  512-token charge each) and keeps only the newest two, stripping older ones with an
+  honest marker; the report card gained a `Vision: yes|no` line.
 
 ## Contributing (humans *and* agents)
 

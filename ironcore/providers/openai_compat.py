@@ -70,10 +70,26 @@ class ProviderTimeout(ProviderError):
 
 def _wire_messages(messages: list[Message]) -> list[dict[str, Any]]:
     """Message list -> OpenAI chat schema. tool_calls carry their arguments
-    as a JSON *string* on the wire; tool results carry tool_call_id/name."""
+    as a JSON *string* on the wire; tool results carry tool_call_id/name.
+    A message with images (MS-6) becomes content-PARTS — a text part (only
+    when content is non-empty) plus one image_url part per image, as a base64
+    data URI (accepted by both the OpenAI dialect and Ollama's /v1 on vision
+    models). Messages without images keep the exact string-content shape."""
     wire: list[dict[str, Any]] = []
     for msg in messages:
         entry: dict[str, Any] = {"role": msg.role, "content": msg.content}
+        if msg.images:
+            parts: list[dict[str, Any]] = []
+            if msg.content:
+                parts.append({"type": "text", "text": msg.content})
+            parts.extend(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{img.media_type};base64,{img.base64}"},
+                }
+                for img in msg.images
+            )
+            entry["content"] = parts
         if msg.tool_calls:
             entry["tool_calls"] = [
                 {

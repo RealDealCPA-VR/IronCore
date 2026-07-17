@@ -347,6 +347,8 @@ def render_report_card(profile: CapabilityProfile) -> str:
         f"Retention:        {profile.instruction_retention:.2f}",
         f"Coherence:        {profile.coherence_horizon} turns "
         f"(anchor every {profile.anchor_cadence()})",
+        # yes/no only (MS-6): the pre-verdict text must never claim "measured".
+        f"Vision:           {'yes' if profile.vision else 'no'}",
         "",
         f"Verdict:          {_verdict(profile, proto, edit)}",
     ]

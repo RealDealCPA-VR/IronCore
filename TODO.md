@@ -709,6 +709,47 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/test_report_card.py tests/test_envelope_wiring.py tests/test_cmd_model.py
     tests/tui/test_app.py -q` + full suite + ruff
 
+- [x] **MS-6 · Vision — image inputs for screenshots/diagrams** *(done: fable-ms6,
+  2026-07-17 — read_image READ tool (sniff/cap/vision_check degrade) -> user-role carrier
+  Message.images -> OpenAI image_url content-parts; vision seeded from /api/show
+  capabilities + `[envelope] vision` override, `_vision_enabled` reads the MS-3 ACTIVE
+  binding; composer keeps newest 2 images at 512 tokens each; 1467 tests green (37 new),
+  ruff clean; proof: MockProvider e2e landed the PNG base64 on the wire, degrade run fed
+  back "no vision capability" with zero image messages)*
+  - **Depends:** MS-1, MS-3, MS-4, MS-8, IC-304, IC-502 · **Spec:** README Moonshots;
+    CONTRACTS §2/§3/§5/§7
+  - **Files:** `ironcore/tools/image.py` (new), `ironcore/providers/base.py`,
+    `ironcore/providers/openai_compat.py`, `ironcore/providers/ollama.py`,
+    `ironcore/envelope/profile.py`, `ironcore/envelope/seed.py`, `ironcore/envelope/runner.py`,
+    `ironcore/core/composer.py`, `ironcore/core/engine.py`, `ironcore/tools/default.py`,
+    `ironcore/config/settings.py`, `docs/CONTRACTS.md`, `README.md`,
+    `tests/tools/test_read_image.py` (new), `tests/test_vision.py` (new),
+    `tests/providers/test_openai_compat.py`, `tests/providers/test_ollama.py`,
+    `tests/test_envelope_seed.py`, `tests/test_composer.py`, `tests/test_report_card.py`,
+    `tests/tools/test_default.py`
+  - **Build:** model calls `read_image(path)` (READ risk, `_FsReadTool` plumbing, magic-byte
+    sniff PNG/JPEG/GIF/WEBP, 5MB cap) -> base64 payload in `ToolResult.data` -> engine
+    appends a role="user" carrier `Message` with additive `Message.images: list[ImageData]`
+    -> `_wire_messages` serializes non-empty images as OpenAI `image_url` content-parts
+    (base64 data URI; string content byte-identical otherwise). Capability: additive
+    `CapabilityProfile.vision` (default False) seeded from Ollama `/api/show`
+    `capabilities` (`ModelDetails.capabilities`), preserved through `run_probes(base=)`;
+    `[envelope] vision` (bool|None) config override wins; engine `_vision_enabled()`
+    consults the ACTIVE loop binding (MS-3) and late-binds the tool's `vision_check`
+    (duck-typed, only when the attribute exists and is None). Degrade: vision off -> the
+    tool returns a clear ok=False error and nothing image-shaped reaches the wire.
+    Composer `_select_history` charges `IMAGE_TOKEN_COST=512` per kept image, keeps the
+    newest `MAX_HISTORY_IMAGES=2`, strips older with an honest dropped marker. Report
+    card gains a `Vision: yes|no` line.
+  - **Accept:** e2e MockProvider turn lands the PNG's base64 on the provider wire in a
+    user-role carrier; vision=False turn has ok=False + zero image-bearing messages;
+    settings override wins; no-images wire shape byte-identical; seed sets vision from
+    capabilities; composer budget invariant holds under images; legacy envelope JSONs
+    load vision=False. **Verify:** `uv run --extra dev pytest
+    tests/tools/test_read_image.py tests/test_vision.py tests/providers
+    tests/test_composer.py tests/test_envelope_seed.py tests/test_report_card.py -q`
+    + full suite + ruff
+
 ---
 
 ### Dependency quick-map

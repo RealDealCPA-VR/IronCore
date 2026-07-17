@@ -80,7 +80,7 @@ from ironcore.core.verify import CommandVerifier
 from ironcore.envelope.outcomes import OutcomeLedger, generation_stamp
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.memory.handoff import Handoff, append_handoff, handoff_from_summary
-from ironcore.providers.base import Message, Provider, ToolCall
+from ironcore.providers.base import ImageData, Message, Provider, ToolCall
 from ironcore.providers.openai_compat import ProviderError
 from ironcore.safety.commands import classify_command
 from ironcore.safety.injection import (
@@ -210,6 +210,17 @@ class TurnEngine:
         self._conversation: list[Message] = []
         #: injection verdict on the PREVIOUS tool output, carried across the loop.
         self._pending_flag: Flag = Flag.NONE
+        # Vision seam (MS-6): late-bind read_image's capability check, duck-typed
+        # so every call site (TUI, demo, workflows, tests) is wired with zero
+        # orchestrator changes. Only when the attribute exists AND is still None —
+        # a custom registry's own read_image wiring is never clobbered.
+        vision_tool = self.tools.get("read_image")
+        if (
+            vision_tool is not None
+            and hasattr(vision_tool, "vision_check")
+            and vision_tool.vision_check is None
+        ):
+            vision_tool.vision_check = self._vision_enabled
 
     def repoint(self, provider: Provider, profile: CapabilityProfile) -> None:
         """Live model swap (MS-2, additive — docs/CONTRACTS.md §4): re-point the
@@ -253,6 +264,20 @@ class TurnEngine:
             self.outcomes = ledger
         ledger.ensure_stamp(generation_stamp(profile))
         return ledger
+
+    def _vision_enabled(self) -> bool:
+        """Whether image payloads may enter the conversation (MS-6).
+
+        The ``[envelope] vision`` config override wins when set; otherwise the
+        ACTIVE loop binding's profile decides (MS-3: a routed coder's vision
+        capability governs attachment, falling back to the primary profile when
+        unrouted). Read live — never cached — so ``repoint`` swaps and
+        hot-swapped seeds (``engine.profile = seed``) flip it mid-session."""
+        override = self.settings.envelope.vision
+        if override is not None:
+            return override
+        loop_role = "planner" if self.mode is Mode.PLAN else "coder"
+        return bool(self._binding(loop_role)[1].vision)
 
     # -- the loop -------------------------------------------------------------
 
@@ -630,6 +655,24 @@ class TurnEngine:
                     self._conversation.append(fed_back)
                     yield ToolCallFinished(turn_id=turn_id, call=call, result=result)
 
+                    # Vision carrier (MS-6): a successful image-bearing tool
+                    # result rides a SEPARATE role="user" message — image
+                    # content-parts on role="tool" are not portable across
+                    # servers, while user-role parts work for native,
+                    # strict_json, and text_protocol alike. Gated live on the
+                    # ACTIVE binding's capability: nothing image-shaped ever
+                    # reaches the wire when vision is off.
+                    if result.ok and self._vision_enabled():
+                        images = self._image_payloads(result.data.get("images"))
+                        if images:
+                            self._conversation.append(
+                                Message(
+                                    role="user",
+                                    content=f"[{len(images)} image(s) from {tool.name}]",
+                                    images=images,
+                                )
+                            )
+
                     # Edit-format evidence (MS-8): count only REAL apply
                     # outcomes — a success or a mechanical `patch_failure`
                     # (MS-4's canonical key). Missing-file / binary / argument
@@ -939,6 +982,27 @@ class TurnEngine:
         if text_frame:
             return Message(role="user", content=ironcall.render_result(call.id, content, ok))
         return Message(role="tool", content=content, tool_call_id=call.id, name=call.name)
+
+    @staticmethod
+    def _image_payloads(raw: object) -> list[ImageData]:
+        """``ToolResult.data['images']`` (plain dicts — tools may not import
+        provider types) -> wire ``ImageData``. Malformed entries are skipped:
+        a buggy tool payload must never crash the turn (MS-6)."""
+        if not isinstance(raw, list):
+            return []
+        images: list[ImageData] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            b64 = entry.get("base64")
+            if not isinstance(b64, str) or not b64:
+                continue
+            media_type = entry.get("media_type")
+            if isinstance(media_type, str) and media_type:
+                images.append(ImageData(base64=b64, media_type=media_type))
+            else:
+                images.append(ImageData(base64=b64))
+        return images
 
     def _feed_refusal(self, call: ToolCall, text_frame: bool, reason: str) -> None:
         """Append a framed refusal so a denied call is answered, not left dangling."""

@@ -13,7 +13,16 @@ from ironcore.safety.risk import ToolRisk
 from ironcore.tools.default import build_default_registry
 from ironcore.tools.fetch import DEFAULT_MAX_BYTES, MAX_FETCH_BYTES, FetchUrlTool
 
-LOCAL_TOOLS = {"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "shell"}
+LOCAL_TOOLS = {
+    "read_file",
+    "list_dir",
+    "glob",
+    "grep",
+    "write_file",
+    "edit_file",
+    "shell",
+    "read_image",  # MS-6: always registered — degrade is an honest tool error
+}
 
 
 def run(tool, **kwargs):
@@ -27,7 +36,7 @@ def network_on() -> Settings:
 # --- registry contents per settings matrix ------------------------------------
 
 
-def test_default_settings_register_exactly_the_seven_local_tools(tmp_path):
+def test_default_settings_register_exactly_the_eight_local_tools(tmp_path):
     registry = build_default_registry(Settings(), tmp_path)
     names = {t.name for t in registry.all()}
     assert names == LOCAL_TOOLS
@@ -46,7 +55,7 @@ def test_network_tools_true_adds_fetch_url(tmp_path):
 def test_assembled_registry_has_unique_names(tmp_path):
     registry = build_default_registry(network_on(), tmp_path)
     names = [t.name for t in registry.all()]
-    assert len(names) == len(set(names)) == 8
+    assert len(names) == len(set(names)) == 9
 
 
 # --- every spec is a valid model-facing function spec --------------------------

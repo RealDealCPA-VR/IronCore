@@ -25,6 +25,18 @@ class ToolCall:
     arguments: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ImageData:
+    """One image payload riding a Message (MS-6, additive — CONTRACTS #2).
+
+    ``base64`` is the raw file's base64 text; ``media_type`` a sniffed MIME
+    type. Serialized by providers as an OpenAI ``image_url`` content-part
+    with a ``data:`` URI — never fetched, never a filesystem path."""
+
+    base64: str
+    media_type: str = "image/png"
+
+
 @dataclass
 class Message:
     role: Role
@@ -33,6 +45,9 @@ class Message:
     #: set on role="tool" messages: which call this result answers
     tool_call_id: str | None = None
     name: str | None = None
+    #: attached images (MS-6, additive with a default — CONTRACTS #2): empty
+    #: for every text-only message, so existing constructions are unchanged.
+    images: list[ImageData] = field(default_factory=list)
 
 
 @dataclass

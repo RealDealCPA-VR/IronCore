@@ -127,3 +127,20 @@ def test_tuned_card_says_tuned_and_shows_the_lowered_ladders():
 def test_tuned_card_keeps_the_probe_timestamp():
     card = render_report_card(_tuned())
     assert "2026-07-15T00:00:00+00:00" in card  # the base measurement stands
+
+
+# -- vision line (MS-6) ---------------------------------------------------------
+
+
+def test_card_shows_vision_no_by_default():
+    card = render_report_card(CapabilityProfile(model_id="fresh"))
+    vision_line = next(line for line in card.splitlines() if line.startswith("Vision:"))
+    assert "no" in vision_line
+    assert card.isascii()
+
+
+def test_card_shows_vision_yes_when_the_profile_has_it():
+    card = render_report_card(CapabilityProfile(model_id="llava", vision=True))
+    vision_line = next(line for line in card.splitlines() if line.startswith("Vision:"))
+    assert "yes" in vision_line
+    assert card.isascii()

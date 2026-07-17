@@ -82,6 +82,9 @@ async def seed_profile(
                 profile.honest_context = min(details.num_ctx_configured, window)
             else:
                 profile.honest_context = min(window, _UNMEASURED_HONEST_CAP)
+            # Vision (MS-6): modern Ollama reports a "capabilities" array; a
+            # server that omits it honestly keeps the floor default (False).
+            profile.vision = "vision" in details.capabilities
         except Exception:  # noqa: BLE001 — best-effort introspection; keep the defaults
             pass
 

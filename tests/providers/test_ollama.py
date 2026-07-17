@@ -283,6 +283,20 @@ def test_show_model_failure_raises_provider_error_with_hint():
         run_closing(provider, provider.show_model("llama3:8b"))
 
 
+def test_show_model_parses_capabilities_array():
+    payload = dict(SHOW_JSON, capabilities=["completion", "vision", 42, None])
+    provider, _ = make_provider(lambda request: httpx.Response(200, json=payload))
+    details = run_closing(provider, provider.show_model("llava:7b"))
+    # string entries kept in order; garbage entries skipped, never a crash
+    assert details.capabilities == ["completion", "vision"]
+
+
+def test_show_model_capabilities_absent_is_empty_list():
+    provider, _ = make_provider(lambda request: httpx.Response(200, json=SHOW_JSON))
+    details = run_closing(provider, provider.show_model("llama3:8b"))
+    assert details.capabilities == []
+
+
 # --- keep_alive injection ----------------------------------------------------
 
 

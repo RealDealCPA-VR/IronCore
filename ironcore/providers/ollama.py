@@ -30,7 +30,7 @@ routed through self._redact / self._describe.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -72,6 +72,9 @@ class ModelDetails:
     #: server-configured num_ctx from the parameters blob (may be far
     #: below context_length — that gap is the MODELS.md §7 trap)
     num_ctx_configured: int | None = None
+    #: the /api/show "capabilities" array (modern Ollama reports e.g.
+    #: ["completion", "vision"]); [] when absent — never a guess (MS-6)
+    capabilities: list[str] = field(default_factory=list)
 
 
 def _as_int(value: Any) -> int | None:
@@ -260,11 +263,18 @@ class OllamaProvider(OpenAICompatProvider):
             match = _NUM_CTX_RE.search(parameters)
             if match:
                 num_ctx = int(match.group(1))
+        raw_caps = payload.get("capabilities")
+        capabilities = (
+            [cap for cap in raw_caps if isinstance(cap, str)]
+            if isinstance(raw_caps, list)
+            else []
+        )
         return ModelDetails(
             context_length=_find_context_length(payload.get("model_info")),
             quantization=quantization if isinstance(quantization, str) else None,
             family=family if isinstance(family, str) else None,
             num_ctx_configured=num_ctx,
+            capabilities=capabilities,
         )
 
     async def check_context(self, name: str, wanted_ctx: int) -> str | None:

@@ -531,3 +531,62 @@ def test_load_project_memory_uses_the_profile_ratio(tmp_path):
     assert estimate_tokens(dense, 2.0) <= 40
     assert estimate_tokens(legacy, 4.0) <= 40
     assert len(dense) < len(legacy)  # a denser tokenizer keeps fewer chars
+
+
+# -- image budgeting (MS-6): flat charge, keep-newest cap, honest drop ----------
+
+
+def _img_msg(text: str, n: int = 1) -> Message:
+    from ironcore.providers.base import ImageData
+
+    return Message(
+        role="user", content=text, images=[ImageData(base64="QUJD") for _ in range(n)]
+    )
+
+
+def test_history_keeps_images_only_on_the_newest_two():
+    from ironcore.core.composer import IMAGE_DROPPED_MARKER, _select_history
+
+    history = [_img_msg("first"), _img_msg("second"), _img_msg("third")]
+    out = _select_history(history, budget=4096)
+    assert [len(m.images) for m in out] == [0, 1, 1]  # newest 2 keep their image
+    assert IMAGE_DROPPED_MARKER in out[0].content  # oldest: honest strip
+    assert "first" in out[0].content  # the text survives the strip
+    assert IMAGE_DROPPED_MARKER not in out[1].content
+
+
+def test_image_charge_drops_a_message_the_text_alone_would_fit():
+    from ironcore.core.composer import IMAGE_TOKEN_COST, _select_history
+
+    msg = _img_msg("tiny")
+    # text costs 1 token; the image charge alone exceeds the region
+    out = _select_history([msg], budget=IMAGE_TOKEN_COST - 1)
+    assert out == []
+    # without an image the same text fits fine
+    assert _select_history([Message(role="user", content="tiny")], budget=8) != []
+
+
+def test_kept_images_are_charged_against_the_history_budget():
+    from ironcore.core.composer import IMAGE_TOKEN_COST, _select_history
+
+    filler = [Message(role="user", content="h" * 400) for _ in range(4)]  # 100 tokens each
+    history = [*filler, _img_msg("shot")]
+    budget = IMAGE_TOKEN_COST + 250
+    out = _select_history(history, budget=budget)
+    # the newest (image) message costs ~513; only two 100-token fillers still fit
+    assert len(out) == 3
+    assert out[-1].images and "shot" in out[-1].content
+
+
+def test_compose_budget_invariant_holds_with_images():
+    profile = _profile(4096)
+    history = [_img_msg(f"screenshot {i} " * 20) for i in range(5)]
+    msgs = _compose(
+        SessionState(turn_count=0, goal="look at the shots"),
+        profile,
+        working_set={"a.py": "print('a')\n" * 40},
+        history=history,
+        user_input="compare them",
+    )
+    assert _content_tokens(msgs) <= _budget_ceiling(profile)
+    assert sum(len(m.images) for m in msgs) <= 2  # the keep-newest cap held

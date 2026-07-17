@@ -40,6 +40,15 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
   it records `last_response_format`, so tests can prove which profile sized each call's
   `max_tokens`/temperature (per-role windows; best-of-N resampling consumes the list).
   *Migration:* none — recording only; no request/response behavior changes.
+- *Additive (MS-6):* `Message.images: list[ImageData]` (default empty) and
+  `ImageData(base64, media_type)` are frozen wire types. Non-empty `images` serialize as
+  OpenAI content-parts — one `image_url` part per image carrying a base64 `data:` URI,
+  plus a `text` part when `content` is non-empty; messages without images keep the exact
+  plain-string content shape. Providers never raise on images (a server that rejects them
+  surfaces the normal `ProviderError` path), and `MockProvider` records image-bearing
+  messages via `calls` like any other. *Migration:* none — purely additive with a
+  default; every existing `Message` construction and `dataclasses.replace` call is
+  unchanged.
 - Malformed model output is repairable data (an `error` event with `repairable: true`),
   not an exception.
 - `MockProvider` remains a drop-in for every consumer — nothing may require a concrete
@@ -102,6 +111,12 @@ owns them, then freezes the *budget shares* here).
   token estimator divides character counts by it; unprobed and seeded profiles keep the
   `4.0` default. *Migration (MS-1):* envelope JSONs cached before this field load as `4.0`
   via the pydantic default — byte-identical legacy packing; no re-probe required.
+  `vision` (`bool`, default `False`) is an additive capability field: floor default
+  `False`, seeded from endpoint introspection (Ollama `/api/show` `capabilities`),
+  preserved through `run_probes(base=...)`; `[envelope] vision` in config overrides it.
+  The engine/tools consult it ONLY for image attachment — never for protocol selection.
+  *Migration (MS-6):* envelope JSONs cached before this field load as `False` via the
+  pydantic default; no re-probe required.
 - Ladder orders and thresholds: tool `native 0.95 / strict_json 0.90 / text floor`; edit
   `unified_diff 0.90 / search_replace 0.85 / whole_file floor`; `anchor_cadence` clamp
   [2, 12]. The engine selects protocols exclusively via `recommended_*`.

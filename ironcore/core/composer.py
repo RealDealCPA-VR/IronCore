@@ -95,6 +95,18 @@ WORKING_SET_SHARE = 0.40
 HISTORY_SHARE = 0.25
 RESPONSE_HEADROOM_SHARE = 0.15
 
+# -- image budgeting (MS-6) ----------------------------------------------------
+# Images ride Message.images, not content, so chars-based estimation never sees
+# them. Each KEPT image is charged a documented flat token cost against the
+# history budget — an honest approximation, same class as the chars/ratio
+# heuristic (a very high-res image on a tiny window may still truncate
+# server-side). Only the newest MAX_HISTORY_IMAGES stay attached; older image
+# messages keep their text with an honest dropped marker so the model knows to
+# re-run read_image if it needs the pixels again.
+IMAGE_TOKEN_COST = 512
+MAX_HISTORY_IMAGES = 2
+IMAGE_DROPPED_MARKER = "\n[image dropped from context; re-run read_image to view it again]"
+
 # -- honest truncation markers (kept short; they cost budget too) --------------
 SYSTEM_MARKER = "\n… [system prompt truncated to fit context budget]"
 MEMORY_MARKER = "\n… [project memory truncated to fit context budget]"
@@ -388,17 +400,32 @@ def _build_working_set(
 def _select_history(history: list[Message], budget: int, cpt: float = 4.0) -> list[Message]:
     """Most-recent history messages whose redacted content fits `budget`, back
     in chronological order. Oldest messages are dropped first; roles, tool_calls
-    and ids are preserved (only content is redacted)."""
+    and ids are preserved (only content is redacted). Images (MS-6): the walk is
+    newest-first, so the newest MAX_HISTORY_IMAGES attached images are kept —
+    each charged IMAGE_TOKEN_COST against the budget — and any older image
+    message is stripped to text plus an honest IMAGE_DROPPED_MARKER."""
     if budget <= 0 or not history:
         return []
     selected: list[Message] = []
     used = 0
+    images_kept = 0
     for msg in reversed(history):
         redacted = redact_context(msg.content)
+        keep_images = bool(msg.images) and (
+            images_kept + len(msg.images) <= MAX_HISTORY_IMAGES
+        )
+        if msg.images and not keep_images:
+            redacted += IMAGE_DROPPED_MARKER
         cost = estimate_tokens(redacted, cpt)
+        if keep_images:
+            cost += IMAGE_TOKEN_COST * len(msg.images)
         if used + cost > budget:
             break
-        selected.append(replace(msg, content=redacted))
+        if keep_images:
+            images_kept += len(msg.images)
+            selected.append(replace(msg, content=redacted))
+        else:
+            selected.append(replace(msg, content=redacted, images=[]))
         used += cost
     selected.reverse()
     return selected

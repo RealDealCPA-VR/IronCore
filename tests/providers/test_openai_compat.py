@@ -12,8 +12,8 @@ import json
 import httpx
 import pytest
 
-from ironcore.providers.base import Message, SamplingPolicy, StreamEvent, ToolCall
-from ironcore.providers.openai_compat import OpenAICompatProvider, ProviderError
+from ironcore.providers.base import ImageData, Message, SamplingPolicy, StreamEvent, ToolCall
+from ironcore.providers.openai_compat import OpenAICompatProvider, ProviderError, _wire_messages
 
 BASE = "http://testserver/v1"
 
@@ -426,6 +426,65 @@ def test_extra_body_wins_a_clash_with_a_same_named_body_key():
     )
     assert body["response_format"] == {"type": "json_schema"}
     assert body["max_tokens"] == 7
+
+
+# --- image wire shape (MS-6) --------------------------------------------------
+
+
+def test_images_serialize_as_content_parts_with_data_uri():
+    parts = _wire_messages(
+        [
+            Message(
+                role="user",
+                content="what is this?",
+                images=[ImageData(base64="QUJD", media_type="image/jpeg")],
+            )
+        ]
+    )
+    assert parts == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "what is this?"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/jpeg;base64,QUJD"},
+                },
+            ],
+        }
+    ]
+
+
+def test_image_with_empty_content_emits_no_text_part():
+    (entry,) = _wire_messages([Message(role="user", images=[ImageData(base64="QUJD")])])
+    assert entry["content"] == [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}
+    ]
+
+
+def test_messages_without_images_keep_the_exact_string_content_shape():
+    # byte-identical regression: the images feature must not disturb text turns
+    (entry,) = _wire_messages([Message(role="user", content="hi")])
+    assert entry == {"role": "user", "content": "hi"}
+
+
+def test_complete_carries_image_parts_in_the_request_body():
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content.decode())
+        return httpx.Response(200, json=completion_json())
+
+    provider, _ = make_provider(handler)
+    complete_one(
+        provider,
+        messages=[
+            Message(role="user", content="look", images=[ImageData(base64="QUJD")])
+        ],
+    )
+    content = seen["body"]["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "look"}
+    assert content[1]["image_url"]["url"] == "data:image/png;base64,QUJD"
 
 
 # --- redaction ---------------------------------------------------------------

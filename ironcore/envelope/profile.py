@@ -42,6 +42,12 @@ class CapabilityProfile(BaseModel):
     #: counts by this ratio. Additive field — CONTRACTS.md §5; envelope JSONs
     #: written before it exist load as 4.0 via this default.
     chars_per_token: float = 4.0
+    #: whether the model accepts image inputs (MS-6). Floor-conservative default
+    #: False; seeded from endpoint introspection (Ollama /api/show capabilities),
+    #: overridable via [envelope] vision. Consulted ONLY for image attachment —
+    #: never for protocol selection. Additive field — CONTRACTS.md §5; envelope
+    #: JSONs written before it exist load as False via this default.
+    vision: bool = False
 
     # Reliability scores, [0..1]
     tool_protocols: dict[str, float] = Field(default_factory=dict)
