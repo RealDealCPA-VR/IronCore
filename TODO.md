@@ -588,6 +588,43 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/test_model_swap.py tests/providers/test_registry.py tests/test_engine.py
     tests/tui/test_app.py -q` + full suite + ruff
 
+- [x] **MS-3 · A model per role, each measured** *(done: fable-ms3, 2026-07-16 — RoleRouter
+  routes planner (PLAN turns) / coder (all other turns) / summarizer (compaction) to their
+  own provider + own measured envelope from the MS-2 shared cache; engine hot loop reads the
+  ACTIVE (provider, profile) locals; 1358 tests green (21 new), ruff clean; proof: routed
+  turn hit coder 1/primary 0 with max_tokens=307 sized by the CODER's 2048 window)*
+  - **Depends:** MS-2, IC-204, IC-608 · **Spec:** README Moonshots; CONTRACTS §2/§4/§5;
+    docs/MODELS.md §5
+  - **Files:** `ironcore/core/roles.py` (new), `ironcore/core/engine.py`,
+    `ironcore/providers/mock.py`, `ironcore/tui/app.py`, `ironcore/commands/workflowcmd.py`,
+    `ironcore/commands/lifecyclecmd.py`, `ironcore/commands/envelopecmd.py`,
+    `docs/CONTRACTS.md`, `docs/MODELS.md`, `README.md`, `tests/test_roles.py` (new),
+    `tests/test_engine_roles.py` (new), `tests/test_cmd_lifecycle.py`,
+    `tests/test_envelope_wiring.py`, `tests/test_cmd_workflow.py`
+  - **Build:** NEW `core/roles.py` `RoleRouter(settings, *, registry, envelope_dir,
+    providers, profiles)`: `resolve(role) -> (Provider, CapabilityProfile) | None` (None =
+    the caller's primary pair — unset role, identity model, or closed/absent registry:
+    degrade, never crash); profiles from the per-model cache accepting only MEASURED disk
+    entries (`source=='probed'` or `probed_at`, the /model cache-hit rule) else floor
+    defaults; `set_profile` hot-swap. Engine: additive keyword-only `roles=` + `_binding`
+    helper; `run_turn` resolves the ACTIVE (provider, profile) once per turn (planner on
+    PLAN, coder otherwise) and every read — protocol, should_compact, memory, compose,
+    sampling, headroom, system-prompt steer, `provider.stream` — uses the ACTIVE profile;
+    compaction routes via `_binding("summarizer")`; `_headroom_tokens`/`_system_prompt`
+    gain optional `profile=` defaulting to the primary. MockProvider additively records
+    `last_sampling`/`sampling_calls` (CONTRACTS §2, same commit). `from_settings` wires
+    `RoleRouter(..., envelope_dir=envelope_dir)` (the MS-2 single resolution); workflow
+    subagents inherit `roles=`; `/compact` routes through the summarizer binding;
+    `/envelope` appends a roles tail (model, measured/floor, protocol, ctx + the /model
+    measure hint).
+  - **Accept:** zero-config engines byte-identical (no router / unset roles → primary pair;
+    full existing suite is the regression harness); routed coder/planner/summarizer each
+    get exactly their calls with THEIR protocol fragment + window-sized max_tokens; closed
+    registry degrades to a completed turn on the primary; roles tail lists measured vs
+    floor honestly. **Verify:** `uv run --extra dev pytest tests/test_roles.py
+    tests/test_engine_roles.py tests/test_cmd_lifecycle.py tests/test_envelope_wiring.py
+    tests/test_cmd_workflow.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map

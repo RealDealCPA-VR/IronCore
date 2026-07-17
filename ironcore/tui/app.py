@@ -81,6 +81,7 @@ from ironcore.core.events import (
     TurnError,
     TurnStarted,
 )
+from ironcore.core.roles import RoleRouter
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.envelope.suite import default_envelope_dir
 from ironcore.memory.sessions import SessionStore
@@ -641,6 +642,10 @@ class IronCoreApp(App):
             mode = Mode(settings.safety.mode)
         except ValueError:
             mode = Mode.MANUAL
+        # per-role routing (MS-3): routed roles get their own provider from the
+        # registry's per-model cache plus their own envelope from the SAME
+        # envelope_dir the boot load / /model swaps / background deepens use.
+        roles = RoleRouter(settings, registry=provider_registry, envelope_dir=envelope_dir)
         engine = TurnEngine(
             provider_registry.default,
             tools,
@@ -648,6 +653,7 @@ class IronCoreApp(App):
             profile,
             mode,
             workspace=ws,
+            roles=roles,
         )
         # mold to the model on first use (instant-on-profiling): for an unprobed
         # model, seed instantly from endpoint introspection then deep-probe to

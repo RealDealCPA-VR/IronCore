@@ -53,12 +53,27 @@ async def _compact_coro(engine, settings) -> str:
     original = len(conversation)
     summary = await compact(
         conversation,
-        provider=engine.provider,
+        provider=_summarizer_provider(engine),
         model=settings.roles.summarizer or "",
     )
     engine._conversation = [summary, *conversation[-_KEEP_RECENT:]]
     kept = len(engine._conversation) - 1
     return f"Compacted {original} message(s) into 1 summary + {kept} recent message(s)."
+
+
+def _summarizer_provider(engine):
+    """The routed summarizer provider (MS-3) when the engine carries a RoleRouter,
+    else the engine's own provider — mirrors the in-turn compaction seam. Duck-typed
+    and degrading (commands never assume a live router)."""
+    roles = getattr(engine, "roles", None)
+    if roles is not None:
+        try:
+            routed = roles.resolve("summarizer")
+        except Exception:  # noqa: BLE001 — a broken router must not break /compact
+            routed = None
+        if routed is not None:
+            return routed[0]
+    return engine.provider
 
 
 # -- /undo and /redo ----------------------------------------------------------

@@ -74,6 +74,25 @@ Patterns that work: 70B plans + 30B executes (quality plans, fast iterations); 3
 summarizes/compacts (latency); anything + *different-family* verifier (decorrelated errors —
 a model grading its own homework shares its own blind spots).
 
+**Each role, measured (MS-3).** The engine's `RoleRouter` (`core/roles.py`) resolves every
+routed role to its own provider *and its own capability envelope*, loaded from the same
+per-model cache (`~/.ironcore/envelopes/<slug>.json`) that `/probe` and `/model` write —
+so a routed coder runs on **its** measured wire protocol, honest context, and sampling, and
+the composer/compaction budgets against **its** window (a small-window coder compacts
+earlier: that is the window being composed into). An unmeasured role model honestly runs on
+floor-conservative defaults; measure it into the shared cache by switching to it once with
+`/model <role-model>` and back. `/envelope` appends a per-role status tail. Worked example:
+
+```toml
+[provider]
+model = "qwen3-coder:30b"        # the primary — plans in PLAN mode unless routed
+
+[roles]
+planner = "llama3.3:70b"          # PLAN-mode turns think on the 70B
+coder   = "qwen2.5-coder:7b"      # every other turn executes on the fast 7B
+# summarizer / verifier unset -> the primary model handles them
+```
+
 ## 6. Sampling
 
 Envelope stores working defaults per model. Harness policy: temperature 0.1–0.3 for tool

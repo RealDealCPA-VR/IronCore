@@ -142,6 +142,11 @@ class MockProvider(Provider):
         # tests can assert the engine requested server-side constrained decoding.
         self.last_response_format: dict | None = None
         self.last_extra_body: dict | None = None
+        # sampling seam (CONTRACTS #2, MS-3): the per-call SamplingPolicy, so
+        # tests can prove which profile sized max_tokens/temperature per call
+        # (per-role windows; MS-4 resample candidates consume the full list).
+        self.last_sampling: SamplingPolicy | None = None
+        self.sampling_calls: list[SamplingPolicy | None] = []
 
     def push(self, result: ScriptEntry) -> None:
         self.script.append(result)
@@ -190,6 +195,8 @@ class MockProvider(Provider):
     ) -> CompletionResult:
         self.last_response_format = response_format
         self.last_extra_body = extra_body
+        self.last_sampling = sampling
+        self.sampling_calls.append(sampling)
         entry = self._pop_entry(messages)
         if isinstance(entry, CompletionResult):
             return entry
@@ -218,6 +225,8 @@ class MockProvider(Provider):
     ) -> AsyncIterator[StreamEvent]:
         self.last_response_format = response_format
         self.last_extra_body = extra_body
+        self.last_sampling = sampling
+        self.sampling_calls.append(sampling)
         entry = self._pop_entry(messages)
         if isinstance(entry, CompletionResult):
             for event in _chunked(entry.message.content):

@@ -20,6 +20,7 @@ from typing import Any
 
 from ironcore.commands.base import CommandContext, SlashCommand
 from ironcore.envelope.runner import render_report_card
+from ironcore.providers.registry import VALID_ROLES
 
 
 def _cmd_envelope(ctx: CommandContext, args: str) -> str:
@@ -30,7 +31,40 @@ def _cmd_envelope(ctx: CommandContext, args: str) -> str:
     card = render_report_card(profile)
     if profile.probed_at is None:
         card += "\n\nThis model is UNPROBED (floor defaults). Run /probe to measure + adapt to it."
-    return card
+    return card + _roles_tail(engine)
+
+
+def _roles_tail(engine: Any) -> str:
+    """Routed-role lines (MS-3), appended suffix-only after the primary card:
+    each routed role's model, measured-vs-floor status, recommended tool
+    protocol, and honest context — read through the live RoleRouter so the
+    display and the turn loop can never disagree. Empty when nothing routes."""
+    router = getattr(engine, "roles", None)
+    if router is None:
+        return ""
+    lines: list[str] = []
+    for role in VALID_ROLES:
+        try:
+            routed = router.resolve(role)
+        except Exception:  # noqa: BLE001 — a broken router must not break /envelope
+            continue
+        if routed is None:
+            continue  # unset / identity / degraded — the primary card covers it
+        _, prof = routed
+        measured = prof.source == "probed" or prof.probed_at is not None
+        status = "measured" if measured else "unprobed — floor defaults"
+        lines.append(
+            f"  {role:<10} -> {prof.model_id}  [{status}]  "
+            f"tools={prof.recommended_tool_protocol()}  ctx={prof.honest_context:,}"
+        )
+    if not lines:
+        return ""
+    return (
+        "\n\nRoles (routed models):\n"
+        + "\n".join(lines)
+        + "\n(a role model is measured into the shared envelope cache by switching to it "
+        "once with /model <role-model>, then /model back)"
+    )
 
 
 def _cmd_probe(ctx: CommandContext, args: str) -> str:

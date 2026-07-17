@@ -134,6 +134,39 @@ def test_envelope_command_renders_the_profile(tmp_path):
     assert "Probing" in ack  # returns an ack, schedules the real work
 
 
+def test_envelope_command_appends_the_roles_tail(tmp_path):
+    """MS-3: /envelope lists each ROUTED role's model + measured status after the
+    primary card, and points at /model as the way a role model gets measured."""
+    from ironcore.core.roles import RoleRouter
+
+    settings = Settings.model_validate(
+        {"roles": {"planner": "deep-70b", "coder": "tiny-7b"}}
+    )
+    router = RoleRouter(
+        settings,
+        providers={"planner": MockProvider(), "coder": MockProvider()},
+        profiles={
+            "deep-70b": CapabilityProfile(
+                model_id="deep-70b",
+                honest_context=16384,
+                tool_protocols={"native": 1.0},
+                probed_at="2026-07-16T00:00:00Z",
+                source="probed",
+            ),
+            "tiny-7b": CapabilityProfile(model_id="tiny-7b"),  # unmeasured floor
+        },
+    )
+    engine = _engine(tmp_path, MockProvider([]), _profile(tool_protocols={"native": 1.0}))
+    engine.roles = router
+    ctx = CommandContext(settings=settings, extra={"engine": engine})
+    out = build_cmds().dispatch("/envelope", ctx)
+    assert "mock" in out  # the primary card still leads
+    assert "Roles (routed models):" in out
+    assert "planner" in out and "deep-70b" in out and "[measured]" in out
+    assert "coder" in out and "tiny-7b" in out and "unprobed — floor defaults" in out
+    assert "/model" in out  # how a role model gets measured into the shared cache
+
+
 # --- edit-format steering: the engine tells the model the measured format ---
 
 

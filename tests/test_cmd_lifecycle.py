@@ -82,6 +82,34 @@ def test_compact_schedules_and_replaces_conversation():
     assert engine._conversation[0].content.startswith("# Compacted history")
 
 
+def test_compact_routes_to_the_summarizer_role():
+    # MS-3: when the engine carries a RoleRouter that routes the summarizer,
+    # /compact's model call goes to THAT provider, not the engine's primary.
+    from ironcore.core.roles import RoleRouter
+
+    schedule, captured = _sync_schedule()
+    conversation = [Message(role="user", content=f"message {i}") for i in range(12)]
+    primary = MockProvider()  # must receive nothing
+    summarizer = MockProvider([_summary_result()])
+    settings = Settings.model_validate(
+        {"provider": {"model": "big"}, "roles": {"summarizer": "small-8b"}}
+    )
+    engine = _Engine(
+        conversation, primary, CapabilityProfile(model_id="big", honest_context=4096)
+    )
+    engine.roles = RoleRouter(
+        settings,
+        providers={"summarizer": summarizer},
+        profiles={"small-8b": CapabilityProfile(model_id="small-8b")},
+    )
+    ctx = CommandContext(settings=settings)
+    ctx.extra.update(engine=engine, schedule=schedule)
+    assert "Compacting 12" in _cmd_compact(ctx, "")
+    assert captured and "Compacted 12" in captured[0]
+    assert len(summarizer.calls) == 1 and primary.calls == []
+    assert engine._conversation[0].content.startswith("# Compacted history")
+
+
 def test_compact_without_engine():
     ctx = CommandContext(settings=Settings())
     assert "no engine" in _cmd_compact(ctx, "").lower()

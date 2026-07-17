@@ -39,6 +39,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ironcore.config.settings import Settings
 from ironcore.core import guided, ironcall
@@ -86,6 +87,9 @@ from ironcore.safety.policy import Decision, decide
 from ironcore.safety.risk import ToolRisk
 from ironcore.safety.snapshots import SnapshotError
 from ironcore.tools.base import Tool, ToolRegistry
+
+if TYPE_CHECKING:  # annotations only — the router is injected, never constructed here
+    from ironcore.core.roles import RoleRouter
 
 #: Short, honest floor system prompt. IRONCORE.md / envelope templates layer on
 #: top later (IC-501 memory, IC-802 /init); this is the always-present base.
@@ -156,12 +160,16 @@ class TurnEngine:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         handoff_path: str | Path | None = _AUTO_HANDOFF,  # type: ignore[assignment]
         author: str | None = None,
+        roles: RoleRouter | None = None,
     ) -> None:
         self.provider = provider
         self.tools = tools
         self.settings = settings
         self.profile = profile
         self.mode = mode
+        #: per-role (provider, profile) routing (MS-3, additive — CONTRACTS §4);
+        #: None (the default) keeps every call on the primary pair.
+        self.roles = roles
         self.workspace = Path(workspace)
         self.approvals = approvals if approvals is not None else ApprovalBroker()
         self.snapshots = snapshots
@@ -201,6 +209,19 @@ class TurnEngine:
         self.profile = profile
         self.handoff_author = f"ironcore/{profile.model_id or 'unknown'}"
 
+    def _binding(self, role: str) -> tuple[Provider, CapabilityProfile]:
+        """The ACTIVE ``(provider, profile)`` pair for ``role`` (MS-3).
+
+        A routed role gets its own provider AND that model's own envelope; an
+        unrouted role (or no router at all) follows the engine's primary pair —
+        so ``repoint`` swaps and background seed/probe hot-swaps keep flowing
+        to every unrouted role, and zero-config behavior is unchanged."""
+        if self.roles is not None:
+            routed = self.roles.resolve(role)
+            if routed is not None:
+                return routed
+        return self.provider, self.profile
+
     # -- the loop -------------------------------------------------------------
 
     async def run_turn(self, user_input: str) -> AsyncIterator[Event]:
@@ -216,7 +237,15 @@ class TurnEngine:
 
         self._conversation.append(Message(role="user", content=user_input))
 
-        protocol = self.profile.recommended_tool_protocol()
+        # Per-role routing (MS-3): the main-loop call is the PLANNER when the
+        # session is in PLAN mode (the engine's read-only think/propose step)
+        # and the CODER otherwise; compaction routes to the SUMMARIZER at its
+        # call site below. The ACTIVE pair is resolved once per turn; protocol,
+        # window budgets, and sampling all read the ACTIVE profile, so a routed
+        # role runs on ITS measured envelope, not the primary model's.
+        loop_role = "planner" if self.mode is Mode.PLAN else "coder"
+        provider, profile = self._binding(loop_role)
+        protocol = profile.recommended_tool_protocol()
         repair_attempt = 0
         any_executed = False
         any_denied = False
@@ -241,11 +270,11 @@ class TurnEngine:
                 # distill older history into one handoff-grade summary + the
                 # recent tail. The summarizer call counts against the budget so a
                 # compaction storm can't bypass runaway protection (SPEC §5.6/T5).
-                if not compacted and should_compact(self._conversation, profile=self.profile):
+                if not compacted and should_compact(self._conversation, profile=profile):
                     compacted = True
                     summary = await compact(
                         self._conversation,
-                        provider=self.provider,
+                        provider=self._binding("summarizer")[0],
                         model=self.settings.roles.summarizer or "",
                     )
                     self._conversation = [summary, *self._conversation[-_KEEP_RECENT:]]
@@ -263,19 +292,19 @@ class TurnEngine:
                 text_frame = text_protocol or is_guided
                 # IRONCORE.md project memory rides the system share (IC-1003);
                 # re-read per turn so mid-session /init and /memory edits land.
-                memory = load_project_memory(self.workspace, profile=self.profile)
+                memory = load_project_memory(self.workspace, profile=profile)
                 messages = compose(
                     state,
-                    profile=self.profile,
+                    profile=profile,
                     settings=self.settings,
-                    system_prompt=self._system_prompt(protocol),
+                    system_prompt=self._system_prompt(protocol, profile=profile),
                     working_set=self._working_set(),
                     history=self._conversation,
                     user_input="",
                     memory=memory,
                 )
-                sampling = resolve_sampling(self.profile, kind="tool", attempt=repair_attempt)
-                sampling = replace(sampling, max_tokens=self._headroom_tokens())
+                sampling = resolve_sampling(profile, kind="tool", attempt=repair_attempt)
+                sampling = replace(sampling, max_tokens=self._headroom_tokens(profile))
                 tool_specs = None if text_frame else self.tools.specs()
                 # strict_json constrains the server to emit exactly one JSON tool
                 # call; the model emits it directly, so we send no native specs.
@@ -294,7 +323,7 @@ class TurnEngine:
                 stream_kwargs: dict = {"tools": tool_specs, "sampling": sampling}
                 if response_format is not None:
                     stream_kwargs["response_format"] = response_format
-                async for ev in self.provider.stream(messages, **stream_kwargs):
+                async for ev in provider.stream(messages, **stream_kwargs):
                     if ev.kind == "text":
                         text_parts.append(ev.text)
                         # Guided text IS the JSON tool-call scaffold, not prose:
@@ -592,7 +621,11 @@ class TurnEngine:
     # -- context assembly -----------------------------------------------------
 
     def _system_prompt(
-        self, protocol: str = "native", *, text_protocol: bool | None = None
+        self,
+        protocol: str = "native",
+        *,
+        text_protocol: bool | None = None,
+        profile: CapabilityProfile | None = None,
     ) -> str:
         """Base prompt + the standing untrusted-data rule; steer the model to the
         edit format the envelope measured as most reliable for it (IC-605). On the
@@ -602,12 +635,16 @@ class TurnEngine:
 
         ``protocol`` is the active tool-call rung. ``text_protocol`` is a
         backward-compat bool alias for existing callers (True -> the text floor);
-        new code passes ``protocol``."""
+        new code passes ``protocol``. ``profile`` is the ACTIVE role's envelope
+        (MS-3) — the edit-format steer must match the model actually called;
+        ``None`` keeps the primary ``self.profile`` (back-compat)."""
         if text_protocol is not None:
             protocol = "text_protocol" if text_protocol else "native"
+        if profile is None:
+            profile = self.profile
         prompt = f"{self.system_prompt}\n\n{UNTRUSTED_PREAMBLE}"
         if self.tools.get("edit_file") is not None:
-            fmt = self.profile.recommended_edit_format()
+            fmt = profile.recommended_edit_format()
             prompt += (
                 f"\n\nWhen you change a file with edit_file, prefer format={fmt!r} — "
                 "it is the edit format this model applies most reliably."
@@ -620,9 +657,12 @@ class TurnEngine:
             prompt = f"{fragment}\n\n{prompt}"
         return prompt
 
-    def _headroom_tokens(self) -> int:
-        """Response budget the composer reserves (15% of honest context)."""
-        return max(256, int(self.profile.honest_context * RESPONSE_HEADROOM_SHARE))
+    def _headroom_tokens(self, profile: CapabilityProfile | None = None) -> int:
+        """Response budget the composer reserves (15% of honest context). The
+        ACTIVE role's profile (MS-3) sizes it; ``None`` = the primary profile."""
+        if profile is None:
+            profile = self.profile
+        return max(256, int(profile.honest_context * RESPONSE_HEADROOM_SHARE))
 
     def _working_set(self) -> dict[str, str]:
         """MRU-touched workspace files, re-presented as DATA (SPEC §5.2)."""

@@ -272,6 +272,10 @@ def _factory_from_engine(engine: Any) -> Callable[[], TurnEngine]:
             workspace=engine.workspace,
             snapshots=None,
             approvals=_unattended_broker(),
+            # subagents inherit per-role routing (MS-3): a routed planner/coder
+            # applies inside workflow engines too; None stays None (getattr
+            # tolerates duck-typed test engines that predate the attribute).
+            roles=getattr(engine, "roles", None),
         )
 
     return make

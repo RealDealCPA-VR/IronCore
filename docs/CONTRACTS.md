@@ -35,6 +35,11 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
 - `complete`/`stream` accept optional keyword-only `response_format` + `extra_body`
   (default `None`) — additive, backward-compatible guided-decoding knobs merged into the
   request body (`extra_body` wins a key clash); `MockProvider` records them.
+- *Additive (MS-3):* `MockProvider` also records the per-call `sampling` policy —
+  `last_sampling` (most recent) and `sampling_calls` (every call, in order) — the same way
+  it records `last_response_format`, so tests can prove which profile sized each call's
+  `max_tokens`/temperature (per-role windows; best-of-N resampling consumes the list).
+  *Migration:* none — recording only; no request/response behavior changes.
 - Malformed model output is repairable data (an `error` event with `repairable: true`),
   not an exception.
 - `MockProvider` remains a drop-in for every consumer — nothing may require a concrete
@@ -70,6 +75,14 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
   `profile.recommended_*`. *Migration:* none — existing constructors and turn flows are
   untouched; old provider instances stay open (the `ProviderRegistry` owns their lifecycle
   via `close_all`).
+- *Additive (MS-3):* `TurnEngine.__init__` additionally accepts keyword-only
+  `roles: RoleRouter | None = None` (`core/roles.py`, default `None`). When set, each
+  provider call resolves its (provider, profile) by role — `planner` for PLAN-mode turns,
+  `coder` otherwise, `summarizer` for compaction; an UNSET role always uses the engine's
+  primary `(provider, profile)` pair, so zero-config behavior is unchanged. Protocol
+  selection still goes exclusively via the ACTIVE profile's `recommended_*` (§5).
+  *Migration:* none — existing constructors pass no `roles` and stay byte-identical;
+  routing degrades to the primary pair (never an error) when a role cannot resolve.
 
 **Not frozen:** internal state-machine implementation; context-composer heuristics (IC-501
 owns them, then freezes the *budget shares* here).

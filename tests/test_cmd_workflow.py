@@ -284,3 +284,16 @@ def test_run_workflow_coroutine_returns_summary_and_emits_beats(tmp_path):
     # beats were delivered to on_progress in order, ending with workflow_done
     assert beats[0].kind == "phase_start"
     assert beats[-1].kind == "workflow_done"
+
+
+def test_factory_from_engine_inherits_role_routing(tmp_path):
+    """MS-3: subagent engines minted off the live engine inherit its RoleRouter
+    (routed planner/coder apply inside workflows too); None stays None."""
+    from ironcore.commands.workflowcmd import _factory_from_engine
+    from ironcore.core.roles import RoleRouter
+
+    engine = _engine_over(tmp_path, MockProvider())
+    assert _factory_from_engine(engine)().roles is None  # unrouted stays unrouted
+    engine.roles = RoleRouter(engine.settings)
+    made = _factory_from_engine(engine)()
+    assert made.roles is engine.roles

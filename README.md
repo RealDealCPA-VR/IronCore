@@ -182,9 +182,6 @@ Plan-mode workflow escape) were caught and fixed exactly this way.
 v0.1 molds to your model — instantly (above), and the strict-JSON rung is now real
 server-side guided decoding (above). These are the bets that would make it mold *deeper*:
 
-- **A model per role, each measured.** Route planning to a 70B and execution to a fast 7B (or
-  the reverse), with a separate capability envelope per role — pick the right brain for each
-  step of the loop.
 - **Best-of-N escape hatches.** When a weak model dead-ends on a step that has a mechanical
   verifier (patch applies / test passes), resample and race candidates instead of failing.
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
@@ -202,6 +199,11 @@ server-side guided decoding (above). These are the bets that would make it mold 
   cached-per-model provider plus the on-disk envelope cache — a measured model hot-swaps its
   profile instantly, an unmeasured one runs on floor defaults while it is seeded and
   deep-probed in the background, and the cache remembers every model you've measured.
+- **A model per role, each measured.** The `[roles]` config now routes the turn loop itself:
+  PLAN-mode turns run on the planner model, execution turns on the coder, compaction on the
+  summarizer — each with *its own* capability envelope from the shared cache, so every routed
+  call uses that model's measured wire protocol, context window, and sampling (floor defaults,
+  honestly, until a role model is measured; `/envelope` shows per-role status).
 
 ## Contributing (humans *and* agents)
 
