@@ -3,15 +3,45 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] — 2026-07-17
 
-### Added
-- **MCP tool servers.** `[mcp.servers.<name>]` config entries connect stdio
-  MCP servers through a dependency-free JSON-RPC client (spawned directly,
-  never via a shell); their tools register as `mcp__<server>__<tool>` at NET
-  risk — never auto-approved, denied in Plan mode, and only present at all
-  when `safety.network_tools = true`. Output is fenced UNTRUSTED like every
-  tool, and `ironcore doctor` reports the configured server lineup.
+The moonshots release: every bet in the README's Moonshots section has landed —
+five that mold the harness *deeper* to the measured model, two that take it
+beyond text, and one that opens it up — plus the two envelope upgrades shipped
+since 0.1.0 (instant-on profiling and real server-side guided decoding).
+**1546 tests, offline-first (no model, no network).**
+
+### Molds deeper
+- **Model-aware tokenization.** The probe battery now *measures* each model's
+  chars-per-token ratio (a `TOKEN-RATIO` probe: known-char filler docs vs the
+  server's reported `prompt_tokens`), and the context composer + compaction
+  predicate budget with it — the universal `chars/4` guess remains only as the
+  honest default for servers that don't report usage. The `/envelope` report
+  card gained a `Token ratio:` line.
+- **Live model swaps.** `/model <name>` re-points the *running* session
+  mid-conversation: a measured model hot-swaps its profile instantly from the
+  on-disk envelope cache; an unmeasured one runs on floor defaults while it is
+  seeded and deep-probed in the background. The cache remembers every model
+  you've measured, and `/model` marks them.
+- **A model per role, each measured.** The `[roles]` config now routes the turn
+  loop itself — Plan-mode turns run on the planner model, execution turns on
+  the coder, compaction on the summarizer — each with *its own* capability
+  envelope from the shared cache, so every routed call uses that model's
+  measured wire protocol, context window, and sampling (floor defaults,
+  honestly, until a role model is measured). `/envelope` shows per-role status.
+- **Best-of-N escape hatches.** When the model dead-ends at a seam with a
+  *mechanical* verifier — a tool call that won't parse, a patch that won't
+  apply — the engine resamples up to `[engine] best_of_n` candidates at raised
+  temperature and races them: the first that parses / applies in-memory
+  re-enters the normal safety gate; losers are discarded, and every candidate
+  is charged to the turn budget. Off by default (`best_of_n = 1`).
+- **The self-improvement loop.** Every session records mechanical evidence per
+  model — did tool calls parse at the active rung, did edits apply, did
+  verification pass, did the turn drift — into an outcome ledger next to the
+  envelope cache, and at session start a deterministic tuner conservatively
+  *lowers* any ladder score the live evidence contradicts (downgrade-only:
+  upgrades are never applied, they earn a "run `/probe`" hint). The report card
+  and `/envelope` say `tuned` honestly; off switch: `[envelope] auto_tune`.
 - **Guided decoding — the real `strict_json` rung.** A model the envelope routes
   to `strict_json` is now driven with server-side constrained decoding: the
   engine sends `response_format` (a json-schema pinning output to one
@@ -31,6 +61,36 @@ All notable changes to IronCore are documented here. This project adheres to
   field (`default`/`seeded`/`probed`) makes the report card and `doctor` honest
   about whether values are introspected guesses or measurements. Configurable
   via `[envelope] instant_seed` / `auto_probe`.
+
+### Beyond text
+- **Vision — image inputs for screenshots/diagrams.** A new `read_image` tool
+  lets the model actually look at a workspace PNG/JPEG/GIF/WEBP: the bytes ride
+  the conversation as OpenAI image content-parts (base64 data URIs, so Ollama
+  and vLLM vision models both work). The capability is *measured, not assumed*
+  — seeded from Ollama's `/api/show` capabilities (`[envelope] vision`
+  overrides for endpoints without introspection), and a text-only model gets an
+  honest "no vision capability" error instead of a hallucination. The composer
+  budgets attached images and keeps only the newest two; the report card gained
+  a `Vision: yes|no` line.
+- **MCP tool servers.** `[mcp.servers.<name>]` config entries connect stdio
+  MCP servers through a dependency-free JSON-RPC client (spawned directly,
+  never via a shell); their tools register as `mcp__<server>__<tool>` at NET
+  risk — never auto-approved, denied in Plan mode, and only present at all
+  when `safety.network_tools = true`. Output is fenced UNTRUSTED like every
+  tool, and `ironcore doctor` reports the configured server lineup.
+
+### Extensibility
+- **Drop-in plugins.** Providers, tools, slash commands, probes, and edit
+  formats now plug in as standard Python entry points (`ironcore.providers` /
+  `ironcore.tools` / `ironcore.commands` / `ironcore.probes` /
+  `ironcore.edit_formats`): `pip install` a plugin distribution next to
+  IronCore and its tools register behind the *same* safety gate, its provider
+  builds when `provider.type` names it (role routing and `/model` swaps
+  included), its probes join `/probe`'s battery, and its edit formats join
+  `edit_file`. Built-ins win every name clash, a broken plugin is skipped and
+  reported by `ironcore doctor` — never a crashed boot — and
+  `[plugins] enabled = false` turns discovery off. Author guide:
+  [`docs/PLUGINS.md`](docs/PLUGINS.md).
 
 ## [0.1.0] — 2026-07-16
 
@@ -95,4 +155,5 @@ probes, and proof-tested end-to-end against real files, subprocesses, and git.
   tag-triggered PyPI release via trusted publishing.
 - `python -m demo` — a fully offline narrated walkthrough of a real session.
 
+[0.2.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.0
 [0.1.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.1.0

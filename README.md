@@ -9,8 +9,8 @@
 [![CI](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml/badge.svg)](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Status: v0.1](https://img.shields.io/badge/status-v0.1-brightgreen.svg)](CHANGELOG.md)
-[![Tests: 1229](https://img.shields.io/badge/tests-1229%20offline-brightgreen.svg)](#built--proven)
+[![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen.svg)](CHANGELOG.md)
+[![Tests: 1546](https://img.shields.io/badge/tests-1546%20offline-brightgreen.svg)](#built--proven)
 
 </div>
 
@@ -143,7 +143,7 @@ Developing on IronCore itself:
 
 ```bash
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q   # 1229 tests, all offline — no model, no network
+uv run --extra dev pytest -q   # 1546 tests, all offline — no model, no network
 ```
 
 ## Architecture at a glance
@@ -167,7 +167,8 @@ notice.
 
 ## Built & proven
 
-All eleven build phases are shipped (**v0.1**). Every phase was validated the same way: a full
+All eleven build phases are shipped, and all eight moonshots landed on top (**v0.2**). Every
+phase was validated the same way: a full
 offline test suite, an *independent adversarial review* that verifies findings by execution,
 and real proof tests against files, subprocesses, git, and the headless UI — **evidence, not
 claims.** Multiple real bugs (a redaction ReDoS, a false-"done", a compaction secret-leak, a
@@ -175,15 +176,12 @@ Plan-mode workflow escape) were caught and fixed exactly this way.
 
 - 📖 [`docs/SPEC.md`](docs/SPEC.md) — the full specification · 🏗️ [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers & dependency rules
 - 🛡️ [`docs/SAFETY.md`](docs/SAFETY.md) — threat model & controls · 🧠 [`docs/MODELS.md`](docs/MODELS.md) — the envelope in depth
-- 📝 [`CHANGELOG.md`](CHANGELOG.md) — what's in v0.1
+- 📝 [`CHANGELOG.md`](CHANGELOG.md) — what's in each release
 
-## 🌙 Moonshots — where we're aiming next
+## 🌙 Moonshots — landed
 
-v0.1 molds to your model — instantly (above), and the strict-JSON rung is now real
-server-side guided decoding (above). These were the bets that would make it mold
-*deeper* — every one of them has landed:
-
-**Shipped:**
+These were the bets that would make IronCore mold *deeper* to your model, see beyond text,
+and open up to plugins — and as of **v0.2**, every one of them has shipped:
 
 - **Model-aware tokenization.** The probe battery now *measures* each model's chars-per-token
   ratio (known-char filler docs vs the server's reported `prompt_tokens`) and the context
@@ -239,6 +237,9 @@ server-side guided decoding (above). These were the bets that would make it mold
   Built-ins win every name clash, a broken plugin is skipped and reported by
   `ironcore doctor` — never a crashed boot — and `[plugins] enabled = false` turns
   discovery off. Author guide: [`docs/PLUGINS.md`](docs/PLUGINS.md).
+
+*What's next:* smaller follow-ups noted in the handoff log — an HTTP transport for MCP
+servers (the config surface is already reserved) and background seeding of role models.
 
 ## Contributing (humans *and* agents)
 
