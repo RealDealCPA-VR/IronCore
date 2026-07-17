@@ -198,3 +198,35 @@ def test_closed_registry_refuses_to_build_new_providers():
     with pytest.raises(RuntimeError, match="closed"):
         registry.for_role("planner")  # would build a never-closed provider
     assert len(created) == 1
+
+
+# --- for_model (MS-2 live swaps) ---------------------------------------------
+
+
+def test_for_model_builds_once_and_caches_per_model():
+    registry, created = make_registry(make_settings())
+    b1 = registry.for_model("model-b")
+    b2 = registry.for_model("model-b")
+    assert b1 is b2
+    assert b1.model == "model-b"
+    assert len(created) == 2  # the default + model-b, one build each
+
+
+def test_for_model_default_model_reuses_the_default_instance():
+    registry, created = make_registry(make_settings())
+    assert registry.for_model("default-model") is registry.default
+    assert len(created) == 1  # no second build for the default's own model
+
+
+def test_for_model_shares_the_cache_with_roles():
+    registry, created = make_registry(make_settings(planner="model-b"))
+    role = registry.for_role("planner")
+    assert registry.for_model("model-b") is role  # one client per (endpoint, model)
+    assert len(created) == 2
+
+
+def test_for_model_on_closed_registry_raises():
+    registry, _ = make_registry(make_settings())
+    asyncio.run(registry.close_all())
+    with pytest.raises(RuntimeError, match="closed"):
+        registry.for_model("model-b")

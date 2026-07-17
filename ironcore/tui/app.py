@@ -36,6 +36,10 @@ carries exactly these keys — future handlers (IC-801..807) consume them:
     ``workspace``          the workspace ``Path``
     ``provider_registry``  the ``ProviderRegistry`` or ``None`` (``/model`` uses it)
     ``settings``           the loaded ``Settings``
+    ``envelope_dir``       the on-disk envelope cache ``Path`` — resolved ONCE at
+                           construction (MS-2); ``/model`` lookups and background
+                           deepens share it, and later per-role / outcome
+                           consumers must reuse the same resolution
     ``schedule``           ``Callable[[Coroutine], None]`` — see ``_schedule``:
                            runs the coroutine as a background worker and posts
                            its (string) result to the transcript. Handlers that
@@ -78,6 +82,7 @@ from ironcore.core.events import (
     TurnStarted,
 )
 from ironcore.envelope.profile import CapabilityProfile
+from ironcore.envelope.suite import default_envelope_dir
 from ironcore.memory.sessions import SessionStore
 from ironcore.providers.registry import ProviderRegistry
 from ironcore.safety.modes import DESCRIPTIONS, Mode, next_mode
@@ -186,11 +191,18 @@ class IronCoreApp(App):
         resume_id: str | None = None,
         auto_probe: bool = False,
         instant_seed: bool = False,
+        envelope_dir: Path | None = None,
     ) -> None:
         super().__init__()
         self.engine = engine
         self.registry = registry
         self.settings = settings
+        #: single source for the on-disk envelope cache (MS-2): /model swap
+        #: lookups and the background deepen write here, and later per-role /
+        #: outcome consumers reuse the same resolution. Tests inject a tmp dir.
+        self.envelope_dir: Path = (
+            envelope_dir if envelope_dir is not None else default_envelope_dir()
+        )
         #: mold the model in the background on first launch (from_settings sets both
         #: for an unprobed model): ``_instant_seed`` introspects the endpoint into a
         #: provisional-but-usable profile in ~1s; ``_auto_probe`` then measures it.
@@ -282,7 +294,9 @@ class IronCoreApp(App):
         if self._auto_probe:
             from ironcore.commands.envelopecmd import probe_and_swap
 
-            report = await probe_and_swap(self.engine)
+            # envelope_dir: the app-wide resolution (MS-2) so this deepen's write
+            # lands where /model swap lookups will read it.
+            report = await probe_and_swap(self.engine, envelope_dir=self.envelope_dir)
             await self.transcript.add_note(report)
 
     # -- input handling -------------------------------------------------------
@@ -353,6 +367,8 @@ class IronCoreApp(App):
         if ctx.mode != self.engine.mode:
             self._set_mode(ctx.mode, announce=False)
         self._goal = ctx.goal
+        # /model swaps live (MS-2); the settings object is shared, so re-read it.
+        self.status_bar.set_model(self.settings.provider.model)
         if result:
             self._post_note(result)
 
@@ -365,6 +381,7 @@ class IronCoreApp(App):
             "workspace": self.workspace,
             "provider_registry": self.provider_registry,
             "settings": self.settings,
+            "envelope_dir": self.envelope_dir,
             "schedule": self._schedule,
         }
         return ctx
@@ -616,7 +633,9 @@ class IronCoreApp(App):
         provider_registry = ProviderRegistry.from_settings(settings)
         tools = build_tool_registry(settings, ws)
         model = settings.provider.model
-        envelope_dir = Path.home() / ".ironcore" / "envelopes"
+        # resolved ONCE (MS-2): the boot profile load, /model swap lookups, and
+        # background deepen writes all share this one directory.
+        envelope_dir = default_envelope_dir()
         profile = CapabilityProfile.load(envelope_dir, model) or CapabilityProfile(model_id=model)
         try:
             mode = Mode(settings.safety.mode)
@@ -646,6 +665,7 @@ class IronCoreApp(App):
             resume_id=resume,
             auto_probe=auto_probe,
             instant_seed=instant_seed,
+            envelope_dir=envelope_dir,
         )
 
 

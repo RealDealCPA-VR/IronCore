@@ -15,6 +15,7 @@ a synchronous read of the current profile. Every ``ctx.extra`` key is optional.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ironcore.commands.base import CommandContext, SlashCommand
@@ -51,9 +52,12 @@ def _model_id(engine: Any) -> str:
     return getattr(engine.profile, "model_id", "") or engine.settings.provider.model
 
 
-async def probe_and_swap(engine: Any) -> str:
+async def probe_and_swap(engine: Any, *, envelope_dir: Path | None = None) -> str:
     """Measure the live model, cache it, hot-swap ``engine.profile``, and return
-    the new report card. Any failure is caught so the UI never crashes."""
+    the new report card. Any failure is caught so the UI never crashes.
+    ``envelope_dir`` (additive, MS-2) pins where the profile is cached so a
+    ``/model`` swap's lookup and this deepen's write agree on one directory;
+    ``None`` keeps the ``default_envelope_dir()`` behavior."""
     from ironcore.envelope.suite import probe_model
 
     model = _model_id(engine)
@@ -64,6 +68,7 @@ async def probe_and_swap(engine: Any) -> str:
         profile = await probe_model(
             engine.provider,
             model_id=model,
+            envelope_dir=envelope_dir,
             probed_at=datetime.now(UTC).isoformat(),
             base=engine.profile,
         )

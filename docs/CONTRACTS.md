@@ -64,6 +64,12 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
   prints/prompts; `TurnCompleted.stop_reason` computed from tool evidence, not model claims.
 - `TurnEngine.__init__(provider, tools, settings, profile, mode)` and
   `run_turn(user_input) -> AsyncIterator[Event]`.
+- *Additive (MS-2):* `TurnEngine.repoint(provider, profile)` hot-swaps the live provider +
+  capability profile between provider calls (`/model` live switches); `__init__`/`run_turn`
+  signatures are unchanged and protocol selection still flows only through
+  `profile.recommended_*`. *Migration:* none — existing constructors and turn flows are
+  untouched; old provider instances stay open (the `ProviderRegistry` owns their lifecycle
+  via `close_all`).
 
 **Not frozen:** internal state-machine implementation; context-composer heuristics (IC-501
 owns them, then freezes the *budget shares* here).

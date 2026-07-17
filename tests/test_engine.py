@@ -442,3 +442,24 @@ def test_linear_step_planner_advances_on_evidence():
     assert state.plan_cursor == 1 and state.plan_evidence[0] == "did a"
     planner.advance(state, "did b")
     assert state.plan_cursor == 2 and planner.is_complete(state)
+
+
+# --------------------------------------------------------------------------- #
+# (12) live model swap: repoint (MS-2)
+# --------------------------------------------------------------------------- #
+
+
+def test_repoint_swaps_provider_profile_and_author(tmp_path):
+    engine = _engine(tmp_path, [_text("from A")])
+    new_provider = MockProvider([_text("from B")])
+    new_profile = CapabilityProfile(
+        model_id="model-b", honest_context=8192, tool_protocols={"native": 1.0}
+    )
+    engine.repoint(new_provider, new_profile)
+    assert engine.provider is new_provider
+    assert engine.profile is new_profile
+    assert engine.handoff_author == "ironcore/model-b"
+    # the very next turn runs against the NEW provider's script
+    events = drive(engine, "hi")
+    assert _text_of(events) == "from B"
+    assert isinstance(events[-1], TurnCompleted)

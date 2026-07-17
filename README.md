@@ -104,7 +104,7 @@ itself never prints or prompts.
 | `/probe` · `/envelope` | Measure the live model and adapt to it · show its capability report card |
 | `/goal <objective>` | Set a persistent objective — IronCore won't call itself done until a stop-condition check passes |
 | `/workflow <name>` | Deterministic multi-agent orchestration (fan-out → verify → reduce) — the *harness* drives the flow, never the model |
-| `/model` · `/init` | List/switch models · scan the repo into `IRONCORE.md` project memory |
+| `/model` · `/init` | List models / live-swap the running session to another model (envelope-cache aware) · scan the repo into `IRONCORE.md` project memory |
 | `/loop [5m] <prompt>` | Run a prompt on an interval, or let the agent self-pace |
 | `/undo` · `/redo` · `/compact` · `/review` · `/memory` | Snapshot undo · history compaction · diff review · project memory |
 
@@ -185,7 +185,6 @@ server-side guided decoding (above). These are the bets that would make it mold 
 - **A model per role, each measured.** Route planning to a 70B and execution to a fast 7B (or
   the reverse), with a separate capability envelope per role — pick the right brain for each
   step of the loop.
-- **Live model swaps.** Re-point the running provider and re-probe on `/model <name>` mid-session, with an on-disk envelope cache that remembers every model you've measured.
 - **Best-of-N escape hatches.** When a weak model dead-ends on a step that has a mechanical
   verifier (patch applies / test passes), resample and race candidates instead of failing.
 - **Drop-in extensibility.** Providers, tools, edit formats, probes, and slash commands as
@@ -199,6 +198,10 @@ server-side guided decoding (above). These are the bets that would make it mold 
   ratio (known-char filler docs vs the server's reported `prompt_tokens`) and the context
   composer + compaction predicate budget with it — the universal `chars/4` guess only remains
   as the honest default for servers that don't report usage.
+- **Live model swaps.** `/model <name>` re-points the *running* session mid-conversation: a
+  cached-per-model provider plus the on-disk envelope cache — a measured model hot-swaps its
+  profile instantly, an unmeasured one runs on floor defaults while it is seeded and
+  deep-probed in the background, and the cache remembers every model you've measured.
 
 ## Contributing (humans *and* agents)
 

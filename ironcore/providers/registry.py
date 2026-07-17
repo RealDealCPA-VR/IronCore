@@ -119,6 +119,15 @@ class ProviderRegistry:
         cached = self._providers.get(model)
         return cached if cached is not None else self._build(model)
 
+    def for_model(self, model: str) -> Provider:
+        """The cached-or-new provider for ``model`` at the default endpoint
+        (MS-2 live swaps: ``/model <name>`` re-points the running engine).
+        Shares the per-model cache the roles use — swapping back to a model
+        reuses its instance — and a closed registry raises like ``_build``."""
+        self._ensure_open()
+        cached = self._providers.get(model)
+        return cached if cached is not None else self._build(model)
+
     def _build(self, model: str) -> Provider:
         if self._closed:
             # a provider built now could never be closed by close_all()

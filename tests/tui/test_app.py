@@ -407,7 +407,7 @@ def test_instant_seed_then_probe_hot_swaps_in_order(tmp_path, monkeypatch):
         order.append("seed")
         return seed
 
-    async def fake_probe(eng):
+    async def fake_probe(eng, *, envelope_dir=None):  # MS-2: additive kwarg threaded
         order.append("probe")
         probe_saw.append(eng.profile)  # the seed must already be hot-swapped in
         eng.profile = measured
@@ -446,7 +446,7 @@ def test_flags_off_neither_seed_nor_probe_fires(tmp_path, monkeypatch):
         fired.append("seed")
         return _profile()
 
-    async def fake_probe(eng):
+    async def fake_probe(eng, *, envelope_dir=None):  # MS-2: additive kwarg threaded
         fired.append("probe")
         return "probed"
 
@@ -462,5 +462,51 @@ def test_flags_off_neither_seed_nor_probe_fires(tmp_path, monkeypatch):
             assert fired == []
             assert "Seeded" not in app.transcript_text()
             assert "measuring it" not in app.transcript_text()
+
+    asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------- #
+# (10) live model swap updates the status bar (MS-2)
+# --------------------------------------------------------------------------- #
+
+
+def test_model_swap_updates_status_bar_and_repoints(tmp_path):
+    """/model <name> with a live registry: the engine is re-pointed (cache-hit
+    profile from the injected envelope_dir — no background work) and the status
+    bar re-reads the shared settings after dispatch."""
+    env = tmp_path / "env"
+    CapabilityProfile(
+        model_id="other:7b",
+        probed_at="2026-07-16T00:00:00Z",
+        source="probed",
+        tool_protocols={"native": 1.0},
+    ).save(env)
+    engine = _engine(tmp_path, [_text("hi")])
+    swapped = MockProvider([])
+
+    class StubRegistry:
+        def for_model(self, model):
+            return swapped
+
+    app = IronCoreApp(
+        engine,
+        build_cmds(),
+        engine.settings,
+        provider_registry=StubRegistry(),
+        envelope_dir=env,
+    )
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            assert "qwen3-coder:30b" in app.status_bar._plain  # the boot model
+            await _submit(app, pilot, "/model other:7b")
+            done = await _wait_for(pilot, lambda: "other:7b" in app.status_bar._plain)
+            assert done, "status bar never showed the new model"
+            assert app.settings.provider.model == "other:7b"
+            assert engine.provider is swapped  # the live session was re-pointed
+            assert engine.profile.probed_at is not None  # measured cache hit
+            await _wait_for(pilot, lambda: "cache" in app.transcript_text())
+            assert "cache" in app.transcript_text()
 
     asyncio.run(scenario())

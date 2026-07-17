@@ -190,6 +190,17 @@ class TurnEngine:
         #: injection verdict on the PREVIOUS tool output, carried across the loop.
         self._pending_flag: Flag = Flag.NONE
 
+    def repoint(self, provider: Provider, profile: CapabilityProfile) -> None:
+        """Live model swap (MS-2, additive — docs/CONTRACTS.md §4): re-point the
+        provider + capability profile between provider calls and follow the new
+        model in ``handoff_author``. Protocol selection still flows exclusively
+        through ``profile.recommended_*`` (read at turn start). The OLD provider
+        stays open by design — the ``ProviderRegistry`` owns provider lifecycle
+        (``close_all``), and a kept instance makes swap-back instant."""
+        self.provider = provider
+        self.profile = profile
+        self.handoff_author = f"ironcore/{profile.model_id or 'unknown'}"
+
     # -- the loop -------------------------------------------------------------
 
     async def run_turn(self, user_input: str) -> AsyncIterator[Event]:

@@ -48,6 +48,11 @@ class StatusBar(Static):
         self._mode = mode
         self._refresh()
 
+    def set_model(self, model: str) -> None:
+        """Live model swaps (MS-2): the app pushes the new name after /model."""
+        self._model = model
+        self._refresh()
+
     def set_running(self, running: bool) -> None:
         self._running = running
         self._refresh()

@@ -560,6 +560,34 @@ Legend: `[ ]` open · `[~]` claimed · `[?]` needs review · `[x]` done
     tests/test_compact.py tests/test_probe_runner.py tests/test_envelope.py
     tests/test_report_card.py -q` + full suite + ruff
 
+- [x] **MS-2 · Live model swaps** *(done: fable-ms2, 2026-07-16 — /model <name> live-swaps
+  provider+profile via `for_model`/`repoint`; envelope cache HIT instant, MISS floors +
+  seed→deepen in background; envelope_dir single-sourced through app/ctx; 1337 tests green
+  (15 new), ruff clean; proof: cache-hit repointed with zero queued work, miss queued
+  exactly one task)*
+  - **Depends:** IC-204, IC-608, IC-801 · **Spec:** README Moonshots; CONTRACTS §4/§5/§6
+  - **Files:** `ironcore/commands/modelcmd.py`, `ironcore/providers/registry.py`,
+    `ironcore/core/engine.py`, `ironcore/commands/envelopecmd.py`,
+    `ironcore/tui/widgets/statusbar.py`, `ironcore/tui/app.py`, `docs/CONTRACTS.md`,
+    `tests/test_model_swap.py` (new), `tests/test_cmd_model.py`,
+    `tests/providers/test_registry.py`, `tests/tui/test_app.py`, `tests/test_engine.py`
+  - **Build:** `/model <name>` live-switches the RUNNING session: additive
+    `ProviderRegistry.for_model(model)` (shares the per-model `_build` cache) + additive
+    `TurnEngine.repoint(provider, profile)` (also refreshes `handoff_author`; old providers
+    stay open — the registry owns lifecycle). Envelope cache decides the profile: HIT (a
+    measured profile on disk) hot-swaps instantly; MISS floors now + schedules seed→deepen
+    (`probe_and_swap` gains additive `envelope_dir=` threaded into `probe_model`). Busy
+    guard refuses a swap mid-turn; headless/closed-registry falls back to the IC-801
+    settings-only advisory. `envelope_dir` resolved ONCE in `from_settings` and exposed
+    (app attribute + `ctx.extra["envelope_dir"]`) as the single source later tasks reuse.
+    Listing marks cached-measured models; status bar re-reads the model after dispatch.
+  - **Accept:** cache hit repoints instantly (no scheduled work); miss floors immediately,
+    exactly one background task queued, deepen caches + hot-swaps; swap-back is a pure hit
+    (same provider instance); busy/headless/closed fallbacks; existing IC-801 wording pins
+    green. **Verify:** `uv run --extra dev pytest tests/test_cmd_model.py
+    tests/test_model_swap.py tests/providers/test_registry.py tests/test_engine.py
+    tests/tui/test_app.py -q` + full suite + ruff
+
 ---
 
 ### Dependency quick-map
