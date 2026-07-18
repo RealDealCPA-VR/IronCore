@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from ironcore.commands import build_default_registry as build_cmds
-from ironcore.commands.base import CommandContext
+from ironcore.commands.base import CommandContext, plain
 from ironcore.commands.envelopecmd import probe_and_swap
 from ironcore.config.settings import Settings
 from ironcore.core.engine import TurnEngine
@@ -193,7 +193,9 @@ def test_envelope_command_appends_the_tuned_footer_last(tmp_path):
     )
     engine.roles = router
     ctx = CommandContext(settings=settings, extra={"engine": engine})
-    out = build_cmds().dispatch("/envelope", ctx)
+    # /envelope returns a styled Text (CONTRACTS.md §6); ordering is asserted on
+    # its plain characters, which are byte-identical to the old string result.
+    out = plain(build_cmds().dispatch("/envelope", ctx))
     assert "Roles (routed models):" in out
     assert "Tuned:" in out and "/probe" in out
     assert out.index("Tuned:") > out.index("Roles (routed models):")  # footer is LAST

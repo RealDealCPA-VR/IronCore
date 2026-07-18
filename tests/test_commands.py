@@ -1,9 +1,11 @@
 """Slash command registry and the live built-ins."""
 
 import pytest
+from rich.text import Text
 
 from ironcore import __version__
-from ironcore.commands import CommandContext, UnknownCommand, build_default_registry
+from ironcore.commands import CommandContext, UnknownCommand, build_default_registry, plain
+from ironcore.commands.base import CommandRegistry, SlashCommand
 from ironcore.config.settings import Settings
 from ironcore.safety.modes import Mode
 
@@ -88,3 +90,49 @@ def test_redo_is_registered(ctx):
     # /redo is new in phase 8 (SPEC §3.3) — it was not in the scaffold's stub table.
     registry, _ = ctx
     assert registry.get("redo") is not None
+
+
+# -- handler result type (CONTRACTS.md §6) --------------------------------------
+
+
+def _registry_of(handler) -> CommandRegistry:
+    registry = CommandRegistry()
+    registry.register(SlashCommand("x", "s", "/x", handler))
+    return registry
+
+
+def test_a_handler_may_return_plain_text():
+    """``str`` stays the default and the common case: nothing about the
+    additive Text option may change what a plain handler does."""
+    out = _registry_of(lambda ctx, args: "just words").dispatch("/x", CommandContext(Settings()))
+    assert out == "just words"
+    assert plain(out) == "just words"
+
+
+def test_a_handler_may_return_styled_text():
+    """The additive half: a command whose output contains a VERDICT can style
+    it, and dispatch hands the styling through untouched."""
+    styled = Text()
+    styled.append("MET", style="bold green")
+    out = _registry_of(lambda ctx, args: styled).dispatch("/x", CommandContext(Settings()))
+    assert isinstance(out, Text)
+    assert out.spans  # the styling survived dispatch
+    assert plain(out) == "MET"  # ...and a str-assuming caller still gets characters
+
+
+def test_envelope_returns_a_styled_card_whose_plain_text_is_unchanged():
+    """/envelope is the flagship consumer: its characters must be exactly what
+    the plain-text renderer produces, so a pipe or a pasted issue loses only
+    colour."""
+    from ironcore.envelope.profile import CapabilityProfile
+    from ironcore.envelope.runner import render_report_card
+
+    class _Engine:
+        profile = CapabilityProfile(model_id="m", source="probed", probed_at="t")
+
+    registry = build_default_registry()
+    ctx = CommandContext(settings=Settings(), extra={"engine": _Engine()})
+    out = registry.dispatch("/envelope", ctx)
+    assert isinstance(out, Text)
+    assert out.spans
+    assert plain(out) == render_report_card(_Engine.profile)

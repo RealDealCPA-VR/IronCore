@@ -40,6 +40,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from rich.text import Text
+
+from ironcore import term
 from ironcore.envelope.profile import (
     EDIT_FORMAT_LADDER,
     EDIT_FORMAT_THRESHOLDS,
@@ -242,11 +245,95 @@ async def probe_and_save(
 # --------------------------------------------------------------------------- #
 # Report card (consumed by /envelope, IC-608)
 # --------------------------------------------------------------------------- #
+#
+# ONE builder, two views. ``render_report_card_text`` composes a ``rich.text.Text``
+# and ``render_report_card`` is its ``.plain`` — so the coloured card a TUI shows
+# and the ASCII card a pipe, a ``doctor``-style CLI run or a pasted GitHub issue
+# gets are, by construction, the same characters. They cannot drift, and the
+# plain-text pins in tests/test_report_card.py keep guarding both.
+#
+# SAFETY: every segment is appended with an explicit style. Nothing here goes
+# near ``Text.from_markup``, because ``model_id`` (and the routed-role ids the
+# command appends after this card) come from a config file or a model endpoint —
+# a model called ``[red]evil[/]`` must print those characters, not arm a colour.
+# ``tests/test_report_card.py::test_report_card_never_interprets_markup`` pins it.
+#
+# The palette is ``ironcore/term.py``'s — the same values ``tui/theme.py`` holds
+# (tests/test_term.py pins the two together). The card is the one renderable that
+# shows up on BOTH sides of that line, so it borrows the leaf module rather than
+# inventing a third palette.
+
+#: Labels and thresholds are chrome; values are content; only outcomes take a hue.
+_S_LABEL = term.MUTED
+_S_VALUE = term.FOREGROUND
+_S_HEADING = f"bold {term.FOREGROUND}"
+_S_MUTED = term.MUTED
+#: The rung that was taken, and a verdict that means "this model can work".
+_S_GOOD = f"bold {term.SUCCESS}"
+#: A rung that cleared its bar but lost to a better one. Its VERDICT gets a calm
+#: steel, but its name and score stay chrome: the first draft gave the fallback
+#: row full-brightness foreground, which made it out-shout the SELECTED row it
+#: lost to on the two left-hand columns. A ladder that ranks its rows wrong is
+#: worse than one that does not rank them at all.
+_S_FALLBACK = term.SECONDARY
+#: A rung that measured short, and the shortfall itself.
+_S_BAD = f"bold {term.ERROR}"
+_S_BAD_DIM = term.ERROR
+#: Provisional / unmeasured / floor-only: honest, but not yet earned.
+_S_WARN = f"bold {term.WARNING}"
+
+#: Fraction of the ADVERTISED window the model actually holds coherently. The
+#: gap between those two numbers is this product's opening argument, so it is
+#: the one field on the card that is graded rather than merely printed.
+_CONTEXT_GOOD = 0.75
+_CONTEXT_FAIR = 0.40
+
+#: Width of the label column ("Model:", "Verdict:", …) — the card's spine.
+_LABEL_WIDTH = 18
+#: Width of the rung-name column, and of the score column beside it.
+_RUNG_WIDTH = 15
+_SCORE_WIDTH = 4
 
 
-def _rung_line(
-    rung: str, scores: dict[str, float], thresholds: dict[str, float], recommended: str
+def _row(label: str, value: str, style: str = _S_VALUE) -> Text:
+    """One ``label   value`` line of the card's header/footer blocks."""
+    text = Text()
+    text.append(f"{label:<{_LABEL_WIDTH}}", style=_S_LABEL)
+    text.append(value, style=style)
+    return text
+
+
+def _selected_style(
+    profile: CapabilityProfile, rung: str, thresholds: dict[str, float]
 ) -> str:
+    """The colour a SELECTED rung earns.
+
+    Green means one thing on this card, exactly: **a real measurement cleared a
+    bar.** Two cases therefore do not get it, and the rule is worth stating in
+    one place because a reader learns it from the whole card at once:
+
+    * The FLOOR rung clears nothing — it is the safety net, chosen because
+      everything above it was rejected or never probed. An unprobed model would
+      otherwise open with a green ``text_protocol`` heading and a green
+      ``SELECTED`` on the floor, which reads as good news on exactly the profile
+      that has no news at all.
+    * A rung selected on a SEEDED profile cleared its bar with an *introspected*
+      score — the endpoint's claim about itself, not a trial. Real signal, but
+      not evidence, and this card's whole job is telling those apart.
+
+    So a card is either measured (some green) or provisional (amber and grey),
+    and the Source line above says which. 🔒 tests/test_report_card.py
+    """
+    return _S_GOOD if rung in thresholds and _is_measured(profile) else _S_WARN
+
+
+def _rung_text(
+    profile: CapabilityProfile,
+    rung: str,
+    scores: dict[str, float],
+    thresholds: dict[str, float],
+    recommended: str,
+) -> Text:
     """One ladder rung as a four-column row: marker, rung, score, verdict.
 
     The ladder is the product's whole thesis, so a reader must be able to see
@@ -254,23 +341,36 @@ def _rung_line(
     line. The old row said ``0.71  (needs >= 0.90, below)`` and left "below" as
     the only, easily-missed signal that the rung was thrown out. Now the outcome
     is a word in its own column — ``SELECTED`` / ``REJECTED`` / ``ok, fallback``
-    — and a rejection says how far short it fell.
+    — a rejection says how far short it fell, and the word carries a colour.
 
-    The card is deliberately ASCII (``tests/test_report_card.py`` pins it): it is
-    printed into a Windows console and pasted into issues, and it is rendered by
-    the TUI transcript as plain text, so its structure has to survive with no
-    colour and no box-drawing at all. Words and columns are all it gets, so the
-    words do the work.
+    The words and the columns are load-bearing on their own; colour only
+    reinforces them (``tests/test_report_card.py`` pins the plain text). The card
+    is printed into a Windows console and pasted into issues, so its structure
+    has to survive with no colour and no box-drawing at all — which is why the
+    verdict is a WORD in a column and not, say, a green bullet.
     """
     marker = "->" if rung == recommended else "  "
     selected = rung == recommended
+    chosen_style = _selected_style(profile, rung, thresholds)
+    text = Text()
+    text.append("  ")
+    text.append(marker, style=chosen_style if selected else _S_MUTED)
+    text.append(" ")
+
     if rung not in thresholds:  # the floor rung: no measurement can disqualify it
-        floor = "floor (always works)"
-        status = f"SELECTED - {floor}" if selected else floor
         # The dash sits right-aligned in the SCORE column and the threshold
         # column is blanked, so "no measurement applies here" lines up with the
         # numbers above it instead of floating between two columns.
-        return f"  {marker} {rung:<15} {'-':>4}{' ' * 14}{status}"
+        text.append(f"{rung:<{_RUNG_WIDTH}}", style=chosen_style if selected else _S_MUTED)
+        text.append(" ")
+        text.append(f"{'-':>{_SCORE_WIDTH}}{' ' * 14}", style=_S_MUTED)
+        if selected:
+            text.append("SELECTED", style=chosen_style)
+            text.append(" - floor (always works)", style=_S_MUTED)
+        else:
+            # The safety net nobody had to use: present, and deliberately quiet.
+            text.append("floor (always works)", style=_S_MUTED)
+        return text
 
     threshold = thresholds[rung]
     need = f"needs {threshold:.2f}"
@@ -284,15 +384,32 @@ def _rung_line(
     # the verdict — and this line is exactly the kind of claim they guard.
     score = scores.get(rung)
     if score is None:
-        unscored = "SELECTED" if selected else "not probed"
-        return f"  {marker} {rung:<15} {'-':>4}  {need}  {unscored}"
+        rung_style = chosen_style if selected else _S_MUTED
+        text.append(f"{rung:<{_RUNG_WIDTH}}", style=rung_style)
+        text.append(" ")
+        text.append(f"{'-':>{_SCORE_WIDTH}}", style=_S_MUTED)
+        text.append(f"  {need}  ", style=_S_LABEL)
+        text.append("SELECTED" if selected else "not probed", style=rung_style)
+        return text
+
     if selected:
-        status = "SELECTED"
+        status, rung_style, score_style = "SELECTED", chosen_style, chosen_style
     elif score >= threshold:
-        status = "ok, fallback"
+        status, rung_style, score_style = "ok, fallback", _S_MUTED, _S_MUTED
     else:
         status = f"REJECTED ({threshold - score:.2f} short)"
-    return f"  {marker} {rung:<15} {score:.2f}  {need}  {status}"
+        rung_style, score_style = _S_BAD_DIM, _S_BAD_DIM
+    text.append(f"{rung:<{_RUNG_WIDTH}}", style=rung_style)
+    text.append(" ")
+    text.append(f"{score:.2f}", style=score_style)
+    # The threshold stays chrome in every row: it is the bar, not the result.
+    text.append(f"  {need}  ", style=_S_LABEL)
+    text.append(status, style=_S_FALLBACK if status == "ok, fallback" else rung_style)
+    if status.startswith("REJECTED"):
+        # The status word already carries the red; make the shortfall the bold
+        # part of it, since "how far short" is the actionable half.
+        text.stylize(_S_BAD, len(text.plain) - len(status), len(text.plain))
+    return text
 
 
 def _is_measured(profile: CapabilityProfile) -> bool:
@@ -314,6 +431,36 @@ def _source_label(profile: CapabilityProfile) -> str:
     if _is_measured(profile):
         return "measured"
     return "defaults (unprobed)"
+
+
+def _source_style(profile: CapabilityProfile) -> str:
+    """Provenance IS a verdict — about how far the numbers below can be trusted.
+    Only a fully measured profile earns the calm green; everything else is
+    provisional and says so in the one colour that means "not settled yet"."""
+    if _is_measured(profile) and profile.source not in ("tuned", "seeded"):
+        return _S_GOOD
+    return _S_WARN
+
+
+def _context_style(profile: CapabilityProfile, honest: int, advertised: int) -> str:
+    """Grade the honest/advertised ratio. A model that holds three quarters of
+    what it advertises is fine; one that holds a fifth is the reason this tool
+    exists, and the card should not make a reader do the division to notice.
+
+    Grading requires a MEASUREMENT. On an unprobed profile both numbers are
+    defaults, and on a seeded one the "honest" figure is the endpoint's own
+    advertised claim read back — colouring either would be the card inventing a
+    finding, on the one screen whose whole job is telling guesses from evidence.
+    Those stay chrome and let the Source line speak.
+    """
+    if not advertised or not _is_measured(profile):
+        return _S_MUTED
+    ratio = honest / advertised
+    if ratio >= _CONTEXT_GOOD:
+        return _S_GOOD
+    if ratio >= _CONTEXT_FAIR:
+        return _S_WARN
+    return _S_BAD
 
 
 def _verdict(profile: CapabilityProfile, proto: str, edit: str) -> str:
@@ -340,13 +487,38 @@ def _verdict(profile: CapabilityProfile, proto: str, edit: str) -> str:
     return "unprobed - floor-conservative defaults (safe-slow until measured)"
 
 
+def _verdict_style(profile: CapabilityProfile, proto: str, edit: str) -> str:
+    """The bottom line gets the only unqualified green on the card — and only
+    when the profile is measured AND cleared something above the floor. Every
+    other outcome (floor-only, seeded, tuned, unprobed) is honest-but-provisional
+    and takes the warm colour that means "there is more to do here"."""
+    floor = proto == TOOL_PROTOCOL_LADDER[-1] and edit == EDIT_FORMAT_LADDER[-1]
+    if profile.source in ("tuned", "seeded") or not _is_measured(profile):
+        return _S_WARN
+    return _S_WARN if floor else _S_GOOD
+
+
 def render_report_card(profile: CapabilityProfile) -> str:
     """Plain-text capability report for ``/envelope`` (IC-608).
+
+    Exactly :func:`render_report_card_text` with its styling dropped — the two
+    can never disagree about a character.
+    """
+    return render_report_card_text(profile).plain
+
+
+def render_report_card_text(profile: CapabilityProfile) -> Text:
+    """The capability report card, styled (``/envelope``, IC-608).
 
     A pure function of the profile: model id, honest vs advertised context, the
     recommended tool protocol + edit format with every rung's reliability, retention /
     coherence, and a one-line verdict. Probe notes are NOT shown here — they live on the
     live run, not the persisted profile.
+
+    Colour is applied by MEANING and never alone: the rung that was selected, the
+    rung that measured short, the honest-context ratio, and the verdict. Strip
+    every span (which :func:`render_report_card` does, and which a non-TTY
+    console does for itself) and the card still says all of it in words.
     """
     proto = profile.recommended_tool_protocol()
     edit = profile.recommended_edit_format()
@@ -360,36 +532,63 @@ def render_report_card(profile: CapabilityProfile) -> str:
     advertised = profile.context_window
     pct = f"{100 * honest / advertised:.0f}%" if advertised else "n/a"
 
-    lines = [
-        f"Model:            {profile.model_id}",
-        f"Source:           {_source_label(profile)}",
-        f"Probed:           {probed}",
-        f"Context:          honest {honest:,} / advertised {advertised:,} tokens ({pct})",
-        # "(default)" not "(unmeasured)": the existing provenance pin forbids the
-        # substring "measured" before the verdict; the Source line carries provenance.
-        f"Token ratio:      {profile.chars_per_token:.1f} chars/token"
-        + ("" if profile.chars_per_token != 4.0 else "  (default)"),
-        "",
-        f"Tool protocol:    {proto}  (recommended)",
+    rows: list[Text] = [
+        _row("Model:", profile.model_id, _S_HEADING),
+        _row("Source:", _source_label(profile), _source_style(profile)),
+        # A timestamp is provenance detail, not a finding: it stays chrome.
+        _row("Probed:", probed, _S_MUTED),
     ]
-    lines += [
-        _rung_line(rung, profile.tool_protocols, TOOL_PROTOCOL_THRESHOLDS, proto)
-        for rung in TOOL_PROTOCOL_LADDER
-    ]
-    lines += ["", f"Edit format:      {edit}  (recommended)"]
-    lines += [
-        _rung_line(rung, profile.edit_formats, EDIT_FORMAT_THRESHOLDS, edit)
-        for rung in EDIT_FORMAT_LADDER
-    ]
-    lines += [
-        "",
-        f"JSON adherence:   {profile.json_adherence:.2f}",
-        f"Retention:        {profile.instruction_retention:.2f}",
-        f"Coherence:        {profile.coherence_horizon} turns "
-        f"(anchor every {profile.anchor_cadence()})",
+
+    # The thesis line. The measured number is the content; the advertised one is
+    # a claim, so it recedes; the ratio between them is graded.
+    context = Text()
+    context.append(f"{'Context:':<{_LABEL_WIDTH}}", style=_S_LABEL)
+    context.append("honest ", style=_S_LABEL)
+    context.append(f"{honest:,}", style=_S_HEADING)
+    context.append(f" / advertised {advertised:,} tokens ", style=_S_MUTED)
+    context.append(f"({pct})", style=_context_style(profile, honest, advertised))
+    rows.append(context)
+
+    # "(default)" not "(unmeasured)": the existing provenance pin forbids the
+    # substring "measured" before the verdict; the Source line carries provenance.
+    ratio = Text()
+    ratio.append(f"{'Token ratio:':<{_LABEL_WIDTH}}", style=_S_LABEL)
+    ratio.append(f"{profile.chars_per_token:.1f} chars/token", style=_S_VALUE)
+    if profile.chars_per_token == 4.0:
+        ratio.append("  (default)", style=_S_MUTED)
+    rows.append(ratio)
+
+    for label, ladder, scores, thresholds, chosen in (
+        ("Tool protocol:", TOOL_PROTOCOL_LADDER, profile.tool_protocols,
+         TOOL_PROTOCOL_THRESHOLDS, proto),
+        ("Edit format:", EDIT_FORMAT_LADDER, profile.edit_formats,
+         EDIT_FORMAT_THRESHOLDS, edit),
+    ):
+        # The section heading names the rung that won, in the same green the
+        # SELECTED row below it carries — heading and evidence tied together.
+        head = Text()
+        head.append(f"{label:<{_LABEL_WIDTH}}", style=_S_HEADING)
+        head.append(chosen, style=_selected_style(profile, chosen, thresholds))
+        head.append("  (recommended)", style=_S_MUTED)
+        rows += [Text(""), head]
+        rows += [_rung_text(profile, rung, scores, thresholds, chosen) for rung in ladder]
+
+    rows += [
+        Text(""),
+        _row("JSON adherence:", f"{profile.json_adherence:.2f}"),
+        _row("Retention:", f"{profile.instruction_retention:.2f}"),
+        _row(
+            "Coherence:",
+            f"{profile.coherence_horizon} turns (anchor every {profile.anchor_cadence()})",
+        ),
         # yes/no only (MS-6): the pre-verdict text must never claim "measured".
-        f"Vision:           {'yes' if profile.vision else 'no'}",
-        "",
-        f"Verdict:          {_verdict(profile, proto, edit)}",
+        _row("Vision:", "yes" if profile.vision else "no"),
+        Text(""),
     ]
-    return "\n".join(lines)
+
+    verdict = Text()
+    verdict.append(f"{'Verdict:':<{_LABEL_WIDTH}}", style=_S_HEADING)
+    verdict.append(_verdict(profile, proto, edit), style=_verdict_style(profile, proto, edit))
+    rows.append(verdict)
+
+    return Text("\n").join(rows)

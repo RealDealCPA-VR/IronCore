@@ -19,20 +19,38 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from ironcore.commands.base import CommandContext, SlashCommand
-from ironcore.envelope.runner import render_report_card
+from ironcore import term
+from ironcore.commands.base import CommandContext, CommandResult, SlashCommand
+from ironcore.envelope.runner import render_report_card, render_report_card_text
 from ironcore.providers.registry import VALID_ROLES
 
 
-def _cmd_envelope(ctx: CommandContext, args: str) -> str:
+def _cmd_envelope(ctx: CommandContext, args: str) -> CommandResult:
+    """The report card, styled (CONTRACTS.md §6 — a handler may return ``Text``).
+
+    This is the one screen that has to prove the product's thesis at a glance,
+    and a wall of same-weight grey made ``SELECTED`` and ``REJECTED`` read
+    identically. The card builds its own styling; the tails appended after it
+    stay chrome so the card keeps the eye.
+
+    SAFETY: the tails are appended with an explicit style, never parsed as
+    markup — the role model ids in them come from a config file.
+    """
     engine = ctx.extra.get("engine")
     if engine is None:
         return "No live session — /envelope shows the current model's measured profile."
     profile = engine.profile
-    card = render_report_card(profile)
+    card = render_report_card_text(profile)
     if profile.probed_at is None:
-        card += "\n\nThis model is UNPROBED (floor defaults). Run /probe to measure + adapt to it."
-    return card + _roles_tail(engine) + _tuned_tail(profile)
+        # The one line an unprobed reader should act on: it takes the warm
+        # colour, because it is asking for a human.
+        card.append(
+            "\n\nThis model is UNPROBED (floor defaults). Run /probe to measure + adapt to it.",
+            style=f"bold {term.WARNING}",
+        )
+    card.append(_roles_tail(engine), style=term.MUTED)
+    card.append(_tuned_tail(profile), style=term.MUTED)
+    return card
 
 
 def _roles_tail(engine: Any) -> str:

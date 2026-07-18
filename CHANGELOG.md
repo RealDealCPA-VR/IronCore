@@ -5,6 +5,35 @@ All notable changes to IronCore are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Added
+- **Slash commands can return styled text, so the report card reads its own
+  verdicts** (CONTRACTS.md §6, additive). A handler returns `str` *or*
+  `rich.text.Text`; `str` stays the default and every existing command is
+  unchanged. `commands.plain(result)` is the accessor for anything that wants
+  characters rather than spans. The mechanism exists because the two screens
+  that carry a *verdict* had no way to say so: `/envelope` rendered
+  `SELECTED` and `REJECTED (0.19 short)` in exactly the same grey, on the one
+  image the README uses to prove the product's thesis.
+  - **`/envelope`** is now colour-coded by outcome. The rung a measurement
+    selected is green, a rejected rung and its shortfall are red, the floor and
+    the also-ran fallback recede to grey, the honest-vs-advertised context gap is
+    graded, and the section headings and verdict carry weight. Green means one
+    thing only — *a real measurement cleared a bar* — so an unprobed or seeded
+    profile shows none of it: its floor selection, its verdict and its context
+    ratio all render amber and grey, because nothing there has been measured yet.
+  - **`/goal check`** colours its payoff line: `Goal stop-condition MET` green,
+    `UNMET` red. The line whose entire purpose is proving "done" is a test result
+    used to arrive in the same grey as the ack above it.
+  - Colour never carries meaning alone, and the plain-text card is unchanged to
+    the byte: `render_report_card(profile)` is now literally
+    `render_report_card_text(profile).plain`, so the coloured card and the ASCII
+    one that gets piped, redirected or pasted into a GitHub issue cannot drift.
+    It stays ASCII, keeps every word, and every existing test pins both views.
+  - **Safety:** styled results are composed programmatically (`Text.append` with
+    an explicit style) and never via `Text.from_markup`. A model id of
+    `[red]evil[/]` prints those characters and arms no colour — pinned by
+    `tests/test_report_card.py::test_report_card_never_interprets_markup`.
+
 ### Changed
 - **`ironcore demo`, `doctor` and the report card read as the same product as the
   app.** The TUI got a palette; everything printed *outside* it was still one

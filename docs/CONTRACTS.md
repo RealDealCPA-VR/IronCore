@@ -160,12 +160,38 @@ owns them, then freezes the *budget shares* here).
 
 **Frozen:**
 - `SlashCommand(name, summary, usage, handler, implemented)`; handlers are synchronous
-  `(CommandContext, args) -> str` and must not block (long work is scheduled, not awaited).
+  `(CommandContext, args) -> CommandResult` and must not block (long work is scheduled,
+  not awaited).
 - `CommandRegistry.dispatch("/name args", ctx)` semantics; `UnknownCommand` on miss.
 - `CommandContext` mutation is the only side channel (`settings`, `mode`, `goal`, `extra`).
   🔒 `tests/test_commands.py`
+- *Additive (VIS-1):* `CommandResult = str | rich.text.Text`. **`str` remains the default**
+  and the right answer for almost every command; a front end renders it however it renders
+  system output. A handler MAY instead return a `Text` when its output contains a *verdict*
+  the reader must not miss — `/envelope`'s ladder (`SELECTED` / `REJECTED` / floor) and
+  `/goal check`'s met-or-not are the two that do — and the front end then renders that
+  `Text` **as-is** rather than flattening it. `commands.plain(result) -> str` is the
+  accessor for any consumer that wants characters rather than spans (logs, session
+  records, tests, non-TTY front ends).
+  - **SAFETY (frozen):** a `Text` result is composed programmatically — `Text()` plus
+    `.append(segment, style=...)` — and **never** via `Text.from_markup` on anything
+    derived from model, tool, file or config content. `Text` is the transcript's
+    markup-proof container (`tui/widgets/transcript.py`), not a bypass for it: a model id
+    of `[red]evil[/]` must print those characters and must not arm a colour.
+    🔒 `tests/test_report_card.py::test_report_card_never_interprets_markup`
+  - Colour never carries meaning alone. Every verdict keeps its WORD, so stripping the
+    spans (which `render_report_card` does, and which a non-TTY console does for itself)
+    loses nothing. `render_report_card(profile)` is defined as
+    `render_report_card_text(profile).plain`, so the two views cannot drift.
+    🔒 `tests/test_report_card.py::test_styled_card_plain_text_is_the_string_card_exactly`
+  - *Migration:* none required. Every existing handler returns `str` and keeps working
+    unchanged. A consumer that annotated a dispatch result as `str` should widen it to
+    `CommandResult` and call `plain()` where it needs a string — `in`, `==` and `.lower()`
+    happen to work on `Text` too, but `.index`, slicing and `%`-formatting do not.
 
-**Not frozen:** the command lineup; handler bodies.
+**Not frozen:** the command lineup; handler bodies; which commands choose to style
+their output, and the styles they choose (the palette lives in `ironcore/term.py` /
+`ironcore/tui/theme.py`, pinned together by `tests/test_term.py`).
 
 ## 7. Config — `ironcore/config/settings.py`
 

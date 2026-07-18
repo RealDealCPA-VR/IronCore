@@ -566,7 +566,12 @@ class IronCoreApp(App):
             except Exception as exc:  # a scheduled task must not kill the app
                 result = f"[error] {exc}"
             if result:
-                await self.transcript.add_note(str(result))
+                # A styled result (``/goal check``'s met/unmet payoff) passes
+                # through intact; anything else is coerced to a string exactly
+                # as it always was.
+                await self.transcript.add_note(
+                    result if isinstance(result, Text) else str(result)
+                )
 
         self.run_worker(_runner(), group="command")
 
@@ -773,9 +778,13 @@ class IronCoreApp(App):
 
     # -- notes ----------------------------------------------------------------
 
-    def _post_note(self, text: str) -> None:
+    def _post_note(self, text: str | Text) -> None:
         """Add a transcript note from a non-worker context, ordered via the
-        message pump (call_later awaits the returned coroutine)."""
+        message pump (call_later awaits the returned coroutine).
+
+        Accepts a pre-styled ``Text`` so a command result that carries its own
+        verdict colouring (CONTRACTS.md §6) reaches the pane intact.
+        """
         self.call_later(self.transcript.add_note, text)
 
     # -- test / introspection surface ----------------------------------------

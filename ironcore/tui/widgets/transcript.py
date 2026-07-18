@@ -316,10 +316,22 @@ class Transcript(VerticalScroll):
         text.append(f": {description}", style=theme.STYLE_MUTED)
         await self._add(_Styled(text, classes="note"))
 
-    async def add_note(self, text: str) -> None:
-        """A dim system line: mode changes, command output, errors, interrupts."""
+    async def add_note(self, text: str | Text) -> None:
+        """A dim system line: mode changes, command output, errors, interrupts.
+
+        A ``str`` gets the default note treatment (muted, leading ``[tag]``
+        lifted). A ``Text`` is ALREADY styled by whoever built it — a command
+        handler that returns one (CONTRACTS.md §6) has said which of its words
+        are verdicts — so it is rendered as-is rather than flattened to grey.
+
+        SAFETY: rendering a ``Text`` as-is is exactly as markup-safe as the
+        ``str`` path. ``Text`` is the transcript's markup-proof container, not a
+        bypass: its spans were attached programmatically by the builder, and
+        printing it never re-parses its characters.
+        """
         self._current = None
-        await self._add(_Styled(_note_text(text), classes="note"))
+        styled = text if isinstance(text, Text) else _note_text(text)
+        await self._add(_Styled(styled, classes="note"))
 
     async def add_card(self, call: ToolCall, risk: str, decision: str) -> ToolCard:
         self._current = None

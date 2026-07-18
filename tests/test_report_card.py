@@ -5,10 +5,20 @@ introspection, still measuring), measurements (the deep probe ran), or floor
 defaults (nothing known yet). A seeded profile has ``probed_at is None`` like a
 default one but is NOT floor-only -- ``source`` is what distinguishes them.
 The card must stay ASCII-safe for the Windows console (no em-dash/ellipsis).
+
+The styled sibling ``render_report_card_text`` is pinned here too, on two
+properties: its plain text is byte-identical to the string card (so a pipe, a
+non-TTY consumer and a pasted GitHub issue get exactly what these tests assert),
+and it never lets a model id become Rich console markup.
 """
 
+import io
+
+from rich.console import Console
+from rich.text import Text
+
 from ironcore.envelope.profile import CapabilityProfile
-from ironcore.envelope.runner import render_report_card
+from ironcore.envelope.runner import render_report_card, render_report_card_text
 
 
 def _seeded_native() -> CapabilityProfile:
@@ -144,3 +154,116 @@ def test_card_shows_vision_yes_when_the_profile_has_it():
     vision_line = next(line for line in card.splitlines() if line.startswith("Vision:"))
     assert "yes" in vision_line
     assert card.isascii()
+
+
+# -- the styled card (CONTRACTS.md §6) ------------------------------------------
+
+
+def _render(text: Text) -> str:
+    """The card as a real terminal would receive it: escape codes and all."""
+    buffer = io.StringIO()
+    Console(
+        file=buffer,
+        width=120,
+        force_terminal=True,
+        color_system="truecolor",
+        legacy_windows=False,
+    ).print(text)
+    return buffer.getvalue()
+
+
+def _profiles() -> list[CapabilityProfile]:
+    return [
+        _seeded_native(),
+        _tuned(),
+        CapabilityProfile(model_id="fresh"),
+        CapabilityProfile(
+            model_id="qwen3-coder:30b",
+            source="probed",
+            probed_at="2026-07-15T00:00:00+00:00",
+            context_window=262144,
+            honest_context=49152,
+            tool_protocols={"native": 0.98, "strict_json": 0.94},
+            edit_formats={"unified_diff": 0.71, "search_replace": 0.93},
+        ),
+    ]
+
+
+def test_styled_card_plain_text_is_the_string_card_exactly():
+    """One builder, two views. The plain-text path (a pipe, a non-TTY consumer,
+    a card pasted into an issue) must not drift from the coloured one by a
+    single character — which is what makes every pin above cover both."""
+    for profile in _profiles():
+        assert render_report_card_text(profile).plain == render_report_card(profile)
+
+
+def test_styled_card_colours_the_ladder_verdicts():
+    """Colour reinforces the words; it must actually be there. SELECTED and
+    REJECTED must not render identically — that was the whole bug."""
+    profile = _profiles()[-1]
+    card = render_report_card_text(profile)
+    styles = {
+        span_text: str(span.style)
+        for span in card.spans
+        if (span_text := card.plain[span.start : span.end])
+    }
+    assert "bold" in styles["SELECTED"]
+    assert styles["SELECTED"] != styles["REJECTED (0.19 short)"]
+    # and the accessible carrier survives with no colour at all
+    plain = card.plain
+    assert "SELECTED" in plain and "REJECTED (0.19 short)" in plain
+
+
+def test_unmeasured_cards_carry_no_success_colour():
+    """Green means "a measurement cleared a bar" — and on a card whose whole job
+    is telling guesses from evidence, it must never mean anything else.
+
+    An unprobed profile selects the FLOOR rung (nothing cleared anything) and a
+    seeded one only read the endpoint's own claim back, so neither may show the
+    success colour anywhere: not on the ladder heading, not on the SELECTED
+    marker, not on the honest/advertised ratio. They render amber and grey, and
+    the Source line says why.
+    """
+    from ironcore.term import SUCCESS
+
+    # the palette's success green as this truecolor console emits it
+    green = "38;2;" + ";".join(str(int(SUCCESS[i : i + 2], 16)) for i in (1, 3, 5))
+
+    for profile in (
+        CapabilityProfile(model_id="fresh"),
+        CapabilityProfile(model_id="s", source="seeded", context_window=8192,
+                          honest_context=8192, tool_protocols={"native": 0.95}),
+    ):
+        assert green not in _render(render_report_card_text(profile))
+    # ...whereas a genuinely measured one does earn it
+    assert green in _render(render_report_card_text(_profiles()[-1]))
+
+
+def test_report_card_never_interprets_markup():
+    """SAFETY: a model id is endpoint/config data, and the transcript's whole
+    reason for wrapping dynamic text in ``Text`` is that such data can never be
+    reinterpreted as Rich console markup. A model called ``[red]evil[/]`` must
+    print those characters and must not arm a colour.
+    """
+    evil = "[red]evil[/] [bold]x[/bold] [/]"
+    card = render_report_card_text(CapabilityProfile(model_id=evil))
+
+    assert evil in card.plain  # survives verbatim into the plain view
+    rendered = _render(card)
+    assert evil in rendered  # ...and into a real terminal, tags and all
+    # Rich's own `red` is SGR 31; this palette only ever emits truecolor
+    # (38;2;r;g;b), so 31m appearing at all would mean the markup was parsed.
+    assert "\x1b[31m" not in rendered
+    assert "\x1b[1m" not in rendered  # nor `[bold]`
+
+
+def test_report_card_markup_in_every_field_stays_literal():
+    """Not just the model id: every string that reaches the card from outside."""
+    evil = "[red]pwn[/]"
+    card = render_report_card_text(
+        CapabilityProfile(model_id=evil, source="probed", probed_at=evil)
+    )
+    assert card.plain.count(evil) == 2
+    rendered = _render(card)
+    assert rendered.count(evil) == 2
+    assert "\x1b[31m" not in rendered

@@ -19,6 +19,9 @@ fresh ``CommandContext`` per dispatch (``ctx`` cannot carry them across calls).
 
 from __future__ import annotations
 
+from rich.text import Text
+
+from ironcore import term
 from ironcore.commands._helpers import resolve_workspace
 from ironcore.commands.base import CommandContext, SlashCommand
 from ironcore.core.verify import CommandVerifier
@@ -111,16 +114,36 @@ def _check(ctx: CommandContext) -> str:
     return f"Checking the goal against {len(checks)} verify command(s)…"
 
 
-async def _run_check(goal: str, checks: list[str], workspace, settings, state) -> str:
+async def _run_check(goal: str, checks: list[str], workspace, settings, state) -> Text:
+    """Run the attached commands and report the stop-condition, styled.
+
+    This is the payoff line of the whole feature — "done" stopped being a claim
+    and became a fact — and it used to arrive in the same grey as the ack above
+    it. MET and UNMET now carry opposite colours (CONTRACTS.md §6). The wording
+    is unchanged, so a no-colour terminal loses nothing.
+
+    SAFETY: ``result.summary`` is the verify command's own output. It is
+    appended with a style, never parsed as markup.
+    """
     from ironcore.core.state import SessionState
 
     verifier = CommandVerifier(commands=checks)
     session = state if state is not None else SessionState()
     result = await verifier.verify(workspace, settings, session, touched_files=True)
+    text = Text()
     if result.ok:
         noun = "command" if len(checks) == 1 else "commands"
-        return f"Goal stop-condition MET — all {len(checks)} verify {noun} passed.\nGoal: {goal}"
-    return f"Goal stop-condition UNMET:\n{result.summary}"
+        text.append("Goal stop-condition MET", style=f"bold {term.SUCCESS}")
+        text.append(f" — all {len(checks)} verify {noun} passed.\n", style=term.MUTED)
+        # The restated objective is what was met, not the finding itself: it
+        # takes the calm steel so the green verdict above stays the brightest
+        # thing in the block (full foreground here out-shone it).
+        text.append("Goal: ", style=term.MUTED)
+        text.append(goal, style=term.SECONDARY)
+        return text
+    text.append("Goal stop-condition UNMET:", style=term.STYLE_FAIL)
+    text.append(f"\n{result.summary}", style=term.FOREGROUND)
+    return text
 
 
 COMMANDS: tuple[SlashCommand, ...] = (

@@ -10,7 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE)
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
-[![Tests: 1789](https://img.shields.io/badge/tests-1789%20offline-brightgreen.svg)](#built--proven)
+[![Tests: 1797](https://img.shields.io/badge/tests-1797%20offline-brightgreen.svg)](#built--proven)
 
 </div>
 
@@ -68,10 +68,12 @@ The middle rung is real: a model routed to **strict JSON** is driven with server
 its output is *constrained* to a well-formed `{"tool", "args"}` object — guaranteed-parseable
 tool calls, not best-effort — with a `done` action so a constrained model can still finish.
 
-![The /envelope report card for qwen3-coder:30b: source measured, honest context 49,152 against an advertised 262,144, 3.6 chars per token, a tool-protocol ladder choosing native at 0.98, an edit-format ladder rejecting unified_diff at 0.71 and choosing search_replace at 0.93, plus JSON adherence, retention, coherence and a usable verdict.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/03-envelope-report-card.png)
+![The /envelope report card for qwen3-coder:30b, colour-coded by outcome. Source reads 'measured' in green; honest context 49,152 against an advertised 262,144, with the resulting 19% flagged in red; 3.6 chars per token. A tool-protocol ladder picks native at 0.98, marked SELECTED in green, with strict_json below it greyed as 'ok, fallback' and text_protocol greyed as 'floor (always works)'. An edit-format ladder shows unified_diff at 0.71 in red, 'REJECTED (0.19 short)', and search_replace at 0.93 SELECTED in green. Below: JSON adherence, retention, coherence, vision, and a green verdict of 'usable — native tool calls, search_replace edits'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/03-envelope-report-card.png)
 
 *`/envelope` — the measurement, not a guess. This model advertises 262k of context; it honestly
-retrieves at 49k, and it cannot be trusted with unified diffs, so IronCore stopped using them.*
+retrieves at 49k, and it cannot be trusted with unified diffs, so IronCore stopped using them.
+Green is a rung a measurement cleared, red is one that fell short and by how much — but every
+verdict is a word first, so the card survives being piped, pasted, or read without colour.*
 
 A capable 30B gets native tool calls and unified diffs. A scrappy 7B gets the IRONCALL text
 protocol, whole-file edits, and an anchor every other turn — and *still finishes the task*.
@@ -337,7 +339,7 @@ itself never prints or prompts. Type `/` to open the palette:
 stops being a slogan: the objective is re-anchored into every turn, and *the harness* — not the
 model's opinion of itself — runs the attached command to decide whether the work is done.
 
-![A session that opens with an ordinary question — 'what's in this project?', answered via a list_dir tool card led by a blue rule, a blue READ chip and a green ✓ ok — and then formalises the work with /goal set to 'make fib() correct for every n up to 30'. Each typed command is echoed back in amber above the reply it produced, so the three /goal exchanges read as three groups. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' and 'Goal stop-condition MET — all 1 verify command passed.'](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
+![A session that opens with an ordinary question — 'what's in this project?', answered via a list_dir tool card led by a blue rule, a blue READ chip and a green ✓ ok — and then formalises the work with /goal set to 'make fib() correct for every n up to 30'. Each typed command is echoed back in amber above the reply it produced, so the three /goal exchanges read as three groups. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' followed by the payoff line 'Goal stop-condition MET' in green — all 1 verify command passed.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
 
 *The stop-condition is a command that really ran. "Done" is a test result, not a claim.*
 
@@ -431,7 +433,7 @@ exactly this way.
 
 ```bash
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q   # 1789 tests, all offline — no model, no network
+uv run --extra dev pytest -q   # 1797 tests, all offline — no model, no network
 ```
 
 The suite sandboxes `HOME` itself, so running it cannot touch your own `~/.ironcore`. CI gates
