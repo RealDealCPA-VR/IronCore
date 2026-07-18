@@ -132,11 +132,12 @@ pip install ironcore        # or:  uv tool install ironcore  /  pipx install iro
 # latest from source:
 pip install git+https://github.com/RealDealCPA-VR/IronCore.git
 
-ironcore doctor             # checks python, config, your endpoint, and probe status
+ironcore init               # write a commented starter config, and print its path
+ironcore doctor             # checks python, config, endpoint, model, git — exits 1 if broken
 ironcore                    # launch the TUI (auto-probes your model on first run)
 ironcore --resume           # pick up a past session
 
-python -m demo              # a fully offline, no-model walkthrough of a real session
+ironcore demo               # a fully offline, no-model walkthrough of a real session
 ```
 
 Developing on IronCore itself:

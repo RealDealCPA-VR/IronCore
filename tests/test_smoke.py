@@ -19,11 +19,17 @@ def test_cli_version(capsys):
     assert ironcore.__version__ in capsys.readouterr().out
 
 
-def test_cli_banner_points_to_docs(capsys):
-    assert main([]) == 0
-    out = capsys.readouterr().out
-    assert "docs/SPEC.md" in out
-    assert "TODO.md" in out
+def test_cli_banner_points_at_urls_not_files_that_do_not_ship(capsys):
+    # No .md file ships in the wheel, so the banner must not send an installed
+    # user to relative paths -- and TODO.md/AGENTS.md are maintainer-internal.
+    assert main([]) == 1  # non-TTY: nothing ran, so do not report success
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "https://github.com/RealDealCPA-VR/IronCore" in out
+    assert "ironcore doctor" in out and "ironcore demo" in out
+    for internal in ("docs/SPEC.md", "TODO.md", "AGENTS.md", "README.md"):
+        assert internal not in out
+    assert "no interactive terminal" in captured.err
 
 
 def test_parser_has_doctor():
@@ -118,7 +124,10 @@ def test_doctor_mcp_silent_without_servers(tmp_path, capsys):
     assert "] mcp:" not in capsys.readouterr().out
 
 
-def test_doctor_mcp_hints_when_network_tools_off(tmp_path, capsys):
+def test_doctor_mcp_hints_when_network_tools_off(tmp_path, capsys, monkeypatch):
+    # PATH made deterministic: doctor now resolves mcp commands (and git), and a
+    # dev box that happens to lack npx must not change this test's verdict.
+    monkeypatch.setattr("ironcore.cli._which", lambda cmd: f"C:/fake/{cmd}")
     user = tmp_path / "user.toml"
     user.write_text('[mcp.servers.gh]\ncommand = "npx.cmd"\n')
     assert _doctor(tmp_path, user) == 0  # a hint, not a failure
@@ -128,7 +137,8 @@ def test_doctor_mcp_hints_when_network_tools_off(tmp_path, capsys):
     assert out.isascii()
 
 
-def test_doctor_mcp_ok_when_network_tools_on(tmp_path, capsys):
+def test_doctor_mcp_ok_when_network_tools_on(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr("ironcore.cli._which", lambda cmd: f"C:/fake/{cmd}")
     user = tmp_path / "user.toml"
     user.write_text(
         '[mcp.servers.gh]\ncommand = "npx.cmd"\n'

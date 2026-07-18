@@ -2,33 +2,53 @@
 
 ``ironcore`` with no subcommand launches the Textual TUI (phase 7,
 ironcore/tui/app.py) **when attached to an interactive terminal**. When stdout
-is not a TTY — piped, captured, or under CI — it prints the informational
-banner and exits 0 instead of trying to drive a full-screen app into a pipe.
-``--version`` and ``doctor`` remain the fast, import-light paths — the TUI (and
-Textual) are imported lazily inside ``main`` so those two never pay for it.
+is not a TTY — piped, captured, or under CI — there is no app to drive, so it
+prints the banner and exits **non-zero**: silently succeeding while doing
+nothing is a lie the caller cannot detect.
+
+``--version``, ``doctor``, ``init`` and ``demo`` are the fast, import-light
+paths — the TUI (and Textual) are imported lazily inside ``main`` so none of
+them pay for it.
+
+Doctor's contract is *truth*: every line it prints is something it actually
+checked, and it exits non-zero when the setup would not work. It is meant to be
+usable as a scriptable setup gate.
 """
 
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from ironcore import __version__
+
+if TYPE_CHECKING:  # import-light at runtime: --version must not pull in pydantic
+    from ironcore.config.settings import Settings
+
+#: Repository/doc links. The wheel ships no .md files, so the banner must point
+#: at URLs, not at relative paths that only exist in a source checkout.
+REPO_URL = "https://github.com/RealDealCPA-VR/IronCore"
+ISSUES_URL = "https://github.com/RealDealCPA-VR/IronCore/issues"
 
 BANNER = r"""
   IronCore v{version}
   A frontier-grade terminal coding agent for open-source models.
 
   Run `ironcore` in an interactive terminal to launch the TUI.
-  Reference:
-    README.md        what this is and why
-    docs/SPEC.md     the full specification
-    TODO.md          the build plan (one-pass tasks)
-    AGENTS.md        pickup protocol for agents working on this repo
 
-  Try: ironcore doctor
+  Start here:
+    ironcore doctor    check python, config, endpoint, model, git -- exits 1 if broken
+    ironcore demo      a real IronCore session, fully offline (no model needed)
+    ironcore init      write a commented starter config and print its path
+
+  Docs:   {repo}
+  Issues: {issues}
 """
 
 
@@ -36,6 +56,14 @@ BANNER = r"""
 #: ``ironcore.tui.app.RESUME_PICK`` (kept as a literal so this module stays
 #: import-light — the TUI is imported lazily inside ``main``).
 RESUME_PICK = "__pick__"
+
+
+#: Role names doctor reports, in the order they appear in RoleModels.
+_ROLE_NAMES = ("planner", "coder", "summarizer", "verifier")
+
+#: How long doctor waits on the endpoint probe. Short: doctor must stay snappy,
+#: and "slow" and "down" are the same answer for a local server.
+_PROBE_TIMEOUT_S = 3.0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,17 +81,145 @@ def build_parser() -> argparse.ArgumentParser:
         help="resume a previous session; with no id, pick one from a list at launch",
     )
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("doctor", help="check the local environment (python, config, endpoint)")
+    sub.add_parser(
+        "doctor",
+        help="check the local setup (python, config, endpoint, model, git); exit 1 if broken",
+    )
+    demo = sub.add_parser(
+        "demo", help="run a real IronCore session fully offline -- no model, no network"
+    )
+    demo.add_argument(
+        "--smoke",
+        action="store_true",
+        help="non-interactive: print one PASS/FAIL line instead of the narration",
+    )
+    init = sub.add_parser("init", help="write a commented starter config file")
+    scope = init.add_mutually_exclusive_group()
+    scope.add_argument(
+        "--user",
+        dest="scope",
+        action="store_const",
+        const="user",
+        help="write ~/.ironcore/config.toml (the default)",
+    )
+    scope.add_argument(
+        "--project",
+        dest="scope",
+        action="store_const",
+        const="project",
+        help="write ./.ironcore/config.toml (committable, overrides the user file)",
+    )
+    init.set_defaults(scope="user")
+    init.add_argument("--force", action="store_true", help="overwrite an existing config file")
     return parser
-
-
-#: Role names doctor reports, in the order they appear in RoleModels.
-_ROLE_NAMES = ("planner", "coder", "summarizer", "verifier")
 
 
 def _is_localhost(url: str) -> bool:
     host = urlsplit(url).hostname or ""
     return host == "localhost" or host == "::1" or host.startswith("127.")
+
+
+def _which(command: str) -> str | None:
+    """Indirection over :func:`shutil.which` so tests can make PATH deterministic."""
+    return shutil.which(command)
+
+
+# --------------------------------------------------------------------------
+# endpoint probe
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EndpointProbe:
+    """The result of ONE request to ``{base_url}/models``.
+
+    ``/models`` is the OpenAI-compatible listing path that every backend
+    IronCore advertises serves (Ollama, vLLM, llama.cpp's server, LM Studio) —
+    unlike Ollama's proprietary ``/api/version``, which the others 404, making
+    a probe of it "pass" against a server that cannot talk to us at all.
+
+    One request answers both questions doctor needs: is the endpoint really an
+    OpenAI-compatible server, and does it have the configured model?
+
+    status:
+      ``ok``          -- 2xx and an intelligible model list (``models`` filled)
+      ``bad_url``     -- not a usable URL at all (missing scheme, bad syntax)
+      ``unreachable`` -- nothing answered (connection refused, DNS, timeout)
+      ``http_error``  -- something answered, but not with success
+      ``bad_payload`` -- 2xx whose body is not an OpenAI model list
+    """
+
+    status: str
+    url: str
+    detail: str = ""
+    code: int | None = None
+    models: tuple[str, ...] = field(default=())
+
+
+def _model_ids(payload: object) -> tuple[str, ...] | None:
+    """Model ids out of an OpenAI ``/models`` body, or None if it isn't one.
+
+    Tolerant on purpose: local servers are sloppy. ``{"data": [...]}`` is the
+    OpenAI shape; a bare list is accepted too; entries may be dicts (``id`` or
+    ``name``) or plain strings. An empty list is a valid answer ("no models
+    installed") and must not be confused with "not a model list".
+    """
+    entries = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(entries, list):
+        return None
+    ids: list[str] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            ids.append(entry)
+        elif isinstance(entry, dict):
+            name = entry.get("id") or entry.get("name")
+            if isinstance(name, str):
+                ids.append(name)
+    if entries and not ids:
+        return None  # a list of somethings, but not of models
+    return tuple(ids)
+
+
+def probe_endpoint(base_url: str, timeout: float = _PROBE_TIMEOUT_S) -> EndpointProbe:
+    """GET ``{base_url}/models`` once and classify the outcome. Never raises."""
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/models"
+    try:
+        resp = httpx.get(url, timeout=timeout)
+    except (httpx.InvalidURL, httpx.UnsupportedProtocol) as exc:
+        # A scheme typo used to print "fine if no local server is running" --
+        # actively telling the user their broken config was OK.
+        return EndpointProbe("bad_url", url, detail=str(exc))
+    except httpx.HTTPError as exc:
+        return EndpointProbe("unreachable", url, detail=str(exc))
+    except Exception as exc:  # pragma: no cover -- defensive; doctor never crashes
+        return EndpointProbe("unreachable", url, detail=str(exc))
+
+    if not 200 <= resp.status_code < 300:
+        return EndpointProbe("http_error", url, code=resp.status_code)
+    try:
+        ids = _model_ids(resp.json())
+    except Exception:
+        ids = None
+    if ids is None:
+        return EndpointProbe("bad_payload", url, code=resp.status_code)
+    return EndpointProbe("ok", url, code=resp.status_code, models=ids)
+
+
+def _model_available(model: str, available: tuple[str, ...]) -> bool:
+    """Is ``model`` in the endpoint's list? Exact match, modulo Ollama's
+    implicit ``:latest`` tag (``llama3`` and ``llama3:latest`` are one model)."""
+    candidates = {model, model.removesuffix(":latest"), f"{model}:latest"}
+    for have in available:
+        if have in candidates or have.removesuffix(":latest") in candidates:
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------
+# doctor
+# --------------------------------------------------------------------------
 
 
 def cmd_doctor(
@@ -72,10 +228,15 @@ def cmd_doctor(
     env: dict[str, str] | None = None,
     envelope_dir: Path | None = None,
     check_endpoint: bool = True,
+    probe: Callable[[str], EndpointProbe] | None = None,
 ) -> int:
-    """Environment checks. Parameters are injectable for tests (mirrors
-    Settings.load); real runs pass nothing. check_endpoint=False skips the
-    network probe so tests stay offline."""
+    """Environment checks; 0 only if the setup would actually work.
+
+    Parameters are injectable for tests (they mirror Settings.load); real runs
+    pass nothing. ``check_endpoint=False`` skips the network probe entirely so
+    tests stay offline; ``probe`` substitutes a scripted probe for the same
+    reason while still exercising the reporting branches.
+    """
     ok = True
 
     version_ok = sys.version_info >= (3, 11)
@@ -84,10 +245,15 @@ def cmd_doctor(
 
     from ironcore.config.settings import ConfigError, Settings
 
+    resolved_project = project_dir if project_dir is not None else Path.cwd()
+    default_user = Path.home() / ".ironcore" / "config.toml"
+    user_path = user_config if user_config is not None else default_user
+    project_path = resolved_project / ".ironcore" / "config.toml"
+
     try:
         settings = Settings.load(
-            project_dir=project_dir if project_dir is not None else Path.cwd(),
-            user_config=user_config,
+            project_dir=resolved_project,
+            user_config=user_path,
             env=env,
         )
     except ConfigError as exc:
@@ -97,7 +263,20 @@ def cmd_doctor(
         print(f"[FAIL] config: {exc}")
         return 1
 
-    print(f"[ok] config loaded (model: {settings.provider.model}, mode: {settings.safety.mode})")
+    # Name the files. "config loaded" printed when no config file existed at all
+    # was the single most misleading line doctor emitted.
+    def _state(path: Path) -> str:
+        return "loaded" if path.exists() else "absent"
+
+    if user_path.exists() or project_path.exists():
+        print(
+            f"[ok] config: {user_path} ({_state(user_path)}) "
+            f"+ {project_path} ({_state(project_path)})"
+        )
+    else:
+        print(f"[--] no config file -- using defaults (model: {settings.provider.model})")
+        print(f"     `ironcore init` writes a commented starter config at {user_path}")
+    print(f"[ok] effective: model {settings.provider.model}, mode {settings.safety.mode}")
     for role in _ROLE_NAMES:
         model = getattr(settings.roles, role)
         if model:
@@ -109,15 +288,9 @@ def cmd_doctor(
         print(f"[!!] endpoint {endpoint} is not localhost and safety.network_tools is on:")
         print("     your code leaves this machine -- make sure that is what you want")
 
-    if check_endpoint:
-        try:
-            import httpx
-
-            probe = f"{endpoint.rstrip('/').removesuffix('/v1')}/api/version"
-            resp = httpx.get(probe, timeout=2.0)
-            print(f"[ok] endpoint reachable: {endpoint} ({resp.status_code})")
-        except Exception:
-            print(f"[--] endpoint not reachable: {endpoint} (fine if no local server is running)")
+    if probe is not None or check_endpoint:
+        result = (probe or probe_endpoint)(endpoint)
+        ok = _report_endpoint(result, settings, endpoint, user_path, project_path) and ok
 
     if envelope_dir is None:
         envelope_dir = Path.home() / ".ironcore" / "envelopes"
@@ -128,10 +301,25 @@ def cmd_doctor(
         print(f"[FAIL] envelope cache: {exc}")
         ok = False
 
+    # git backs /undo, /redo and change-set snapshots -- a headline feature that
+    # silently degrades to nothing when git is missing.
+    if _which("git"):
+        print("[ok] git found (undo/redo and change-set snapshots available)")
+    else:
+        print("[!!] git not found -- /undo, /redo and change-set snapshots are disabled")
+
     # whether the configured model has been measured — the molds-to-the-model status
     from ironcore.envelope.profile import CapabilityProfile
 
-    profile = CapabilityProfile.load(envelope_dir, settings.provider.model)
+    # load_with_note, not load: a quarantined (corrupt) cache is announced at TUI
+    # boot, and doctor must not be the one surface that stays quiet about it.
+    profile, quarantine_note = CapabilityProfile.load_with_note(
+        envelope_dir, settings.provider.model
+    )
+    if quarantine_note:
+        # same sentence the boot note uses, minus its "[envelope]" tag -- doctor's
+        # own marker column already carries the severity.
+        print(f"[!!] {quarantine_note.removeprefix('[envelope] ')}")
     if profile is not None and (profile.source == "probed" or profile.probed_at is not None):
         print(
             f"[ok] model {settings.provider.model} measured "
@@ -144,17 +332,7 @@ def cmd_doctor(
             "from the endpoint in ~1s then measures in the background (or run /probe)"
         )
 
-    # MCP tool servers (MS-7) -- settings-only status, no processes spawned here
-    mcp_enabled = sorted(name for name, srv in settings.mcp.servers.items() if srv.enabled)
-    if mcp_enabled:
-        names = ", ".join(mcp_enabled)
-        if settings.safety.network_tools:
-            print(f"[ok] mcp: {len(mcp_enabled)} server(s) configured ({names})")
-        else:
-            print(
-                f"[--] mcp: {len(mcp_enabled)} server(s) configured ({names}) but MCP tools "
-                "are NET-risk and stay unregistered until safety.network_tools = true"
-            )
+    ok = _report_mcp(settings) and ok
 
     # Entry-point plugins (MS-5) -- what discovery would load at boot. This
     # RUNS installed plugin factories (installation is the consent moment,
@@ -165,7 +343,7 @@ def cmd_doctor(
     if not settings.plugins.enabled:
         print("[--] plugins: disabled ([plugins] enabled = false)")
     else:
-        loaded = load_plugins(settings, project_dir if project_dir is not None else Path.cwd())
+        loaded = load_plugins(settings, resolved_project)
         print(f"[ok] plugins: {loaded.summary()}")
         for skip in loaded.skipped:
             print(f"[--] plugin skipped: {skip.group}:{skip.name} -- {skip.reason}")
@@ -182,23 +360,284 @@ def cmd_doctor(
     return 0 if ok else 1
 
 
-def main(argv: list[str] | None = None) -> int:
+def _config_hint(user_path: Path, project_path: Path) -> str:
+    """Which file to edit: the one that already exists wins (project last)."""
+    for path in (project_path, user_path):
+        if path.exists():
+            return str(path)
+    return f"{user_path} (run `ironcore init` to create it)"
+
+
+def _report_endpoint(
+    result: EndpointProbe,
+    settings: Settings,
+    endpoint: str,
+    user_path: Path,
+    project_path: Path,
+) -> bool:
+    """Print the endpoint + model-availability verdict; return False if broken.
+
+    Split out of cmd_doctor because it is the part that has to be exactly right:
+    the old code captured ``resp.status_code``, printed it, and never looked at
+    it, so ``[ok] endpoint reachable (404)`` was a literal output.
+    """
+    ok = True
+    where = _config_hint(user_path, project_path)
+    if result.status == "bad_url":
+        print(f"[FAIL] provider.base_url is not a usable URL: {endpoint}")
+        print("       expected something like http://localhost:11434/v1")
+        print(f"       set [provider] base_url in {where}")
+        ok = False
+    elif result.status == "unreachable":
+        print(f"[--] endpoint not reachable: {result.url}")
+        print("     start your local server (e.g. `ollama serve`), then re-run `ironcore doctor`")
+    elif result.status == "http_error":
+        print(
+            f"[!!] got HTTP {result.code} from {result.url} "
+            "-- is this an OpenAI-compatible endpoint?"
+        )
+        if not endpoint.rstrip("/").endswith("/v1"):
+            print(f"     base_url usually ends with /v1 (yours is {endpoint})")
+    elif result.status == "bad_payload":
+        print(f"[!!] {result.url} answered {result.code} but not with an OpenAI model list")
+        print("     point [provider] base_url at an OpenAI-compatible server")
+    else:
+        print(f"[ok] endpoint reachable: {result.url} ({len(result.models)} model(s) listed)")
+        ok = _report_models(result, settings, where) and ok
+
+    if not ok or result.status != "ok":
+        print("     no model ready yet? `ironcore demo` runs a real session fully offline")
+    return ok
+
+
+def _report_models(result: EndpointProbe, settings: Settings, where: str) -> bool:
+    """Is every configured model actually available at the endpoint?
+
+    The shipped default is an ~18GB model almost nobody has pulled, and until
+    now doctor never asked — so a clean bill of health was compatible with the
+    very first turn failing.
+    """
+    wanted: list[tuple[str, str]] = [("provider.model", settings.provider.model)]
+    for role in _ROLE_NAMES:
+        model = getattr(settings.roles, role)
+        if model:
+            wanted.append((f"roles.{role}", model))
+
+    if not result.models:
+        print(f"[FAIL] {result.url} answered, but lists no models at all")
+        print(f"       pull one first (e.g. `ollama pull {settings.provider.model}`)")
+        return False
+
+    shown = ", ".join(result.models[:5])
+    if len(result.models) > 5:
+        shown += f", ... ({len(result.models)} total)"
+    ok = True
+    for label, model in wanted:
+        if _model_available(model, result.models):
+            print(f"[ok] {label} {model} is available at the endpoint")
+        else:
+            print(f"[FAIL] model {model} is not available at {result.url} (from {label})")
+            print(f"       models you have: {shown}")
+            print(f"       fix: `ollama pull {model}`, or set [provider] model in {where}")
+            ok = False
+    return ok
+
+
+def _report_mcp(settings: Settings) -> bool:
+    """MCP servers: configured, registerable, and actually launchable?"""
+    servers = sorted(
+        ((name, srv) for name, srv in settings.mcp.servers.items() if srv.enabled),
+        key=lambda item: item[0],
+    )
+    if not servers:
+        return True
+    names = ", ".join(name for name, _ in servers)
+    if settings.safety.network_tools:
+        print(f"[ok] mcp: {len(servers)} server(s) configured ({names})")
+    else:
+        print(
+            f"[--] mcp: {len(servers)} server(s) configured ({names}) but MCP tools "
+            "are NET-risk and stay unregistered until safety.network_tools = true"
+        )
+    ok = True
+    for name, srv in servers:
+        if not srv.command:
+            # the exact wording MCPManager.from_settings emits, so doctor and
+            # the TUI never disagree about why an entry was dropped.
+            print(
+                f"[--] mcp {name}: url-only entries are not supported yet "
+                "(stdio only -- set 'command') -- will be skipped"
+            )
+        elif _which(srv.command) is None:
+            print(f"[FAIL] mcp {name}: command {srv.command!r} not found on PATH")
+            ok = False
+    return ok
+
+
+# --------------------------------------------------------------------------
+# init
+# --------------------------------------------------------------------------
+
+#: A starter config. Everything a user is likely to change is live; everything
+#: else is commented with its real default, so the file doubles as the settings
+#: reference and never changes behaviour just by existing.
+STARTER_CONFIG = """\
+# IronCore configuration.
+#   user file:    ~/.ironcore/config.toml
+#   project file: <repo>/.ironcore/config.toml   (committable; wins over the user file)
+#   environment:  IRONCORE_BASE_URL / _MODEL / _API_KEY / _MODE / _ROLE_* (win over both)
+# Every commented line below shows IronCore's actual default.
+
+[provider]
+# Any OpenAI-compatible server: Ollama, vLLM, llama.cpp's server, LM Studio.
+# The path almost always ends in /v1.
+base_url = "http://localhost:11434/v1"
+# The model must already exist on that server -- `ironcore doctor` checks.
+model = "qwen3-coder:30b"
+# api_key = "ironcore-local"   # local servers ignore it; never put a real key in a repo
+# type = "auto"                # "auto" | "ollama" | "openai"
+
+[safety]
+# Boot mode: "manual" (approve every action) | "accept-edits" | "plan".
+mode = "manual"
+# workspace_only = true        # path jail: writes cannot escape the workspace
+# network_tools = false        # NET-risk tools are not even registered unless true
+
+# [roles]                      # optional per-role routing; unset = use provider.model
+# planner = "big-model"
+# coder = "fast-model"
+# summarizer = "fast-model"
+# verifier = "fast-model"
+
+# [envelope]                   # how IronCore molds itself to your model
+# auto_probe = true            # false = never measure in the background; stay on floor defaults
+# instant_seed = true          # false = no ~1s seed from endpoint introspection at boot
+# auto_tune = true             # false = never record outcomes or downgrade a ladder rung
+# vision = false               # force image support on/off; unset = trust the profile
+
+# [engine]
+# best_of_n = 1                # 1 = off; N resamples up to N-1 extra candidates per turn
+
+# [plugins]
+# enabled = true               # false = never consult entry points at all
+
+# [mcp.servers.example]        # stdio transport only in v0.x
+# command = "npx.cmd"          # on Windows use the real launcher name
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+# enabled = true
+"""
+
+
+def cmd_init(
+    scope: str = "user",
+    project_dir: Path | None = None,
+    user_config: Path | None = None,
+    force: bool = False,
+) -> int:
+    """Write a commented starter config and print where it went."""
+    if scope == "project":
+        base = project_dir if project_dir is not None else Path.cwd()
+        target = base / ".ironcore" / "config.toml"
+    else:
+        target = (
+            user_config if user_config is not None else Path.home() / ".ironcore" / "config.toml"
+        )
+
+    if target.exists() and not force:
+        print(f"ironcore: {target} already exists; pass --force to overwrite it")
+        return 1
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(STARTER_CONFIG, encoding="utf-8")
+    except OSError as exc:
+        print(f"ironcore: could not write {target}: {exc}")
+        return 1
+    print(f"wrote {target}")
+    print("edit [provider] base_url + model, then run `ironcore doctor`")
+    return 0
+
+
+# --------------------------------------------------------------------------
+# demo
+# --------------------------------------------------------------------------
+
+
+def cmd_demo(smoke: bool = False) -> int:
+    """Run the offline demo session (ironcore/demo). No model, no network.
+
+    ``--smoke`` collapses the narration to one PASS/FAIL line so a release gate
+    can assert on it; the transcript is still printed on failure, because a
+    silent failure is the thing a gate exists to prevent.
+    """
+    from ironcore.demo.scenario import run_demo
+
+    if not smoke:
+        return run_demo(emit=print)
+
+    captured: list[str] = []
+    code = run_demo(emit=captured.append)
+    if code == 0:
+        print("demo: PASS -- offline session completed (read -> edit -> verify -> done)")
+        return 0
+    print("\n".join(captured))
+    print("demo: FAIL -- the offline session did not complete")
+    return 1
+
+
+# --------------------------------------------------------------------------
+# entry point
+# --------------------------------------------------------------------------
+
+#: Printed under any unhandled error out of the dispatch. Every path that can
+#: raise (a stray quote in TOML, a half-written state file) used to traceback
+#: straight out of the primary entry point.
+_ERROR_HINT = (
+    "Fix the file or delete it to fall back to defaults; run `ironcore doctor` to re-check."
+)
+
+
+def _dispatch(argv: list[str] | None) -> int:
     args = build_parser().parse_args(argv)
     if args.version:
         print(f"ironcore {__version__}")
         return 0
     if args.command == "doctor":
         return cmd_doctor()
+    if args.command == "demo":
+        return cmd_demo(smoke=args.smoke)
+    if args.command == "init":
+        return cmd_init(scope=args.scope, force=args.force)
     # No subcommand: launch the interactive TUI only when we own a real
-    # terminal. Non-TTY (pipes, CI, captured tests) gets the banner — driving a
-    # full-screen app into a pipe would hang. Imported lazily so --version and
-    # doctor stay import-light.
+    # terminal. Non-TTY (pipes, CI, captured tests) gets the banner and a
+    # non-zero exit — driving a full-screen app into a pipe would hang, and
+    # exiting 0 would tell the caller a session ran. Imported lazily so
+    # --version and doctor stay import-light.
     if sys.stdout.isatty():
         from ironcore.tui.app import run_app
 
         return run_app(resume=args.resume)
-    print(BANNER.format(version=__version__))
-    return 0
+    print(BANNER.format(version=__version__, repo=REPO_URL, issues=ISSUES_URL))
+    print("no interactive terminal; try `ironcore doctor` or `ironcore demo`", file=sys.stderr)
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    from ironcore.config.settings import ConfigError
+
+    try:
+        return _dispatch(argv)
+    except ConfigError as exc:
+        print(f"ironcore: {exc}", file=sys.stderr)
+        print(_ERROR_HINT, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:  # pragma: no cover -- interactive only
+        print("ironcore: interrupted", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        # Last line of defence: a stranger gets a sentence, not a traceback.
+        print(f"ironcore: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(_ERROR_HINT, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

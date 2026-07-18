@@ -3,7 +3,8 @@
 The demo drives the real TurnEngine against a scripted MockProvider, so these
 prove the whole read → plan → edit → verify → done arc runs with no network and
 no real model. Most tests call ``run_demo`` directly with a capture list (fast,
-hermetic); one exercises the ``python -m demo`` entry point via subprocess.
+hermetic); two exercise the shipped entry points (``ironcore demo`` and
+``python -m ironcore.demo``) via subprocess.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from demo.scenario import CHECK_FILENAME, GREETER_FILENAME, run_demo
+from ironcore.demo.scenario import CHECK_FILENAME, GREETER_FILENAME, run_demo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -94,12 +95,41 @@ def test_run_demo_with_no_workspace_uses_a_throwaway_tempdir():
     assert "stop_reason: done" in "\n".join(out)
 
 
-def test_python_dash_m_demo_exits_zero():
+def test_python_dash_m_ironcore_demo_exits_zero():
     proc = subprocess.run(
-        [sys.executable, "-m", "demo"],
+        [sys.executable, "-m", "ironcore.demo"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
     )
     assert proc.returncode == 0, proc.stderr
     assert "stop_reason: done" in proc.stdout
+
+
+def test_demo_lives_inside_the_package_so_it_ships_in_the_wheel():
+    """The regression: `demo/` was a top-level dir, the wheel packages only
+    `ironcore`, so the documented `python -m demo` did not exist after a pip
+    install. It has to be importable as a subpackage, and there must be no
+    top-level `demo` package squatting that name."""
+    import ironcore.demo
+
+    assert Path(ironcore.demo.__file__).parent.parent.name == "ironcore"
+    assert not (REPO_ROOT / "demo").exists()
+
+
+def test_ironcore_demo_smoke_prints_one_pass_line(capsys):
+    """`ironcore demo --smoke` is FIX-4's release gate: one line, exit 0."""
+    from ironcore.cli import main
+
+    assert main(["demo", "--smoke"]) == 0
+    out = capsys.readouterr().out
+    assert "demo: PASS" in out
+    assert "stop_reason" not in out  # the narration is collapsed, not printed
+    assert out.isascii()
+
+
+def test_ironcore_demo_narrates_by_default(capsys):
+    from ironcore.cli import main
+
+    assert main(["demo"]) == 0
+    assert "stop_reason: done" in capsys.readouterr().out

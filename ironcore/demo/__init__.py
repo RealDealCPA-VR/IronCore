@@ -14,17 +14,24 @@ Rules for this package:
 * Nothing here imports ``ironcore.tui`` (docs/ARCHITECTURE.md §4): the demo is a
   headless consumer of the same event stream the TUI renders.
 * All work happens in a caller-supplied (or throwaway ``tempfile``) workspace, so
-  ``python -m demo`` is idempotent and leaves nothing behind.
+  ``ironcore demo`` is idempotent and leaves nothing behind.
+
+This package lives INSIDE ``ironcore`` so it ships in the wheel: the demo is the
+first thing a stranger without a model running should be able to run, so it has
+to exist after ``pip install ironcore`` (a top-level ``demo`` package would work
+too, but it would squat a very common name in every user's site-packages).
 
 Entry points:
 
-* ``python -m demo``                 — run it, narrated, in a temp dir (exit 0 on success).
-* :func:`demo.scenario.run_demo`     — drive it with an injectable ``emit`` sink
-  (the test captures output without touching stdout).
+* ``ironcore demo``                  — run it, narrated, in a temp dir (exit 0 on success).
+* ``ironcore demo --smoke``          — same run, one PASS/FAIL line (release gate).
+* ``python -m ironcore.demo``        — the module form of ``ironcore demo``.
+* :func:`ironcore.demo.scenario.run_demo` — drive it with an injectable ``emit``
+  sink (the test captures output without touching stdout).
 """
 
 from __future__ import annotations
 
-from demo.scenario import run_demo
+from ironcore.demo.scenario import run_demo
 
 __all__ = ["run_demo"]

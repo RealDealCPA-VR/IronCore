@@ -1,4 +1,8 @@
-"""``python -m demo`` — run the offline session, narrated, in a throwaway dir.
+"""``python -m ironcore.demo`` — the offline session, narrated, in a throwaway dir.
+
+The user-facing spelling is ``ironcore demo`` (``ironcore.cli.cmd_demo``); this
+module is the equivalent ``python -m`` form and delegates to the same
+``run_demo``.
 
 Creates a ``tempfile`` workspace so re-runs are clean, drives the demo with
 ``print`` as the narration sink, and exits 0 on a clean, verified ``done``. The
@@ -12,7 +16,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from demo.scenario import run_demo
+from ironcore.demo.scenario import run_demo
 
 
 def main() -> int:
