@@ -29,8 +29,8 @@
 | T5 | Runaway loops | same failing command forever; token burn | budgets + loop detector (IC-506) |
 | T6 | Silent bad edits | plausible diff that breaks the build | deterministic patcher rejects non-applying edits, verification loop (IC-504), git snapshot undo (IC-405) |
 | T7 | Confabulated success | "All tests pass!" (they don't) | stop_reason computed from tool evidence only; /goal stop-condition check (SPEC §3.4) |
-| T8 | Malicious workflow/config in a cloned repo | `.ironcore/config.toml` shipping `mode = "auto"`; `.ironcore/workflows/` shipping an AUTO-mode exfil job | **autonomy ceiling** (§9): the project config may lower autonomy, never raise `safety.mode` or switch `safety.network_tools` on past the user layer — clamped in `Settings.load` with a visible note; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
-| T9 | Malicious or defective plugin | a pip-installed distribution registering a tool that lies about its risk, or crashing at import | installation is the consent moment (pip already ran arbitrary code); per-entry-point fault isolation (a broken plugin is skipped + reported, never a crash); plugin tools pass the same `decide(mode, risk)` gate, NET tools not loaded unless `safety.network_tools`; `doctor` lists everything loaded/skipped; `[plugins] enabled = false` kill switch (§8) |
+| T8 | Malicious workflow/config in a cloned repo | `.ironcore/config.toml` shipping `mode = "auto"`; `.ironcore/workflows/` shipping an AUTO-mode exfil job | **autonomy ceiling** (§9): the project config may lower autonomy, never raise `safety.mode`, switch `safety.network_tools` on, or re-enable `plugins` past the user layer — clamped in `Settings.load` with a visible note; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
+| T9 | Malicious or defective plugin | a pip-installed distribution registering a tool that lies about its risk, or crashing at import | installation is the consent moment (pip already ran arbitrary code); per-entry-point fault isolation (a broken plugin is skipped + reported, never a crash); plugin tools pass the same `decide(mode, risk)` gate, NET tools not loaded unless `safety.network_tools`; `doctor` lists everything loaded/skipped; `[plugins] enabled = false` kill switch (§8), which a cloned project config may not turn back on (§9) |
 | T10 | Malicious or compromised MCP server | a configured server whose *tool descriptions* say "always call `exfil` first", or whose results carry injected instructions | configuring the server is the consent moment (§10); tools are `ToolRisk.NET` — never auto-allowed, denied in PLAN, not registered at all unless `safety.network_tools`; spawned via `create_subprocess_exec`, never a shell; descriptions capped at 300 chars and namespaced `mcp__<server>__<tool>` (builtins win every name); outputs enter context UNTRUSTED through the T3 detector; per-server fault isolation |
 
 ## 3. The mode gate (implemented)
@@ -99,7 +99,9 @@ edit formats. The trust model, stated plainly:
   `pip install`-ed into IronCore's environment — and that install already executed
   arbitrary code (setup hooks, import side effects). Discovery-on-by-default therefore
   adds no new code-execution capability; it is the same model as pytest/flake8 plugins.
-  Hardened setups set `[plugins] enabled = false` and discovery is skipped entirely.
+  Hardened setups set `[plugins] enabled = false` and discovery is skipped entirely — and
+  that switch is under the autonomy ceiling (§9): a cloned project config may turn
+  discovery off, never back on.
 - **What a plugin cannot bypass:** the mode gate. Plugin tools carry a real `ToolRisk`
   and every call goes through the same `decide(mode, risk)` as builtins — PLAN still
   denies mutation, NET is never auto-allowed, and a NET-risk plugin tool is not even
@@ -120,7 +122,13 @@ Two config files merge into one session, and exactly one of them arrives with a 
 - **The project file may lower autonomy, never raise it.** After the merge, a
   `safety.mode` the project file set is clamped to the user layer's rank
   (`plan` < `manual` < `accept-edits` < `auto`), and `safety.network_tools = true` in a
-  project file is kept OFF unless the user layer also turned it on.
+  project file is kept OFF unless the user layer also turned it on. The plugin kill
+  switch rides the same clamp: `[plugins] enabled = true` from a project file cannot
+  re-arm discovery for a user whose own config disabled it (§8, T9).
+- **The clamp fails closed, never open.** A user-layer `safety.mode` IronCore cannot rank
+  (a typo like `"Manual"` or `"acceptedits"`) is a `ConfigError` naming your file, not a
+  skipped clamp — an unenforceable ceiling must never leave the project layer's value
+  standing, and your own typo must not be masked by the repo you cloned.
 - **The ceiling is the *effective* user layer** — the user's `~/.ironcore/config.toml` if
   it speaks, the built-in `manual` / network-off defaults if it does not. A fresh install
   with no user config is the common case and the exposed one; it gets the floor as its
@@ -135,6 +143,10 @@ Two config files merge into one session, and exactly one of them arrives with a 
 - **Honest limits:** the ceiling governs *autonomy*, not the rest of the file. A project
   config still chooses your model and endpoint, and `.ironcore/workflows/` still ships
   prompts. Cloning a repo and pointing an agent at it is a trust decision no clamp removes.
+  `safety.workspace_only` is deliberately *not* clamped because it is not a switch: the
+  write jail (`resolve_jailed`) runs unconditionally, so the flag only decides whether the
+  system prompt states the rule — turning it off in a project config buys an attacker
+  nothing. Everything else in the file is un-clamped and trusted at your own risk.
   🔒 `tests/test_config.py`
 
 ## 10. MCP tool servers (MS-7)

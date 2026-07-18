@@ -11,9 +11,11 @@ Environment overrides (highest precedence):
 
 THE AUTONOMY CEILING (docs/SAFETY.md T8). The project file is the ONLY layer
 that arrives with a `git clone`, so it is the only untrusted one. It may LOWER
-autonomy freely; it may never RAISE `safety.mode` or turn `safety.network_tools`
-on above the ceiling the user layer set (defaults included -- an absent user
-config means the built-in `manual` / network-off floor IS the ceiling). Env is
+autonomy freely; it may never RAISE `safety.mode`, turn `safety.network_tools`
+on, or turn `plugins.enabled` back on above the ceiling the user layer set
+(defaults included -- an absent user config means the built-in `manual` /
+network-off floor IS the ceiling). An unrankable user-layer `safety.mode` is a
+ConfigError, not a skipped clamp: fail closed and loud, never open. Env is
 NOT clamped: `IRONCORE_MODE` comes from the user's own shell, not from the repo.
 Every clamp emits a note (load_with_notes) -- silent downgrades would leave both
 the user and an honest repo author guessing.
@@ -68,6 +70,11 @@ class RoleModels(BaseModel):
 
 class SafetySettings(BaseModel):
     mode: str = "manual"  # boot mode; must be a safety.modes.Mode value
+    #: prompt-level statement of the write jail, NOT a switch that arms it:
+    #: `ironcore/tools/fs_write.py` calls `resolve_jailed()` unconditionally, so
+    #: turning this off only drops the sentence from the system prompt
+    #: (`core/composer.py`) -- it cannot let a write escape. That is why it needs
+    #: no T8 clamp: an untrusted project layer setting it false gains nothing.
     workspace_only: bool = True  # path jail on writes (IC-401)
     network_tools: bool = False  # NET-risk tools not even registered unless true
 
@@ -199,12 +206,23 @@ class Settings(BaseModel):
         layers: dict[str, dict[str, Any]] = {"user": {}, "project": {}}
         for layer, path in (("user", user_config), ("project", project_config)):
             if path is not None and path.exists():
-                with path.open("rb") as f:
-                    try:
+                try:
+                    with path.open("rb") as f:
                         layers[layer] = tomllib.load(f)
-                    except tomllib.TOMLDecodeError as exc:
-                        # exc's message already carries "(at line N, column M)".
-                        raise ConfigError(f"malformed config file {path}: {exc}") from exc
+                except tomllib.TOMLDecodeError as exc:
+                    # exc's message already carries "(at line N, column M)".
+                    raise ConfigError(f"malformed config file {path}: {exc}") from exc
+                except UnicodeDecodeError as exc:
+                    raise ConfigError(
+                        f"malformed config file {path}: not valid UTF-8 at byte "
+                        f"{exc.start} -- TOML must be UTF-8 (re-save the file as UTF-8)"
+                    ) from exc
+                except OSError as exc:
+                    # unreadable, a directory, a dead junction: still ours to
+                    # report, not a raw traceback (module docstring).
+                    raise ConfigError(
+                        f"cannot read config file {path}: {exc.strerror or exc}"
+                    ) from exc
 
         # deepcopy: _deep_merge grafts sub-dicts by REFERENCE, so merging into
         # a raw layer would let the project file overwrite the very user values
@@ -256,20 +274,42 @@ def _clamp_autonomy(
     Mutates ``data`` in place; returns one note per clamp.
     """
     notes: list[str] = []
+    notes.extend(_clamp_safety(data, user_layer, project_layer, user_config))
+    notes.extend(_clamp_plugins(data, user_layer, project_layer, user_config))
+    return notes
+
+
+def _clamp_safety(
+    data: dict[str, Any],
+    user_layer: dict[str, Any],
+    project_layer: dict[str, Any],
+    user_config: Path,
+) -> list[str]:
+    """The `[safety]` half of the ceiling: `mode` and `network_tools`."""
+    notes: list[str] = []
     user_safety = _section(user_layer, "safety")
     project_safety = _section(project_layer, "safety")
     merged = data.get("safety")
     if not isinstance(merged, dict):
-        return notes  # garbage section — model_validate reports it loudly
+        return notes  # absent (nothing to clamp) or garbage (model_validate is loud)
 
+    # A ceiling we cannot RANK is a ceiling we cannot enforce, so an unusable
+    # user-layer mode is an error, never a skipped clamp: silently falling
+    # through here would leave the (untrusted) project layer's value standing --
+    # the exact escalation this function exists to stop -- and would also mask
+    # the user's own typo, which raises loudly when no project file is present.
     ceiling_mode = user_safety.get("mode")
-    if not isinstance(ceiling_mode, str):
+    if ceiling_mode is None:
         ceiling_mode = SafetySettings.model_fields["mode"].default
+    elif not isinstance(ceiling_mode, str) or ceiling_mode not in _MODE_RANK:
+        valid = ", ".join(_MODE_RANK)
+        raise ConfigError(
+            f"invalid safety.mode {ceiling_mode!r} in {user_config}; valid modes: {valid}"
+        )
     wanted_mode = project_safety.get("mode")
     if (
         isinstance(wanted_mode, str)
         and wanted_mode in _MODE_RANK
-        and ceiling_mode in _MODE_RANK
         and _MODE_RANK[wanted_mode] > _MODE_RANK[ceiling_mode]
     ):
         merged["mode"] = ceiling_mode
@@ -293,6 +333,37 @@ def _clamp_autonomy(
             "ceiling (docs/SAFETY.md T8). NET tools -- including MCP -- stay unregistered "
             f"until [safety] network_tools = true in {user_config}."
         )
+    return notes
+
+
+def _clamp_plugins(
+    data: dict[str, Any],
+    user_layer: dict[str, Any],
+    project_layer: dict[str, Any],
+    user_config: Path,
+) -> list[str]:
+    """The plugin kill switch is an autonomy control too (docs/SAFETY.md §8/T9).
+
+    ``[plugins] enabled = false`` is THE hardened-setup switch, and entry-point
+    plugin code runs at boot and during ``doctor``. So the project layer may turn
+    discovery off, never back on -- otherwise a clone silently re-arms code
+    execution for the one user who explicitly disarmed it.
+    """
+    notes: list[str] = []
+    ceiling = _section(user_layer, "plugins").get("enabled")
+    if not isinstance(ceiling, bool):
+        ceiling = PluginSettings.model_fields["enabled"].default
+    if _section(project_layer, "plugins").get("enabled") is not True or ceiling is True:
+        return notes
+    merged = data.get("plugins")
+    if not isinstance(merged, dict):
+        return notes  # garbage section — model_validate reports it loudly
+    merged["enabled"] = False
+    notes.append(
+        "[plugins] project config requested plugins enabled = true; kept OFF by your "
+        "ceiling (docs/SAFETY.md T9). Entry-point plugin discovery stays skipped until "
+        f"[plugins] enabled = true in {user_config}."
+    )
     return notes
 
 

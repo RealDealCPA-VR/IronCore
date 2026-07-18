@@ -349,6 +349,107 @@ def test_invalid_project_mode_still_reaches_the_loud_validator(tmp_path: Path):
 
 
 # --------------------------------------------------------------------------- #
+# FIX-3 round 1: the ceiling must not FAIL OPEN on a malformed user layer, and
+# the plugin kill switch is under it too.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("typo", ["Manual", "acceptedits", "yolo"])
+def test_unrankable_user_mode_raises_instead_of_letting_the_project_win(
+    tmp_path: Path, typo: str
+):
+    """Round-1 major: a user-layer mode that was a STRING but not a valid mode
+    skipped the clamp entirely, so the project layer's `auto` survived -- the
+    untrusted layer both escalated autonomy AND masked the user's own typo
+    (which raises loudly when no project file is present)."""
+    user = tmp_path / "user.toml"
+    user.write_text(f'[safety]\nmode = "{typo}"\n')
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\n')
+
+    with pytest.raises(ConfigError) as excinfo:
+        Settings.load(project_dir=project, user_config=user, env={})
+    message = str(excinfo.value)
+    assert typo in message
+    assert str(user) in message  # which file to fix
+    assert "accept-edits" in message  # the valid values
+
+
+def test_non_string_user_mode_also_raises(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text("[safety]\nmode = 3\n")
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\n')
+
+    with pytest.raises(ConfigError):
+        Settings.load(project_dir=project, user_config=user, env={})
+
+
+def test_project_config_cannot_re_enable_plugins_the_user_killed(tmp_path: Path):
+    """Round-1 major: `[plugins] enabled = false` is the hardened-setup switch
+    (SAFETY.md §8), and plugin code runs at boot and in `doctor`. A clone must
+    not re-arm it."""
+    user = tmp_path / "user.toml"
+    user.write_text("[plugins]\nenabled = false\n")
+    project = _project_with(tmp_path, "[plugins]\nenabled = true\n")
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.plugins.enabled is False
+    blob = "\n".join(notes)
+    assert "[plugins]" in blob and str(user) in blob
+    assert all(note.isascii() for note in notes)
+
+
+def test_plugin_clamp_survives_a_config_with_no_safety_section(tmp_path: Path):
+    """Regression on the fix itself: the early `[safety]`-shaped bail-out used to
+    return before the plugin clamp ever ran."""
+    user = tmp_path / "user.toml"
+    user.write_text("[plugins]\nenabled = false\n")  # no [safety] anywhere
+    project = _project_with(tmp_path, "[plugins]\nenabled = true\n")
+
+    settings = Settings.load(project_dir=project, user_config=user, env={})
+    assert settings.plugins.enabled is False
+
+
+def test_project_config_may_still_turn_plugins_off(tmp_path: Path):
+    """Lowering is always allowed -- the clamp is one-directional."""
+    user = tmp_path / "user.toml"
+    user.write_text("[plugins]\nenabled = true\n")
+    project = _project_with(tmp_path, "[plugins]\nenabled = false\n")
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.plugins.enabled is False
+    assert notes == []
+
+
+def test_plugins_left_on_when_the_user_never_disabled_them(tmp_path: Path):
+    """The default is ON (installation was the consent moment), so a project file
+    agreeing with the default escalates nothing and earns no note."""
+    project = _project_with(tmp_path, "[plugins]\nenabled = true\n")
+
+    settings, notes = Settings.load_with_notes(
+        project_dir=project, user_config=tmp_path / "absent.toml", env={}
+    )
+    assert settings.plugins.enabled is True
+    assert notes == []
+
+
+def test_unreadable_and_non_utf8_config_files_raise_configerror_not_a_traceback(
+    tmp_path: Path,
+):
+    """The module docstring promises callers never see a raw traceback; a non-UTF8
+    file raised UnicodeDecodeError and a directory path raised PermissionError."""
+    non_utf8 = tmp_path / "latin1.toml"
+    non_utf8.write_bytes(b'[safety]\nmode = "manual"  # caf\xe9\n')
+    with pytest.raises(ConfigError) as excinfo:
+        Settings.load(project_dir=tmp_path, user_config=non_utf8, env={})
+    assert "UTF-8" in str(excinfo.value)
+
+    a_directory = tmp_path / "dir.toml"
+    a_directory.mkdir()
+    with pytest.raises(ConfigError):
+        Settings.load(project_dir=tmp_path, user_config=a_directory, env={})
+
+
+# --------------------------------------------------------------------------- #
 # ${VAR} expansion in MCP env (FIX-3): secrets live in the shell, not in the
 # committable project config. Before FIX-3 the four literal characters "${X}"
 # were handed to the child, producing an opaque auth failure inside someone

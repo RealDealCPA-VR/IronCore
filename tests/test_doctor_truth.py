@@ -375,9 +375,29 @@ def test_no_config_file_is_not_reported_as_config_loaded(tmp_path, capsys):
 
 
 def test_a_config_error_that_names_no_file_gets_one_named_for_it(tmp_path, capsys):
-    """A non-UTF8 byte surfaces as a bare codec message with no path in it, so
-    a user with both a user and a project config cannot tell which to open --
-    while the malformed-TOML branch right beside it does name the file."""
+    """An invalid VALUE is reported by key, not by file ("invalid safety.mode
+    'yolo'"), so a user with both a user and a project config cannot tell which
+    to open -- doctor knows both and says so."""
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "yolo"\n', encoding="utf-8")
+
+    rc = cmd_doctor(
+        project_dir=tmp_path,
+        user_config=user,
+        env={},
+        envelope_dir=tmp_path / "envelopes",
+        check_endpoint=False,
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "yolo" in out
+    assert str(user) in out  # the question that actually matters: which file?
+
+
+def test_an_unreadable_config_file_names_itself_without_a_traceback(tmp_path, capsys):
+    """FIX-3 round 1: a non-UTF8 byte used to escape as a raw UnicodeDecodeError
+    with no path in it; it is now a ConfigError that names the file itself."""
     user = tmp_path / "user.toml"
     user.write_bytes(b'[provider]\nmodel = "caf\xe9"\n')
 
@@ -391,8 +411,10 @@ def test_a_config_error_that_names_no_file_gets_one_named_for_it(tmp_path, capsy
     out = capsys.readouterr().out
 
     assert rc == 1
-    assert "codec can't decode" in out
-    assert str(user) in out  # the question that actually matters: which file?
+    assert "UTF-8" in out
+    assert str(user) in out
+    assert "Traceback" not in out
+    assert "config file(s) doctor read" not in out  # already named, not told twice
 
 
 def test_a_config_error_that_already_names_the_file_is_not_told_twice(tmp_path, capsys):
