@@ -68,7 +68,13 @@ packages = ["ironcore"]
 [tool.hatch.build.targets.sdist]
 # Maintainer-internal artifacts: agent handoff logs, the build ledger, and CI /
 # agent-harness config are not part of the source distribution.
-exclude = ["HANDOFF.md", "TODO.md", ".github", ".agents", ".codex"]
+#
+# docs/img/*.png are README screenshots, ~1.5MB of the sdist and the single
+# largest thing in it. README.md references them by absolute raw.githubusercontent
+# URL (so they render on PyPI and on any mirror), which means nothing in the
+# distribution reads them off disk -- shipping them only inflated the download.
+# They stay in the repo and on GitHub; they just don't ride along in the tarball.
+exclude = ["HANDOFF.md", "TODO.md", ".github", ".agents", ".codex", "docs/img"]
 
 [tool.ruff]
 line-length = 100

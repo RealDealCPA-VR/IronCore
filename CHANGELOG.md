@@ -6,6 +6,38 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Fixed
+- **The README no longer documents an install command that 404s.** The Install
+  section offered a concrete versioned wheel URL
+  (`…/releases/download/v0.2.0/ironcore-0.2.0-py3-none-any.whl`) hedged with
+  "once a release is tagged". There are no tags and no releases, so that URL was
+  dead — verified 404 — and a skimmer copies the concrete command, not the hedge.
+  Replaced with a link to the releases page phrased to read correctly both before
+  and after the first release exists, so it cannot rot into a lie either way.
+- **A git-free install path is documented.** `pip install git+https://…` was the
+  only documented path and it shells out to git to clone, which contradicted the
+  neighbouring claim that git is a soft dependency. Both halves are now precise:
+  git is soft **at runtime** (no snapshots, so `/undo`/`/redo` do nothing) but
+  **required** by the `git+https` form, and
+  `pip install https://github.com/RealDealCPA-VR/IronCore/archive/refs/heads/main.zip`
+  installs the same code with no git at all. Verified in clean venvs with every
+  git directory stripped from `PATH`: the zip form yields `ironcore 0.2.0`, the
+  `git+https` form fails with "Cannot find command 'git'".
+- **Three of the eight environment variables were unreadable in the README.** Its
+  table compressed the role overrides into
+  `IRONCORE_ROLE_PLANNER · _CODER · _SUMMARIZER · _VERIFIER`, so
+  `IRONCORE_ROLE_CODER`, `_SUMMARIZER` and `_VERIFIER` appeared under no name you
+  could copy or grep. Each now has its own row. The guard derived from
+  `_apply_env`'s own mapping covered `docs/CONFIG.md` only; it now covers the
+  README too, matching full names, so this exact shorthand cannot come back.
+
+### Changed
+- **The sdist is 70% smaller** — 1,958,297 → 583,895 bytes — by excluding
+  `docs/img` from it. The nine README screenshots were 1.5MB of the tarball and
+  its single largest component, yet nothing in the distribution reads them: the
+  README references them by absolute `raw.githubusercontent` URL so they render
+  on PyPI and any mirror. They remain in the repo and on GitHub. The wheel never
+  contained them and is unchanged in content.
+
 - **`ironcore init --force` no longer silently eats a hand-edited config.** It
   now copies the existing file to a sibling `config.toml.bak` before writing the
   template over it, and says on stdout where the backup went. A file that is

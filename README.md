@@ -94,9 +94,11 @@ From nothing to a working first turn. If you have no model server yet, skip to
 - **A local OpenAI-compatible model server.** [Ollama](https://ollama.com) is the smoothest
   path — it keeps your model resident between turns, so there are no reload stalls. vLLM,
   llama.cpp's server and LM Studio all work too.
-- **git on your PATH** — a *soft* dependency. Without it IronCore runs fine, but change-set
-  snapshots are disabled, so `/undo` and `/redo` do nothing. `ironcore doctor` tells you
-  which case you are in.
+- **git on your PATH** — a *soft* dependency **at runtime**: without it IronCore runs fine, but
+  change-set snapshots are disabled, so `/undo` and `/redo` do nothing. `ironcore doctor` tells
+  you which case you are in. It is *not* optional for the `pip install git+https://…` line in
+  [Install](#install) — pip needs git to clone. The source-archive install right below it
+  doesn't, so a machine with no git can still get IronCore.
 
 With Ollama, a complete cold start looks like this:
 
@@ -119,11 +121,18 @@ PyPI publishing is not live yet, so install from the repository:
 pip install git+https://github.com/RealDealCPA-VR/IronCore.git
 ```
 
-Once a release is tagged you can also install the attached wheel directly:
+That form needs **git on your PATH** — pip shells out to it to clone the repo. If you don't
+have git, install the exact same code from GitHub's source archive instead, which needs no git
+at all:
 
 ```bash
-uv tool install https://github.com/RealDealCPA-VR/IronCore/releases/download/v0.2.0/ironcore-0.2.0-py3-none-any.whl
+pip install https://github.com/RealDealCPA-VR/IronCore/archive/refs/heads/main.zip
 ```
+
+Both commands install the current `main`. Prebuilt wheels are attached to
+[releases](https://github.com/RealDealCPA-VR/IronCore/releases) as they are published; if that
+page lists one you want, copy its `.whl` asset URL and hand it straight to your installer
+(`uv tool install <wheel-url>` or `pip install <wheel-url>`).
 
 `pip install ironcore` from PyPI is **not** available yet — treat any instruction that says
 otherwise as premature.
@@ -361,7 +370,13 @@ Environment overrides — the fastest way to try something without editing TOML:
 | `IRONCORE_MODEL` | `[provider] model` |
 | `IRONCORE_API_KEY` | `[provider] api_key` |
 | `IRONCORE_MODE` | `[safety] mode` |
-| `IRONCORE_ROLE_PLANNER` · `_CODER` · `_SUMMARIZER` · `_VERIFIER` | `[roles] planner` · `coder` · `summarizer` · `verifier` |
+| `IRONCORE_ROLE_PLANNER` | `[roles] planner` |
+| `IRONCORE_ROLE_CODER` | `[roles] coder` |
+| `IRONCORE_ROLE_SUMMARIZER` | `[roles] summarizer` |
+| `IRONCORE_ROLE_VERIFIER` | `[roles] verifier` |
+
+Those eight are the complete set `config/settings.py` reads; an empty value is ignored rather
+than blanking the key, and env is never clamped.
 
 Set them the way your shell does: `export IRONCORE_MODE=plan` in bash/zsh,
 `$env:IRONCORE_MODE = "plan"` in PowerShell, `set IRONCORE_MODE=plan` in cmd.

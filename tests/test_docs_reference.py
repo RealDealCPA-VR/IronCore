@@ -155,6 +155,12 @@ def test_every_env_var_read_by_settings_is_documented() -> None:
     assert len(env_vars) == 8, f"expected 8 env vars, found {env_vars}"
     missing = [var for var in env_vars if var not in CONFIG_MD]
     assert not missing, f"docs/CONFIG.md is missing env vars: {missing}"
+    # README's table had no guard at all, and had drifted: it compressed the four
+    # role vars into `IRONCORE_ROLE_PLANNER · _CODER · _SUMMARIZER · _VERIFIER`,
+    # so three of the eight never appeared under a name you could copy or grep.
+    # Match on the FULL name for that reason -- shorthand is what regressed here.
+    missing = [var for var in env_vars if var not in README_MD]
+    assert not missing, f"README.md is missing env vars (spell them out in full): {missing}"
 
 
 def test_config_md_states_the_precedence_chain() -> None:
