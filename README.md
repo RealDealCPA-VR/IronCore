@@ -106,8 +106,10 @@ ollama pull qwen2.5-coder:7b      # ~4.7GB — a model most machines can actuall
 ```
 
 IronCore's shipped default model is `qwen3-coder:30b`, which is roughly 18GB. If you have the
-hardware, pull that instead. If you don't, pull something smaller and point IronCore at it —
-the next section shows how, and `ironcore doctor` will name the models you actually have.
+hardware, pull that instead. **If you pull anything else, you must point IronCore at it before
+you run `ironcore doctor`** — that is step 2 of [Set it up](#set-it-up) below, and skipping it
+is the one way to make doctor fail on a perfectly good machine. (`ironcore doctor` names the
+models you actually have, so it tells you exactly what to put there.)
 
 ## Install
 
@@ -143,48 +145,75 @@ CI.
 
 ## Set it up
 
+Four steps, **in this order**. Step 2 is the one people skip, and it is the one that makes
+step 3 pass.
+
+### 1. Write the config
+
 ```bash
-ironcore init      # write a commented starter config, and print its path
-ironcore doctor    # check python, config, endpoint, model, git
-ironcore           # launch the TUI
+ironcore init
 ```
 
-`ironcore init` writes `~/.ironcore/config.toml` with every section, every real default and
-every off-switch already commented in. (`ironcore init --project` writes a committable
+That writes `~/.ironcore/config.toml` — every section, every real default and every off-switch
+already commented in — and prints the path. (`ironcore init --project` writes a committable
 `./.ironcore/config.toml` instead; `--force` overwrites an existing file.) You do not strictly
 need a config file — every key has a default — but starting from the annotated one is easier
 than starting from this README.
 
-**`ironcore doctor` is the gate.** It exits 1 when something is genuinely misconfigured — an
-unusable `base_url`, an endpoint that isn't OpenAI-compatible, a configured model the server
-doesn't have, an MCP command that isn't on PATH — which makes `ironcore doctor && ironcore` an
-honest one-liner. A server you simply haven't started yet exits **0**: that is a thing to
-start, not a thing to fix.
+### 2. Point it at the model you actually pulled
 
-![Real ironcore doctor output on a fresh machine: python 3.11.13 ok; no config file, using defaults, with a pointer to ironcore init; effective model and mode; endpoint not reachable with the next step 'start your local server (e.g. ollama serve), then re-run' and the fallback 'no model ready yet? ironcore demo runs a real session fully offline'; envelope cache writable; git found; model unprobed; no plugins loaded.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/07-doctor.png)
-
-*What a stranger actually sees first. Every `[--]` and `[FAIL]` line carries the next step, and
-[`docs/TROUBLESHOOTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/TROUBLESHOOTING.md)
-is keyed line-by-line to this output.*
-
-The minimum config that gets you running against a different model or endpoint:
+The shipped default is `qwen3-coder:30b`. **If you pulled something else, change it now** —
+`ironcore doctor` in step 3 fails on a model the server doesn't have, which is exactly the
+point of it. Open the file `init` just printed and edit the one `model =` line:
 
 ```toml
 # ~/.ironcore/config.toml
 [provider]
 base_url = "http://localhost:11434/v1"
-model    = "qwen2.5-coder:7b"     # must already exist on that server
+model    = "qwen2.5-coder:7b"     # the model you pulled; must already exist on that server
 api_key  = "ironcore-local"       # local servers ignore this; hosted ones reject you without it
 
 [safety]
 mode = "manual"                   # plan | manual | accept-edits | auto
 ```
 
-Or skip the file entirely for a one-off:
+Or skip the file entirely and set it for the shell, which every later command picks up:
 
 ```bash
-IRONCORE_MODEL=qwen2.5-coder:7b ironcore
+export IRONCORE_MODEL=qwen2.5-coder:7b      # bash / zsh
 ```
+
+```powershell
+$env:IRONCORE_MODEL = "qwen2.5-coder:7b"    # PowerShell
+```
+
+### 3. Check it
+
+```bash
+ironcore doctor
+```
+
+**`ironcore doctor` is the gate.** It exits 1 when something is genuinely misconfigured — an
+unusable `base_url`, an endpoint that isn't OpenAI-compatible, a configured model the server
+doesn't have, an MCP command that isn't on PATH. A server you simply haven't started yet exits
+**0**: that is a thing to start, not a thing to fix.
+
+![Real ironcore doctor output on a fresh machine: python 3.11.13 ok; no config file, using defaults, with a pointer to ironcore init; effective model and mode; endpoint not reachable with the next step 'start your local server (e.g. ollama serve), then re-run' and the fallback 'no model ready yet? ironcore demo runs a real session fully offline'; envelope cache writable; git found; model unprobed; no plugins loaded.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/07-doctor.png)
+
+*Doctor on a machine that hasn't run `ironcore init` yet — which is why it reports defaults.
+Every `[--]` and `[FAIL]` line carries the next step, and
+[`docs/TROUBLESHOOTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/TROUBLESHOOTING.md)
+is keyed line-by-line to this output.*
+
+### 4. Launch
+
+```bash
+ironcore
+```
+
+Because doctor's exit code is honest, you can chain the two once you trust the setup —
+`ironcore doctor && ironcore` in bash, zsh, cmd or PowerShell 7 (Windows PowerShell 5.1 has no
+`&&`; run them as two lines there).
 
 ## Your first session
 
@@ -224,9 +253,10 @@ it's ready. Turn it off with `auto_probe = false` under `[envelope]` if you'd ra
 the tokens.
 
 Interrupting mid-probe is safe. The cache under `~/.ironcore/envelopes/` is written atomically
-and heals itself: a profile that got truncated, emptied or corrupted is quarantined to
-`<model>.json.corrupt`, reported by name in a boot note, and simply re-measured. You never have
-to clean it up by hand.
+and heals itself: a profile that got truncated, emptied or corrupted is quarantined next to
+itself with a `.corrupt` suffix — for the default model that file is
+`qwen3-coder_30b.json.corrupt`, since the model id is slugified for the filesystem — reported
+by name in a boot note, and simply re-measured. You never have to clean it up by hand.
 
 ### When something goes wrong
 
@@ -285,8 +315,21 @@ itself never prints or prompts. Type `/` to open the palette:
 | `/undo` · `/redo` · `/compact` · `/review` · `/memory` | Snapshot undo · history compaction · diff review · project memory |
 | `/mode` · `/help` · `/version` | Set or cycle the operating mode · list commands and keys · print the version |
 
+`/goal` is the one worth trying first, because it is where "the intelligence is in the loop"
+stops being a slogan: the objective is re-anchored into every turn, and *the harness* — not the
+model's opinion of itself — runs the attached command to decide whether the work is done.
+
+![A session where /goal was set to 'make fib() correct for every n up to 30'. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' and 'Goal stop-condition MET — all 1 verify command passed.'](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
+
+*The stop-condition is a command that really ran. "Done" is a test result, not a claim.*
+
 Sessions are recorded and resumable: `ironcore --resume` opens a picker of past sessions, and
 `ironcore --resume <id>` jumps straight to one.
+
+![The 'Resume a session' picker listing four past sessions, each with its age, its opening request and its turn count: 8m ago 'fix the failing fib tests' 3 turns, 2h ago 'add a --json flag to the report CLI' 6 turns, 1d ago 'why does the parser drop trailing commas?' 4 turns, 3d ago 'port the ingest script off requests' 11 turns. The first row is selected.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/08-session-picker.png)
+
+*Sessions are listed by what you asked for, not by an opaque id — so you can find yesterday's
+thread without knowing its name.*
 
 ## Configuration
 
@@ -312,12 +355,15 @@ Environment overrides — the fastest way to try something without editing TOML:
 | `IRONCORE_MODE` | `[safety] mode` |
 | `IRONCORE_ROLE_PLANNER` · `_CODER` · `_SUMMARIZER` · `_VERIFIER` | `[roles] planner` · `coder` · `summarizer` · `verifier` |
 
+Set them the way your shell does: `export IRONCORE_MODE=plan` in bash/zsh,
+`$env:IRONCORE_MODE = "plan"` in PowerShell, `set IRONCORE_MODE=plan` in cmd.
+
 **A project config can lower autonomy, but never raise it.** The `<workspace>/.ironcore/config.toml`
 layer arrives with a `git clone`, so it is the only untrusted one: a cloned repo cannot put you
 in AUTO, cannot switch `safety.network_tools` on, cannot re-enable plugins you disabled, and
 cannot declare an MCP server. Every clamp prints a note in `ironcore doctor` and as a boot note.
-If you want more autonomy, grant it in your own `~/.ironcore/config.toml`, export
-`IRONCORE_MODE`, or press Shift+Tab — those are you at the keyboard, and they are never clamped.
+If you want more autonomy, grant it in your own `~/.ironcore/config.toml`, set
+`IRONCORE_MODE` in your own environment, or press Shift+Tab — those are you at the keyboard, and they are never clamped.
 
 The same rule is why **MCP servers and `safety.network_tools = true` must live in your user
 config**; requested from a project file, they are clamped off with a note. For MCP secrets, use

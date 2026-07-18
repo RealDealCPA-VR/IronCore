@@ -589,9 +589,16 @@ model = "qwen3-coder:30b"
 # type = "auto"                # "auto" | "ollama" | "openai"
 
 [safety]
-# Boot mode: "manual" (approve every action) | "accept-edits" | "plan".
+# Boot mode, least to most autonomous:
+#   "plan"         read-only: explore and propose; nothing is changed
+#   "manual"       approve every file edit, command, and network call  (the default)
+#   "accept-edits" file edits apply automatically; commands still ask
+#   "auto"         full auto inside the workspace sandbox; network still asks
+# Shift+Tab cycles it live in the TUI.
 mode = "manual"
-# workspace_only = true        # path jail: writes cannot escape the workspace
+# workspace_only = true        # states the write jail in the system prompt; the jail
+#                              # itself is always enforced, so false only drops the
+#                              # sentence -- it cannot let a write escape
 # network_tools = false        # NET-risk tools are not even registered unless true
 
 # [roles]                      # EXAMPLE names -- optional per-role routing.
