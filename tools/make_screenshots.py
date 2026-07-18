@@ -11,11 +11,11 @@ Pipeline, per shot:
 3. Headless Edge/Chrome rasterizes that SVG to a 2x PNG; the SVG's ``viewBox``
    fixes the window size so no scaling guesswork is involved.
 
-``ironcore doctor`` is a CLI, not a TUI: it is executed for real as a subprocess
-and its captured stdout is replayed through a recording ``rich.Console`` (rich
-ships with textual) into the same SVG -> PNG rasterizer. Only the ``$ ironcore
-doctor`` prompt line is added as a label; every other character is the command's
-own output.
+``ironcore doctor`` and ``ironcore demo`` are CLIs, not TUIs: each is executed
+for real as a subprocess and its captured stdout is replayed through a recording
+``rich.Console`` (rich ships with textual) into the same SVG -> PNG rasterizer.
+Only the ``$ ironcore <cmd>`` prompt line is added as a label; every other
+character is the command's own output.
 
 Constraints this script must keep:
 
@@ -74,6 +74,19 @@ TERM_SIZE = (100, 30)
 #: Console width for the doctor capture; matches TERM_SIZE's width so the CLI
 #: shot sits at the same page width as the TUI shots.
 DOCTOR_WIDTH = 100
+#: Same page width for the demo capture, for the same reason.
+DEMO_WIDTH = DOCTOR_WIDTH
+#: Where the demo shot is run from. ``ironcore demo`` prints two paths that are
+#: machine-specific: its temp workspace, and — inside the verify line — the
+#: interpreter that ran the feature check. Both would otherwise carry whichever
+#: maintainer regenerated the shot into a committed public image, and neither
+#: can be steered by an environment variable alone: the workspace follows
+#: ``TEMP``, but the verify line is ``sys.executable``. So the run is handed a
+#: neutral root — ``TEMP`` points inside it and the active venv is *linked* into
+#: it, which makes ``sys.executable`` resolve through that link. This is the
+#: doctor shot's fake-HOME trick applied to two more inputs: it chooses where
+#: the command runs, never what it prints.
+DEMO_ROOT = Path("C:/ironcore-demo") if os.name == "nt" else Path("/tmp/ironcore-demo")
 #: Rasterize at 2x so the PNGs stay sharp on high-density displays.
 SCALE = 2
 
@@ -496,6 +509,112 @@ async def shot_doctor(tmp: Path) -> str:
     return render_doctor(tmp)
 
 
+def _link_dir(target: Path, link: Path) -> None:
+    """Make ``link`` resolve to the directory ``target``, without admin rights.
+
+    A Windows *symlink* needs Developer Mode or elevation; a *junction* needs
+    neither, and ``mklink /J`` is the supported way to create one. Elsewhere a
+    plain symlink does the job.
+    """
+    if os.name == "nt":
+        proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if not link.exists():
+            raise RuntimeError(f"could not link {link} -> {target}: {proc.stdout}{proc.stderr}")
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def _unlink_dir(link: Path) -> None:
+    """Remove the link itself and never what it points at.
+
+    ``os.rmdir`` on a junction deletes the reparse point only — using
+    ``shutil.rmtree`` here would walk into the live venv and delete it.
+    """
+    if not os.path.lexists(link):
+        return
+    if os.name == "nt":
+        os.rmdir(link)
+    else:
+        link.unlink()
+
+
+def _demo_output() -> str:
+    """Run the REAL ``ironcore demo`` and return its stdout verbatim.
+
+    The subprocess is given ``DEMO_ROOT`` as its whole world: a temp dir that is
+    also its fake HOME, and a link to the running venv that it is launched
+    through. Every ``IRONCORE_*`` variable is stripped, so the session it
+    narrates is the one a stranger with no config gets.
+    """
+    if DEMO_ROOT.exists():
+        raise RuntimeError(f"{DEMO_ROOT} already exists — remove it and re-run")
+    venv = Path(sys.executable).resolve().parent.parent
+    link = DEMO_ROOT / "venv"
+    tmp = DEMO_ROOT / "tmp"
+    tmp.mkdir(parents=True)
+    try:
+        _link_dir(venv, link)
+        python = link / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("IRONCORE_")}
+        env.update(
+            {
+                "HOME": str(tmp),
+                "USERPROFILE": str(tmp),
+                "TEMP": str(tmp),
+                "TMP": str(tmp),
+                "TMPDIR": str(tmp),
+            }
+        )
+        proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            [str(python), "-m", "ironcore.cli", "demo"],
+            cwd=tmp,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"ironcore demo failed ({proc.returncode}): {proc.stderr!r}")
+        if not proc.stdout.strip():
+            raise RuntimeError(f"ironcore demo produced no output: {proc.stderr!r}")
+        return proc.stdout
+    finally:
+        _unlink_dir(link)
+        shutil.rmtree(DEMO_ROOT, ignore_errors=True)
+
+
+def render_demo() -> str:
+    """Replay captured demo stdout through a recording Console -> SVG.
+
+    Framing: the transcript is shown WHOLE. It renders ~40 rows against the TUI
+    shots' 30 — taller, but every line earns its place (the header is where the
+    reader learns the model is scripted; the tail is where the edit is verified
+    and the turn stops on evidence), and the one screenshot a stranger reaches
+    first is the wrong place to economise. Lines are wrapped in ``Text`` so the
+    demo's own ``[ok ]`` tags can never be read as Rich markup.
+    """
+    output = _demo_output()
+    console = Console(record=True, width=DEMO_WIDTH, file=io.StringIO(), force_terminal=True)
+    console.print(Text("$ ironcore demo", style="bold"))
+    for line in output.splitlines():
+        console.print(Text(line))
+    return console.export_svg(title="ironcore demo")
+
+
+async def shot_demo(tmp: Path) -> str:
+    """``ironcore demo``: the offline end-to-end session, really executed.
+
+    ``tmp`` is unused: this shot needs the neutral ``DEMO_ROOT`` described above,
+    not a workspace under the generator's own (username-bearing) temp dir.
+    """
+    return render_demo()
+
+
 #: Output name -> builder. Order is the order the README author will see them.
 SHOTS: tuple[tuple[str, Callable[[Path], Awaitable[str]]], ...] = (
     ("01-session-tool-cards", shot_session_tool_cards),
@@ -506,6 +625,7 @@ SHOTS: tuple[tuple[str, Callable[[Path], Awaitable[str]]], ...] = (
     ("06-goal-verified", shot_goal_verified),
     ("07-doctor", shot_doctor),
     ("08-session-picker", shot_session_picker),
+    ("09-demo", shot_demo),
 )
 
 

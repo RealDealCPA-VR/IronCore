@@ -140,6 +140,12 @@ model's replies are scripted. You watch it read a file, propose an edit as a rea
 through a gate decision, apply the patch and then *verify* the result before calling itself
 done. It is the fastest way to see whether this tool is for you.
 
+![Real ironcore demo output: a banner reporting the temp workspace, accept-edits mode and 'model: mock (scripted; no network, no real model)'; the user asks for greet() to end with an exclamation mark; the assistant reads greeter.py through a read_file tool card marked risk=read gate=allow, then an edit_file card marked risk=write gate=allow showing the one-line search_replace diff, applied to greeter.py; a verify block runs check_feature.py and reports 'verify passed: 1 command (configured)'; the turn completes with stop_reason: done, the final greeter.py is echoed, and the run ends 'demo complete: feature edited, verified green, and the turn stopped on evidence (done)'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/09-demo.png)
+
+*The whole run, start to finish. The banner names the mock model up front, every tool call
+prints its own risk and gate decision, the edit lands as a real diff — and the turn only stops
+after `check_feature.py` actually passes. `stop_reason: done` is earned, not announced.*
+
 `ironcore demo --smoke` collapses the same run into one PASS/FAIL line — that is the form for
 CI.
 
