@@ -134,6 +134,20 @@ owns them, then freezes the *budget shares* here).
   need no changes; profiles never persist `source="tuned"`, and consumers matching on
   `source` should treat `"tuned"` as measured-and-adjusted, not unprobed.
 
+- *Additive (FIX-1):* **persistence is atomic and reads never raise.** `CapabilityProfile.save`
+  and `OutcomeLedger.save` stage to a sibling `.tmp`, `fsync`, then `os.replace` — an
+  interrupted write leaves the PREVIOUS cache intact instead of a truncated one (matching
+  `core/state.py`, `tools/fs_write.py`, `safety/snapshots.py`). `CapabilityProfile.load` no
+  longer propagates `ValueError`/`OSError`: a missing **or corrupt** cache returns `None`,
+  i.e. reads as unprobed and re-probes, so a half-written cache can never brick boot or
+  `ironcore doctor`. A corrupt file is renamed aside to `<slug>.json.corrupt` (never
+  deleted) and `load_with_note(envelope_dir, model_id) -> (profile, note)` returns a
+  user-facing note naming that path; `load` is exactly `load_with_note(...)[0]`.
+  *Migration:* none for callers that only read the profile — `load` keeps its signature and
+  its `None`-means-unprobed semantics. Callers that previously relied on `load` RAISING to
+  detect corruption (there were none in-tree) must switch to `load_with_note`.
+  🔒 `tests/test_envelope_resilience.py`
+
 **Not frozen:** probe implementations and trial counts (must only *fill* these fields).
 
 ## 6. Slash commands — `ironcore/commands/base.py`

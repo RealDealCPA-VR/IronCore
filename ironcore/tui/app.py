@@ -101,6 +101,11 @@ from ironcore.tui.widgets import InputBar, StatusBar, Transcript
 #: ``--resume`` with no id: open the picker at launch instead of resuming one.
 RESUME_PICK = "__pick__"
 
+#: Provider calls the default probe battery issues at full depth (measured:
+#: 16+12+30+10+3+1+3 = 75; probes that short-circuit on failure issue fewer).
+#: Quoted in the first-run note so the burst is never a silent surprise.
+PROBE_CALL_ESTIMATE = 80
+
 
 def match_commands(registry: CommandRegistry, prefix: str) -> list[SlashCommand]:
     """Registry commands matching ``prefix`` — name-prefix hits first, then
@@ -286,6 +291,15 @@ class IronCoreApp(App):
                 "in the background so IronCore molds to it. You can work now on floor "
                 "defaults; the profile hot-swaps itself as measurements land (or /probe)."
             )
+            if self._auto_probe:
+                # Say what it actually costs. A silent burst of ~80 calls at a
+                # local 30B reads as "this thing hung", and quitting mid-probe is
+                # exactly how the envelope cache used to get corrupted.
+                self._post_note(
+                    f"  Deep probe: ~{PROBE_CALL_ESTIMATE} short calls, typically 1-3 min "
+                    "on a local model; your turns keep working meanwhile. Turn it off with "
+                    "[envelope] auto_probe = false."
+                )
             self.run_worker(self._mold_to_model(), group="probe")
         # MCP tool servers (MS-7): connect in the background and register their
         # tools into the LIVE registry. Late registration is safe — the engine
@@ -699,13 +713,18 @@ class IronCoreApp(App):
         # resolved ONCE (MS-2): the boot profile load, /model swap lookups, and
         # background deepen writes all share this one directory.
         envelope_dir = default_envelope_dir()
-        profile = CapabilityProfile.load(envelope_dir, model) or CapabilityProfile(model_id=model)
+        # A corrupt cache reads as unprobed (it is quarantined, never fatal) and
+        # says so: boot must never traceback on state IronCore itself wrote.
+        cached, envelope_note = CapabilityProfile.load_with_note(envelope_dir, model)
+        profile = cached or CapabilityProfile(model_id=model)
         # Self-improvement loop (MS-8): the model's outcome ledger lives in the
         # SAME envelope dir; live-session evidence may conservatively LOWER
         # ladder scores (downgrade-only — /probe re-measures). auto_tune=false
         # wires neither the tuning nor the in-engine recording.
         outcomes: OutcomeLedger | None = None
         boot_notes: list[str] = []
+        if envelope_note is not None:
+            boot_notes.append(envelope_note)
         if settings.envelope.auto_tune:
             outcomes = OutcomeLedger.load(envelope_dir, model)
             tuning = apply_tuning(profile, outcomes)

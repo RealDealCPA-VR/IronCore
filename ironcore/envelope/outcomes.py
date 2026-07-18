@@ -37,6 +37,7 @@ imports core/tools/commands/tui.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -190,7 +191,16 @@ class OutcomeLedger(BaseModel):
         self._envelope_dir = target
         target.mkdir(parents=True, exist_ok=True)
         path = self.path_for(target, self.model_id)
-        path.write_text(json.dumps(self.model_dump(), indent=2), encoding="utf-8")
+        # Atomic like every other persistence path in this codebase: stage on the
+        # same volume, fsync, publish. A crash mid-write leaves the PREVIOUS
+        # ledger intact instead of a truncated one.
+        tmp = path.with_name(path.name + ".tmp")
+        payload = json.dumps(self.model_dump(), indent=2)
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
         return path
 
     @classmethod

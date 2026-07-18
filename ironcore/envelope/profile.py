@@ -12,6 +12,7 @@ a protocol another way.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -93,14 +94,55 @@ class CapabilityProfile(BaseModel):
         return re.sub(r"[^a-zA-Z0-9._-]+", "_", model_id)
 
     def save(self, envelope_dir: Path) -> Path:
+        """Write the cache ATOMICALLY: stage next to the target (same volume, so
+        ``os.replace`` is atomic), fsync, then publish. The first-run probe is
+        the one write a stranger's launch performs unasked, and quitting during
+        it must never leave a half-written file at the live path — that used to
+        brick every later boot AND ``ironcore doctor``."""
         envelope_dir.mkdir(parents=True, exist_ok=True)
         path = envelope_dir / f"{self.slug(self.model_id)}.json"
-        path.write_text(json.dumps(self.model_dump(), indent=2), encoding="utf-8")
+        tmp = path.with_name(path.name + ".tmp")
+        payload = json.dumps(self.model_dump(), indent=2)
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
         return path
 
     @classmethod
     def load(cls, envelope_dir: Path, model_id: str) -> CapabilityProfile | None:
-        path = envelope_dir / f"{cls.slug(model_id)}.json"
-        if not path.exists():
-            return None
-        return cls.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        """The cached profile, or ``None`` when there isn't a usable one.
+
+        Never raises: a missing cache and a CORRUPT cache both read as
+        "unprobed" so the model simply re-probes. See ``load_with_note`` for the
+        variant that reports corruption to the user."""
+        return cls.load_with_note(envelope_dir, model_id)[0]
+
+    @classmethod
+    def load_with_note(
+        cls, envelope_dir: Path, model_id: str
+    ) -> tuple[CapabilityProfile | None, str | None]:
+        """``(profile, note)``. ``note`` is non-None only when a corrupt cache
+        was quarantined, and names the path so the boot note can say what
+        happened. Additive surface — CONTRACTS.md §5."""
+        path = Path(envelope_dir) / f"{cls.slug(model_id)}.json"
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError:  # missing file = the normal first boot; unreadable = same outcome
+            return None, None
+        try:
+            return cls.model_validate(json.loads(raw)), None
+        except ValueError:  # bad JSON (truncated/empty) or bad schema
+            pass
+        # Quarantine rather than delete: the evidence stays inspectable, and the
+        # live path is freed so the next probe can write a good cache.
+        quarantine = path.with_name(path.name + ".corrupt")
+        try:
+            os.replace(path, quarantine)
+        except OSError:  # locked/read-only — still boot; the next save overwrites
+            return None, f"[envelope] ignored a corrupt cache at {path} (could not quarantine it)"
+        return None, (
+            f"[envelope] the cached profile for {model_id!r} was corrupt (an interrupted "
+            f"write?) — moved to {quarantine} and re-measuring from defaults."
+        )

@@ -42,6 +42,18 @@ _REAL_COMMANDS: tuple[SlashCommand, ...] = (
 )
 
 
+#: Mirrors ``IronCoreApp.BINDINGS`` + the slash prefix. Duplicated as literals on
+#: purpose: nothing may import ``tui/`` (docs/ARCHITECTURE.md §4), and /help must
+#: still work in headless front ends that have no Textual app at all. Kept honest
+#: by tests/test_envelope_resilience.py, which asserts these against BINDINGS.
+_KEYS: tuple[tuple[str, str], ...] = (
+    ("shift+tab", "cycle mode (plan / manual / accept-edits / auto)"),
+    ("escape", "interrupt the running turn"),
+    ("ctrl+c", "quit IronCore"),
+    ("/", "start a slash command; tab completes"),
+)
+
+
 def _cmd_help(ctx: CommandContext, args: str) -> str:
     # every ctx.extra key is optional (headless / alternate front ends may not
     # populate it); fall back to a freshly built registry rather than crash.
@@ -50,6 +62,12 @@ def _cmd_help(ctx: CommandContext, args: str) -> str:
     for cmd in registry.all():
         marker = "" if cmd.implemented else "  [planned]"
         lines.append(f"  /{cmd.name:<10} {cmd.summary}{marker}")
+    # Keys are otherwise undiscoverable: they live in IronCoreApp.BINDINGS and
+    # are announced once in a mount note that scrolls away. /help is where a
+    # stranger looks, so it must answer "how do I get out of this?".
+    lines.append("")
+    lines.append("Keys:")
+    lines.extend(f"  {key:<11} {what}" for key, what in _KEYS)
     return "\n".join(lines)
 
 
