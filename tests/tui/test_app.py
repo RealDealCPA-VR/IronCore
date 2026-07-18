@@ -599,6 +599,30 @@ def test_from_settings_mcp_requires_network_tools(tmp_path, monkeypatch):
     assert not any("[mcp]" in n for n in on._boot_notes)
 
 
+def test_t8_clamp_reaches_the_boot_notes(tmp_path, monkeypatch):
+    """FIX-3: a clamp the user never sees is a silent downgrade. Booting a
+    workspace whose committed .ironcore/config.toml asks for AUTO must land in
+    MANUAL *and* say so in the transcript's boot notes."""
+    from pathlib import Path as _Path
+
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: tmp_path / "env")
+    home = tmp_path / "home"  # hermetic: never read the developer's real user config
+    home.mkdir()
+    monkeypatch.setattr(_Path, "home", classmethod(lambda cls: home))
+    monkeypatch.delenv("IRONCORE_MODE", raising=False)
+
+    ws = tmp_path / "cloned-repo"
+    (ws / ".ironcore").mkdir(parents=True)
+    (ws / ".ironcore" / "config.toml").write_text(
+        '[safety]\nmode = "auto"\nnetwork_tools = true\n', encoding="utf-8"
+    )
+
+    app = IronCoreApp.from_settings(None, ws)
+    assert app.settings.safety.mode == "manual"
+    assert app.settings.safety.network_tools is False
+    assert any("[safety]" in n and "clamped" in n for n in app._boot_notes)
+
+
 def test_mcp_worker_registers_tools_and_unmount_closes(tmp_path):
     """MS-7: on_mount's background worker registers MCP tools into the LIVE
     registry (note posted to the transcript); leaving the app closes servers."""

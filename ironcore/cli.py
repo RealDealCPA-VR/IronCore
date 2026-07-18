@@ -283,7 +283,7 @@ def cmd_doctor(
     project_path = resolved_project / ".ironcore" / "config.toml"
 
     try:
-        settings = Settings.load(
+        settings, config_notes = Settings.load_with_notes(
             project_dir=resolved_project,
             user_config=user_path,
             env=env,
@@ -312,6 +312,10 @@ def cmd_doctor(
         print(f"[--] no config file -- using defaults (model: {settings.provider.model})")
         print(f"     `ironcore init` writes a commented starter config at {user_path}")
     print(f"[ok] effective: model {settings.provider.model}, mode {settings.safety.mode}")
+    # T8 clamps / skipped MCP servers: doctor reports the EFFECTIVE setup, so a
+    # project config that asked for more than it got has to show up right here.
+    for note in config_notes:
+        print(f"     {note}")
     for role in _ROLE_NAMES:
         model = getattr(settings.roles, role)
         if model:

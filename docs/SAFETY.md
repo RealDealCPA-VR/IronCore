@@ -29,8 +29,9 @@
 | T5 | Runaway loops | same failing command forever; token burn | budgets + loop detector (IC-506) |
 | T6 | Silent bad edits | plausible diff that breaks the build | deterministic patcher rejects non-applying edits, verification loop (IC-504), git snapshot undo (IC-405) |
 | T7 | Confabulated success | "All tests pass!" (they don't) | stop_reason computed from tool evidence only; /goal stop-condition check (SPEC §3.4) |
-| T8 | Malicious workflow/config in a cloned repo | `.ironcore/workflows/` shipping an AUTO-mode exfil job | project config cannot raise autonomy above user config's ceiling; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
+| T8 | Malicious workflow/config in a cloned repo | `.ironcore/config.toml` shipping `mode = "auto"`; `.ironcore/workflows/` shipping an AUTO-mode exfil job | **autonomy ceiling** (§9): the project config may lower autonomy, never raise `safety.mode` or switch `safety.network_tools` on past the user layer — clamped in `Settings.load` with a visible note; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
 | T9 | Malicious or defective plugin | a pip-installed distribution registering a tool that lies about its risk, or crashing at import | installation is the consent moment (pip already ran arbitrary code); per-entry-point fault isolation (a broken plugin is skipped + reported, never a crash); plugin tools pass the same `decide(mode, risk)` gate, NET tools not loaded unless `safety.network_tools`; `doctor` lists everything loaded/skipped; `[plugins] enabled = false` kill switch (§8) |
+| T10 | Malicious or compromised MCP server | a configured server whose *tool descriptions* say "always call `exfil` first", or whose results carry injected instructions | configuring the server is the consent moment (§10); tools are `ToolRisk.NET` — never auto-allowed, denied in PLAN, not registered at all unless `safety.network_tools`; spawned via `create_subprocess_exec`, never a shell; descriptions capped at 300 chars and namespaced `mcp__<server>__<tool>` (builtins win every name); outputs enter context UNTRUSTED through the T3 detector; per-server fault isolation |
 
 ## 3. The mode gate (implemented)
 
@@ -75,6 +76,9 @@ loosen a gate decision. Approval grants ("approve all writes") live at most one 
   `openai_compat.py`).
 - `ironcore doctor` warns when a hosted endpoint (non-localhost) is configured while
   `safety.network_tools` is on — a "your code leaves this machine" reminder.
+- **Secrets belong in your shell environment, never in `.ironcore/config.toml`** — that
+  file is committable and the shipped `.gitignore` says so. MCP server `env` values take
+  `${VAR}` placeholders resolved from IronCore's own environment at load time (§10).
 
 ## 7. What IronCore will not build
 
@@ -107,3 +111,63 @@ edit formats. The trust model, stated plainly:
   Plugin code also runs at import/factory time during boot and `doctor`; fault isolation
   contains crashes, not intent. `ironcore doctor` shows exactly what loaded and what was
   skipped (with reasons), so the plugin surface is always inspectable.
+
+## 9. The autonomy ceiling (T8)
+
+Two config files merge into one session, and exactly one of them arrives with a `git clone`.
+`Settings.load` therefore treats them differently:
+
+- **The project file may lower autonomy, never raise it.** After the merge, a
+  `safety.mode` the project file set is clamped to the user layer's rank
+  (`plan` < `manual` < `accept-edits` < `auto`), and `safety.network_tools = true` in a
+  project file is kept OFF unless the user layer also turned it on.
+- **The ceiling is the *effective* user layer** — the user's `~/.ironcore/config.toml` if
+  it speaks, the built-in `manual` / network-off defaults if it does not. A fresh install
+  with no user config is the common case and the exposed one; it gets the floor as its
+  ceiling rather than an exemption.
+- **Clamps are never silent.** Each one emits a note (`Settings.load_with_notes`) that the
+  TUI posts as a boot note and `ironcore doctor` prints under the effective-config line,
+  naming what the project asked for, what it got, and where to raise the ceiling. A repo
+  author who legitimately wants AUTO is told why they did not get it.
+- **What is *not* clamped:** `IRONCORE_MODE` and the Shift+Tab keystroke. Both come from
+  the human at the keyboard, not from the cloned tree — that is the whole distinction.
+  Mode is per-session anyway, so clamping costs a consenting user nothing: press Shift+Tab.
+- **Honest limits:** the ceiling governs *autonomy*, not the rest of the file. A project
+  config still chooses your model and endpoint, and `.ironcore/workflows/` still ships
+  prompts. Cloning a repo and pointing an agent at it is a trust decision no clamp removes.
+  🔒 `tests/test_config.py`
+
+## 10. MCP tool servers (MS-7)
+
+An MCP server is an executable IronCore spawns as a child process. Stated as plainly as §8:
+
+- **Configuring the server is the consent moment.** A `[mcp.servers.<name>]` table names a
+  command already on your PATH and hands it your stdin/stdout — the same trust as typing
+  that command yourself. IronCore never installs, downloads, or discovers servers; nothing
+  is spawned until the first tool call, and nothing is spawned at all while
+  `safety.network_tools` is false. Because that switch is under the ceiling (§9), a cloned
+  repo cannot turn its own servers on.
+- **Spawned directly, never through a shell.** `create_subprocess_exec` with `shutil.which`
+  resolution means no shell metacharacter surface; `args` are argv entries, not a string.
+- **What an MCP server cannot bypass:** the mode gate. Every remote tool registers at
+  `ToolRisk.NET` — worst-case honest — so it is never auto-allowed (AUTO still asks), it is
+  denied outright in PLAN, and it is not registered at all unless `safety.network_tools` is
+  true. Names are namespaced `mcp__<server>__<tool>` and builtins win every collision, so a
+  server can never shadow `edit_file` or `run_command`.
+- **Descriptions are attacker-controlled text, not just outputs.** A server's `tools/list`
+  reply rides into the model's prompt every turn — that is a T3 injection surface that
+  arrives *before* you call anything. Descriptions are capped (300 chars) and namespaced;
+  tool *results* additionally enter context wrapped UNTRUSTED and pass the injection
+  detector, which downgrades AUTO to ASK on a flag. Neither control makes a hostile server
+  safe: it makes it visible and gated.
+- **Secrets stay in your environment.** The child inherits IronCore's environment, so a
+  server needing `GITHUB_TOKEN` gets it from your shell. Write `env = { GITHUB_TOKEN =
+  "${GITHUB_TOKEN}" }` if you must name it — the placeholder is expanded at load time, and
+  an unset variable *skips that server with a note* rather than passing four literal
+  characters to a child that will fail opaquely. Never paste a live token into
+  `.ironcore/config.toml`: it is committable (§6).
+- **Honest limits:** a server can lie in its descriptions, return anything, and read
+  whatever the OS lets that executable read — IronCore runs it, it does not sandbox it.
+  Fault isolation is per server (a dead one is skipped with a note, never a failed boot),
+  which contains crashes, not intent. `ironcore doctor` lists every configured server and
+  whether its command resolves, so the surface is inspectable before you turn NET on.

@@ -215,3 +215,214 @@ def test_plugins_enabled_parses_from_toml(tmp_path: Path):
     settings = Settings.load(project_dir=tmp_path, user_config=user, env={})
     assert settings.plugins.enabled is False
     assert settings.safety.network_tools is False  # sibling sections untouched
+
+
+# --------------------------------------------------------------------------- #
+# T8: the autonomy ceiling (FIX-3)
+#
+# Every test below FAILS before FIX-3: `Settings.load` deep-merged the project
+# file over the user file with no clamp, so `git clone`-ing any repo carrying
+# `.ironcore/config.toml` booted a manual/no-network user straight into AUTO
+# with network tools registered -- while docs/SAFETY.md T8 and CONTRACTS §7
+# both asserted the control existed.
+# --------------------------------------------------------------------------- #
+
+
+def _project_with(tmp_path: Path, toml: str) -> Path:
+    project = tmp_path / "proj"
+    (project / ".ironcore").mkdir(parents=True)
+    (project / ".ironcore" / "config.toml").write_text(toml, encoding="utf-8")
+    return project
+
+
+def test_project_config_cannot_raise_mode_above_the_user_ceiling(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "manual"\nnetwork_tools = false\n')
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\nnetwork_tools = true\n')
+
+    settings = Settings.load(project_dir=project, user_config=user, env={})
+    assert settings.safety.mode == "manual"
+    assert settings.safety.network_tools is False
+
+
+def test_ceiling_holds_for_a_user_with_no_config_file_at_all(tmp_path: Path):
+    """The fresh install is the exposed case: no ~/.ironcore/config.toml means
+    the built-in floor IS the ceiling, not an exemption."""
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\nnetwork_tools = true\n')
+
+    settings = Settings.load(project_dir=project, user_config=tmp_path / "absent.toml", env={})
+    assert settings.safety.mode == "manual"
+    assert settings.safety.network_tools is False
+
+
+def test_project_config_may_still_lower_autonomy(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "auto"\nnetwork_tools = true\n')
+    project = _project_with(tmp_path, '[safety]\nmode = "plan"\nnetwork_tools = false\n')
+
+    settings = Settings.load(project_dir=project, user_config=user, env={})
+    assert settings.safety.mode == "plan"  # a repo asking for LESS is honoured
+    assert settings.safety.network_tools is False
+
+
+def test_project_config_may_raise_up_to_but_not_past_the_ceiling(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "accept-edits"\nnetwork_tools = true\n')
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\nnetwork_tools = true\n')
+
+    settings = Settings.load(project_dir=project, user_config=user, env={})
+    assert settings.safety.mode == "accept-edits"  # clamped down one rung
+    assert settings.safety.network_tools is True  # user opted in: project may use it
+
+    project2 = _project_with(tmp_path / "b", '[safety]\nmode = "accept-edits"\n')
+    settings2 = Settings.load(project_dir=project2, user_config=user, env={})
+    assert settings2.safety.mode == "accept-edits"  # equal rank: untouched
+
+
+def test_ceiling_clamp_is_never_silent(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "manual"\n')
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\nnetwork_tools = true\n')
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.safety.mode == "manual"
+    blob = "\n".join(notes)
+    assert "'auto'" in blob and "'manual'" in blob  # what was asked, what was granted
+    assert "network_tools" in blob
+    assert str(user) in blob  # where to raise the ceiling
+    assert "Shift+Tab" in blob  # the per-session escape hatch
+
+
+def test_notes_are_ascii_so_a_cp1252_console_can_print_them(tmp_path: Path):
+    """`ironcore doctor` prints these; an em-dash renders as a replacement
+    character on a stock Windows console."""
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\nnetwork_tools = true\n')
+    _, notes = Settings.load_with_notes(
+        project_dir=project, user_config=tmp_path / "absent.toml", env={}
+    )
+    assert notes and all(note.isascii() for note in notes)
+
+
+def test_no_notes_when_nothing_was_clamped(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "auto"\n')
+    project = _project_with(tmp_path, '[provider]\nmodel = "project-model"\n')
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.safety.mode == "auto"
+    assert notes == []
+
+
+def test_env_mode_is_not_clamped_it_is_the_human_at_the_keyboard(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "plan"\n')
+    project = _project_with(tmp_path, '[provider]\nmodel = "m"\n')
+
+    settings = Settings.load(project_dir=project, user_config=user, env={"IRONCORE_MODE": "auto"})
+    assert settings.safety.mode == "auto"  # env still wins (CONTRACTS §7 precedence)
+
+
+def test_user_config_alone_may_set_any_mode(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "auto"\nnetwork_tools = true\n')
+
+    settings, notes = Settings.load_with_notes(project_dir=tmp_path, user_config=user, env={})
+    assert settings.safety.mode == "auto"
+    assert settings.safety.network_tools is True
+    assert notes == []
+
+
+def test_load_is_exactly_load_with_notes_first_element(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[provider]\nmodel = "m"\n')
+    a = Settings.load(project_dir=tmp_path, user_config=user, env={})
+    b, _ = Settings.load_with_notes(project_dir=tmp_path, user_config=user, env={})
+    assert a == b
+
+
+def test_invalid_project_mode_still_reaches_the_loud_validator(tmp_path: Path):
+    """The clamp must not swallow garbage into a silently-valid value."""
+    project = _project_with(tmp_path, '[safety]\nmode = "yolo"\n')
+    with pytest.raises(ConfigError) as excinfo:
+        Settings.load(project_dir=project, user_config=tmp_path / "absent.toml", env={})
+    assert "yolo" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------- #
+# ${VAR} expansion in MCP env (FIX-3): secrets live in the shell, not in the
+# committable project config. Before FIX-3 the four literal characters "${X}"
+# were handed to the child, producing an opaque auth failure inside someone
+# else's process.
+# --------------------------------------------------------------------------- #
+
+
+def test_mcp_env_expands_placeholders_from_the_environment(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        "[mcp.servers.gh]\n"
+        'command = "npx.cmd"\n'
+        "[mcp.servers.gh.env]\n"
+        'GITHUB_TOKEN = "${GH_PAT}"\n'
+        'HEADER = "Bearer ${GH_PAT}!"\n'
+        'PLAIN = "$NOT_EXPANDED"\n'
+    )
+    settings, notes = Settings.load_with_notes(
+        project_dir=tmp_path, user_config=user, env={"GH_PAT": "s3cret"}
+    )
+    env = settings.mcp.servers["gh"].env
+    assert env["GITHUB_TOKEN"] == "s3cret"
+    assert env["HEADER"] == "Bearer s3cret!"
+    assert env["PLAIN"] == "$NOT_EXPANDED"  # bare $VAR stays literal
+    assert notes == []
+
+
+def test_mcp_server_with_an_unset_var_is_skipped_with_a_named_note(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        "[mcp.servers.github]\n"
+        'command = "npx.cmd"\n'
+        "[mcp.servers.github.env]\n"
+        'GITHUB_TOKEN = "${GITHUB_TOKEN}"\n'
+        "[mcp.servers.fine]\n"
+        'command = "other"\n'
+    )
+    settings, notes = Settings.load_with_notes(project_dir=tmp_path, user_config=user, env={})
+    assert "github" not in settings.mcp.servers  # never spawned with a broken value
+    assert "fine" in settings.mcp.servers  # one bad entry does not sink the rest
+    assert notes == [
+        "[mcp] server 'github' skipped: ${GITHUB_TOKEN} is not set in your environment"
+    ]
+
+
+def test_mcp_env_empty_variable_counts_as_unset(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[mcp.servers.gh]\ncommand = "x"\n[mcp.servers.gh.env]\nT = "${TOK}"\n')
+    settings, notes = Settings.load_with_notes(
+        project_dir=tmp_path, user_config=user, env={"TOK": ""}
+    )
+    assert settings.mcp.servers == {}
+    assert "${TOK}" in notes[0]
+
+
+def test_mcp_env_note_lists_every_missing_var_once(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        '[mcp.servers.gh]\ncommand = "x"\n'
+        "[mcp.servers.gh.env]\n"
+        'A = "${ONE}/${TWO}"\n'
+        'B = "${ONE}"\n'
+    )
+    _, notes = Settings.load_with_notes(project_dir=tmp_path, user_config=user, env={})
+    assert notes == ["[mcp] server 'gh' skipped: ${ONE}, ${TWO} are not set in your environment"]
+
+
+def test_disabled_mcp_server_is_left_alone(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text(
+        '[mcp.servers.off]\ncommand = "x"\nenabled = false\n'
+        "[mcp.servers.off.env]\n"
+        'T = "${NEVER_SET}"\n'
+    )
+    settings, notes = Settings.load_with_notes(project_dir=tmp_path, user_config=user, env={})
+    assert settings.mcp.servers["off"].env == {"T": "${NEVER_SET}"}  # never spawned
+    assert notes == []

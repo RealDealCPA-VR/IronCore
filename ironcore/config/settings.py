@@ -9,13 +9,24 @@ Environment overrides (highest precedence):
   IRONCORE_ROLE_PLANNER, IRONCORE_ROLE_CODER, IRONCORE_ROLE_SUMMARIZER,
   IRONCORE_ROLE_VERIFIER
 
+THE AUTONOMY CEILING (docs/SAFETY.md T8). The project file is the ONLY layer
+that arrives with a `git clone`, so it is the only untrusted one. It may LOWER
+autonomy freely; it may never RAISE `safety.mode` or turn `safety.network_tools`
+on above the ceiling the user layer set (defaults included -- an absent user
+config means the built-in `manual` / network-off floor IS the ceiling). Env is
+NOT clamped: `IRONCORE_MODE` comes from the user's own shell, not from the repo.
+Every clamp emits a note (load_with_notes) -- silent downgrades would leave both
+the user and an honest repo author guessing.
+
 Malformed files and invalid values raise ConfigError with a human message
 (file path + line for TOML errors) -- callers never see a raw traceback.
 """
 
 from __future__ import annotations
 
+import copy
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -100,7 +111,11 @@ class MCPServerSettings(BaseModel):
     the server as a child process, resolved via PATH but never through a shell —
     so on Windows launcher shims need their real name (``command = "npx.cmd"``).
     ``url`` is accepted so http-transport configs parse, but such entries are
-    skipped with a note until an http client ships."""
+    skipped with a note until an http client ships.
+
+    ``env`` values support ``${VAR}`` placeholders, expanded from IronCore's own
+    environment at load time (see ``_expand_mcp_env``): secrets belong in your
+    shell, never in the committable project config."""
 
     command: str | None = None
     args: list[str] = Field(default_factory=list)
@@ -151,22 +166,52 @@ class Settings(BaseModel):
         user_config: Path | None = None,
         env: dict[str, str] | None = None,
     ) -> Settings:
-        """Layered load. `user_config` and `env` are injectable for tests."""
+        """Layered load. `user_config` and `env` are injectable for tests.
+
+        Exactly ``load_with_notes(...)[0]`` — use that when you can surface the
+        notes (a clamped project config, a skipped MCP server) to the user."""
+        return cls.load_with_notes(
+            project_dir=project_dir, user_config=user_config, env=env
+        )[0]
+
+    @classmethod
+    def load_with_notes(
+        cls,
+        project_dir: Path | None = None,
+        user_config: Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> tuple[Settings, list[str]]:
+        """Layered load plus the user-facing notes the load produced.
+
+        Notes are plain lines ready to print (`ironcore doctor`) or post as boot
+        notes (the TUI): autonomy clamps (§T8) and MCP servers dropped for an
+        unset ``${VAR}``. Empty list = nothing was silently changed.
+        """
         if user_config is None:
             user_config = Path.home() / ".ironcore" / "config.toml"
         if env is None:
             env = dict(os.environ)
 
         project_config = (project_dir / ".ironcore" / "config.toml") if project_dir else None
-        data: dict[str, Any] = {}
-        for path in (user_config, project_config):
+        # Layers stay SEPARATE through the merge: the ceiling has to know what
+        # the user asked for vs. what the (untrusted, cloned) project file asked
+        # for, and that is unrecoverable from the merged dict afterwards.
+        layers: dict[str, dict[str, Any]] = {"user": {}, "project": {}}
+        for layer, path in (("user", user_config), ("project", project_config)):
             if path is not None and path.exists():
                 with path.open("rb") as f:
                     try:
-                        _deep_merge(data, tomllib.load(f))
+                        layers[layer] = tomllib.load(f)
                     except tomllib.TOMLDecodeError as exc:
                         # exc's message already carries "(at line N, column M)".
                         raise ConfigError(f"malformed config file {path}: {exc}") from exc
+
+        # deepcopy: _deep_merge grafts sub-dicts by REFERENCE, so merging into
+        # a raw layer would let the project file overwrite the very user values
+        # the ceiling is about to compare against.
+        data: dict[str, Any] = copy.deepcopy(layers["user"])
+        _deep_merge(data, copy.deepcopy(layers["project"]))
+        notes = _clamp_autonomy(data, layers["user"], layers["project"], user_config)
 
         _apply_env(data, env)
         try:
@@ -182,7 +227,125 @@ class Settings(BaseModel):
             raise ConfigError(
                 f"invalid safety.mode {settings.safety.mode!r}; valid modes: {valid}"
             ) from None
-        return settings
+        notes.extend(_expand_mcp_env(settings, env))
+        return settings, notes
+
+
+#: Autonomy ranking for the T8 ceiling. Ordering is the mode gate's own
+#: (docs/SAFETY.md §3): each rung allows strictly more than the one below it.
+_MODE_RANK: dict[str, int] = {
+    Mode.PLAN.value: 0,
+    Mode.MANUAL.value: 1,
+    Mode.ACCEPT_EDITS.value: 2,
+    Mode.AUTO.value: 3,
+}
+
+
+def _clamp_autonomy(
+    data: dict[str, Any],
+    user_layer: dict[str, Any],
+    project_layer: dict[str, Any],
+    user_config: Path,
+) -> list[str]:
+    """T8: the project file may lower autonomy, never raise it (module docstring).
+
+    The ceiling is the EFFECTIVE user layer — the user's TOML if it speaks, the
+    built-in defaults if it does not — so a fresh install with no
+    ``~/.ironcore/config.toml`` is protected too, which is the whole point:
+    that user is the one most likely to `git clone` and press Enter.
+    Mutates ``data`` in place; returns one note per clamp.
+    """
+    notes: list[str] = []
+    user_safety = _section(user_layer, "safety")
+    project_safety = _section(project_layer, "safety")
+    merged = data.get("safety")
+    if not isinstance(merged, dict):
+        return notes  # garbage section — model_validate reports it loudly
+
+    ceiling_mode = user_safety.get("mode")
+    if not isinstance(ceiling_mode, str):
+        ceiling_mode = SafetySettings.model_fields["mode"].default
+    wanted_mode = project_safety.get("mode")
+    if (
+        isinstance(wanted_mode, str)
+        and wanted_mode in _MODE_RANK
+        and ceiling_mode in _MODE_RANK
+        and _MODE_RANK[wanted_mode] > _MODE_RANK[ceiling_mode]
+    ):
+        merged["mode"] = ceiling_mode
+        notes.append(
+            f"[safety] project config requested mode {wanted_mode!r}; clamped to your "
+            f"ceiling {ceiling_mode!r} (docs/SAFETY.md T8). Grant it for this session "
+            f"with Shift+Tab, or raise the ceiling in {user_config}."
+        )
+
+    # network_tools has no per-session keystroke, so an unset user layer means
+    # the default (off) is the ceiling and a cloned repo cannot switch NET on.
+    ceiling_net = user_safety.get("network_tools")
+    if not isinstance(ceiling_net, bool):
+        ceiling_net = SafetySettings.model_fields["network_tools"].default
+    if project_safety.get("network_tools") is True and ceiling_net is not True:
+        merged["network_tools"] = False
+        notes.append(
+            "[safety] project config requested network_tools = true; kept OFF by your "
+            # ASCII only: these lines print to the Windows console, where a
+            # cp1252 code page turns an em-dash into a replacement char.
+            "ceiling (docs/SAFETY.md T8). NET tools -- including MCP -- stay unregistered "
+            f"until [safety] network_tools = true in {user_config}."
+        )
+    return notes
+
+
+#: ``${VAR}`` in an MCP env value. Bare ``$VAR`` is left literal on purpose:
+#: an env value like a JSON blob or a Windows path must survive untouched.
+_ENV_PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_mcp_env(settings: Settings, env: dict[str, str]) -> list[str]:
+    """Resolve ``${VAR}`` in every enabled MCP server's ``env`` values.
+
+    An unset (or empty) variable DROPS that server with a note instead of
+    passing the four literal characters to the child, where it would surface as
+    an opaque auth failure from someone else's process. Disabled entries are
+    left untouched — they are never spawned, so an unset var is not news.
+    Mutates ``settings.mcp.servers``; returns one note per dropped server.
+    """
+    notes: list[str] = []
+    kept: dict[str, MCPServerSettings] = {}
+    for name, server in settings.mcp.servers.items():
+        if not server.enabled or not server.env:
+            kept[name] = server
+            continue
+        missing: list[str] = []
+        resolved: dict[str, str] = {}
+        for key, value in server.env.items():
+
+            def _sub(match: re.Match[str], _missing: list[str] = missing) -> str:
+                var = match.group(1)
+                filled = env.get(var)
+                if not filled:  # unset or empty — an empty token is as broken as none
+                    _missing.append(var)
+                    return ""
+                return filled
+
+            resolved[key] = _ENV_PLACEHOLDER.sub(_sub, value)
+        if missing:
+            unique = list(dict.fromkeys(missing))
+            names = ", ".join(f"${{{var}}}" for var in unique)
+            verb = "is" if len(unique) == 1 else "are"
+            notes.append(
+                f"[mcp] server {name!r} skipped: {names} {verb} not set in your environment"
+            )
+            continue
+        server.env = resolved
+        kept[name] = server
+    settings.mcp.servers = kept
+    return notes
+
+
+def _section(layer: dict[str, Any], name: str) -> dict[str, Any]:
+    value = layer.get(name)
+    return value if isinstance(value, dict) else {}
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:

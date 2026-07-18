@@ -186,8 +186,31 @@ owns them, then freezes the *budget shares* here).
   are never registered unless `safety.network_tools` is true, and §1 gating applies
   unchanged (NET never auto-allowed, denied in PLAN). *Migration:* none — configs without
   `[mcp]` behave byte-identically, and no existing key changes meaning.
-- Project config may never *raise* autonomy above the user-config ceiling (SAFETY.md T8).
-  🔒 `tests/test_config.py` (ceiling test lands with IC-402)
+- **Autonomy ceiling (SAFETY.md T8/§9), enforced in `Settings.load`:** the project config
+  may *lower* autonomy freely and may never *raise* it. A project-set `safety.mode` is
+  clamped to the user layer's rank (`plan` < `manual` < `accept-edits` < `auto`), and
+  `safety.network_tools = true` from a project file is forced back to `false` unless the
+  user layer also enabled it. The ceiling is the EFFECTIVE user layer: the user's TOML if
+  it sets the key, the built-in default (`manual`, network off) if it does not — an absent
+  `~/.ironcore/config.toml` is a floor, not an exemption. `IRONCORE_MODE` and the Shift+Tab
+  keystroke are NOT clamped (they are the human at the keyboard, not the cloned tree).
+  Every clamp emits a note. *Migration:* a project config that raised `safety.mode` or
+  turned `safety.network_tools` on now gets the ceiling instead, with a note naming the
+  file to raise it in — move the key to `~/.ironcore/config.toml` (or export
+  `IRONCORE_MODE`) to keep the old effective value. Configs that only lower autonomy, and
+  all user-layer/env configs, behave byte-identically.
+  🔒 `tests/test_config.py`
+- *Additive:* `Settings.load_with_notes(...) -> (Settings, list[str])` returns the load's
+  user-facing notes (autonomy clamps; MCP servers skipped for an unset `${VAR}`), and
+  `load` is exactly `load_with_notes(...)[0]`. Notes are pre-formatted lines; order is
+  clamps first, then MCP. *Migration:* none — `load` keeps its signature and behaviour;
+  callers that can display notes (TUI boot notes, `doctor`) should prefer the new one.
+- *Additive:* `[mcp.servers.<name>].env` values support `${VAR}` placeholders, expanded
+  from IronCore's own environment at load time so secrets stay out of the committable
+  project config (SAFETY.md §10). A bare `$VAR` is left literal. If a referenced variable
+  is unset or empty, that server is dropped from `settings.mcp.servers` with a note rather
+  than spawned with a broken value. Disabled entries are left unexpanded. *Migration:*
+  none for configs with no `${...}` in `env`, which are byte-identical.
 
 ## 8. Handoff format — `ironcore/memory/handoff.py`
 

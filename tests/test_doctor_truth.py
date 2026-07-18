@@ -461,6 +461,29 @@ def test_missing_git_is_reported_because_undo_silently_needs_it(tmp_path, capsys
     assert "/undo" in out and "snapshots are disabled" in out
 
 
+def test_doctor_prints_the_t8_clamp_it_applied(tmp_path, capsys):
+    """FIX-3: doctor reports the EFFECTIVE setup. A project config that asked
+    for AUTO and got MANUAL is exactly the kind of gap doctor exists to name."""
+    user = tmp_path / "absent.toml"
+    (tmp_path / ".ironcore").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ironcore" / "config.toml").write_text(
+        '[safety]\nmode = "auto"\nnetwork_tools = true\n', encoding="utf-8"
+    )
+    code = cmd_doctor(
+        project_dir=tmp_path,
+        user_config=user,
+        env={},
+        envelope_dir=tmp_path / "envelopes",
+        check_endpoint=False,
+    )
+    out = capsys.readouterr().out
+
+    assert code == 0  # a clamp is a control working, not a broken install
+    assert "mode manual" in out  # the effective line tells the truth
+    assert "clamped to your ceiling 'manual'" in out
+    assert "network_tools" in out
+
+
 def test_present_git_is_reported(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr("ironcore.cli._which", lambda cmd: "C:/git/git.exe")
     _doctor(tmp_path)

@@ -117,6 +117,24 @@ def test_garbage_stdout_lines_are_skipped():
     assert result["content"][0]["text"] == "echo: still works"
 
 
+def test_server_initiated_request_with_a_colliding_id_is_not_read_as_our_response():
+    """FIX-3. A server request numbered from its OWN sequence (also starting at
+    1) used to pass the id check, carry no "result", and fall through to
+    ``return {}`` -- tools/list then registered ZERO tools and reported success
+    cheerfully. A message with a "method" key is a request/notification, never
+    a response."""
+
+    async def run():
+        client = _client(env={"FAKE_MCP_SERVER_REQUEST": "1"})
+        try:
+            return await client.list_tools()
+        finally:
+            await client.aclose()
+
+    tools = asyncio.run(run())
+    assert [t["name"] for t in tools] == ["echo", "boom", "slow"]  # not []
+
+
 def test_dead_server_raises_mcp_error():
     async def run():
         client = MCPClient(

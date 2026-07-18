@@ -695,8 +695,11 @@ class IronCoreApp(App):
         session picker at launch, a concrete id resumes that session. Production
         always gets a real ``SessionStore`` so live turns are recorded."""
         ws = Path(workspace) if workspace is not None else Path.cwd()
+        # config_notes: T8 autonomy clamps and skipped MCP servers. A clamp the
+        # user cannot see is a silent downgrade, so these ride the boot notes.
+        config_notes: list[str] = []
         if settings is None:
-            settings = Settings.load(project_dir=ws)
+            settings, config_notes = Settings.load_with_notes(project_dir=ws)
         # Entry-point plugins (MS-5): discovered ONCE, before ANY registry is
         # built, so plugin providers/tools/commands/probes feed every
         # construction below. load_plugins never raises — broken plugins are
@@ -722,7 +725,7 @@ class IronCoreApp(App):
         # ladder scores (downgrade-only — /probe re-measures). auto_tune=false
         # wires neither the tuning nor the in-engine recording.
         outcomes: OutcomeLedger | None = None
-        boot_notes: list[str] = []
+        boot_notes: list[str] = list(config_notes)
         if envelope_note is not None:
             boot_notes.append(envelope_note)
         if settings.envelope.auto_tune:

@@ -269,8 +269,16 @@ class MCPClient:
                 msg = json.loads(stripped)
             except json.JSONDecodeError:
                 continue  # human log noise on stdout — skip, stay on protocol
-            if not isinstance(msg, dict) or msg.get("id") != req_id:
-                continue  # a notification, or a stale reply from a timed-out call
+            if not isinstance(msg, dict) or "method" in msg or msg.get("id") != req_id:
+                # A "method" key makes it a server-initiated REQUEST or a
+                # notification, never a response -- and a server numbering its
+                # own requests from 1 collides with our ids. Without this,
+                # such a message passes the id check, has no "result", and
+                # returns {}: tools/list would register zero tools and say so
+                # cheerfully. We advertise no capabilities, so a well-behaved
+                # server never does this -- which is exactly the assumption
+                # this module refuses to make anywhere else.
+                continue  # or a stale reply from a timed-out call
             if "error" in msg:
                 err = msg.get("error")
                 detail = err.get("message", err) if isinstance(err, dict) else err

@@ -10,6 +10,9 @@ Environment knobs (all optional):
   FAKE_MCP_SLEEP     seconds to sleep before answering any tools/call
   FAKE_MCP_GARBAGE   when set, print a non-JSON log line to stdout at boot
   FAKE_MCP_PAGINATE  when set, tools/list returns one tool per page via nextCursor
+  FAKE_MCP_SERVER_REQUEST  when set, a server-initiated REQUEST reusing the client's
+                     id is emitted before each tools/list reply (id collision: a
+                     server numbering its own requests from 1 hits ours)
 """
 
 from __future__ import annotations
@@ -101,6 +104,15 @@ def main() -> None:
                 },
             )
         elif method == "tools/list":
+            if os.environ.get("FAKE_MCP_SERVER_REQUEST"):
+                # A REQUEST from the server (has "method", carries no result),
+                # numbered from the server's own sequence straight into ours.
+                print(
+                    json.dumps(
+                        {"jsonrpc": "2.0", "id": msg_id, "method": "roots/list", "params": {}}
+                    ),
+                    flush=True,
+                )
             _reply(msg_id, result=_list_result(msg.get("params") or {}))
         elif method == "tools/call":
             result = _call_result(msg.get("params") or {})
