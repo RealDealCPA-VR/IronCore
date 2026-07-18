@@ -13,13 +13,16 @@ Fully offline: the endpoint probe is injected (``probe=``), never dialled.
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import httpx
 import pytest
 
 from ironcore.cli import (
     EndpointProbe,
+    _display_path,
     _model_available,
     build_parser,
     cmd_doctor,
@@ -792,6 +795,36 @@ def test_init_on_a_directory_does_not_suggest_a_remedy_that_cannot_work(tmp_path
 
     assert cmd_init(scope="user", user_config=target, force=True) == 1  # still no crash
     assert "is a directory" in capsys.readouterr().out
+
+
+def test_home_paths_print_as_tilde_so_output_carries_no_username(tmp_path, capsys, monkeypatch):
+    """Doctor output gets pasted into issues and screenshots -- it must not leak $HOME."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert (
+        cmd_doctor(
+            project_dir=tmp_path / "proj",
+            user_config=None,  # resolves under the patched home
+            env={},
+            envelope_dir=None,  # ditto
+            check_endpoint=False,
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert f"~{os.sep}.ironcore" in out
+    assert str(tmp_path) not in out
+
+
+def test_display_path_degrades_instead_of_raising(tmp_path, monkeypatch):
+    outside = tmp_path / "elsewhere" / "config.toml"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    assert _display_path(outside) == str(outside)  # not under home -> unchanged
+
+    def _no_home(cls):
+        raise RuntimeError("home directory can't be determined")
+
+    monkeypatch.setattr(Path, "home", classmethod(_no_home))
+    assert _display_path(outside) == str(outside)  # unresolvable home -> no crash
 
 
 def test_doctor_sees_the_config_init_just_wrote(tmp_path, capsys):

@@ -21,6 +21,7 @@ running yet exits 0: that is a thing to start, not a thing to fix. So
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from collections.abc import Callable
@@ -126,6 +127,20 @@ def _is_localhost(url: str) -> bool:
 def _which(command: str) -> str | None:
     """Indirection over :func:`shutil.which` so tests can make PATH deterministic."""
     return shutil.which(command)
+
+
+def _display_path(path: Path) -> str:
+    """Render ``path`` with the home directory collapsed to ``~``.
+
+    Doctor output gets pasted into issues and screenshots, so an absolute path
+    carries the operator's username off this machine for no benefit. Falls back
+    to the full path when home is unresolvable (``Path.home()`` raises) or when
+    the path lies outside it.
+    """
+    try:
+        return f"~{os.sep}{path.relative_to(Path.home())}"
+    except (ValueError, RuntimeError, OSError):
+        return str(path)
 
 
 # --------------------------------------------------------------------------
@@ -295,7 +310,8 @@ def cmd_doctor(
         print(f"[FAIL] config: {exc}")
         present = [p for p in (user_path, project_path) if p.exists()]
         if present and not any(str(p) in str(exc) for p in present):
-            print(f"       config file(s) doctor read: {', '.join(str(p) for p in present)}")
+            names = ", ".join(_display_path(p) for p in present)
+            print(f"       config file(s) doctor read: {names}")
         return 1
 
     # Name the files. "config loaded" printed when no config file existed at all
@@ -305,12 +321,13 @@ def cmd_doctor(
 
     if user_path.exists() or project_path.exists():
         print(
-            f"[ok] config: {user_path} ({_state(user_path)}) "
-            f"+ {project_path} ({_state(project_path)})"
+            f"[ok] config: {_display_path(user_path)} ({_state(user_path)}) "
+            f"+ {_display_path(project_path)} ({_state(project_path)})"
         )
     else:
         print(f"[--] no config file -- using defaults (model: {settings.provider.model})")
-        print(f"     `ironcore init` writes a commented starter config at {user_path}")
+        starter = _display_path(user_path)
+        print(f"     `ironcore init` writes a commented starter config at {starter}")
     print(f"[ok] effective: model {settings.provider.model}, mode {settings.safety.mode}")
     # T8 clamps / skipped MCP servers: doctor reports the EFFECTIVE setup, so a
     # project config that asked for more than it got has to show up right here.
@@ -341,7 +358,7 @@ def cmd_doctor(
         envelope_dir = Path.home() / ".ironcore" / "envelopes"
     try:
         envelope_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[ok] envelope cache writable: {envelope_dir}")
+        print(f"[ok] envelope cache writable: {_display_path(envelope_dir)}")
     except OSError as exc:  # pragma: no cover — defensive
         print(f"[FAIL] envelope cache: {exc}")
         ok = False
