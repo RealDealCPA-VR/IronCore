@@ -14,9 +14,9 @@ on `/probe` or a model digest change.
 
 ## 2. The probe suite
 
-Declared in `envelope/probes.py`; runners land in IC-602..604. Design rules: mechanical
-scoring only (no LLM judges), fixed seeds where supported, ≤ ~2 min total on a local 30B,
-partial failure degrades scores rather than blocking.
+Declared in `envelope/probes.py`, run by `envelope/runner.py` (IC-602..604, shipped). Design
+rules: mechanical scoring only (no LLM judges), fixed seeds where supported, ≤ ~2 min total on
+a local 30B, partial failure degrades scores rather than blocking.
 
 | Probe | Method | Fills |
 |---|---|---|
@@ -27,6 +27,34 @@ partial failure degrades scores rather than blocking.
 | `EDIT-FORMAT` | per format: given a fixture file + change request, emit the edit; score = the harness patcher applies it AND result compiles | `edit_formats` |
 | `CODE-SMOKE` | write a ~10-line function from a docstring + make a failing test pass; floor gate | usability flag |
 | `TOKEN-RATIO` | send filler docs of known char counts; read the server-reported `prompt_tokens`; ratio = chars/tokens, clamped [1.0, 8.0]; a server that omits usage keeps the 4.0 default | `chars_per_token` |
+
+### 2.1 Seeded, not probed: the instant-on profile
+
+The deep suite takes minutes; two signals are free at boot. `envelope/seed.py` assembles a
+**provisional but usable** profile in ~1–2s and the deep probe then *refines* rather than
+replaces it (`run_probes(base=...)`). Off switch: `[envelope] instant_seed = false`.
+
+| Field | Seeded from | Notes |
+|---|---|---|
+| `context_window`, `honest_context` | Ollama `/api/show` | `honest_context` = the server's pinned `num_ctx` when set (the real ceiling), else the advertised window capped at 32768 — never seed a depth nobody measured. |
+| `tool_protocols`, `edit_formats` | endpoint capability detection | Native tool-calling detected → `native 0.95` + `search_replace 0.85` (a usable middle rung); otherwise the text / whole-file floors. |
+| `vision` | Ollama `/api/show` `capabilities` array | **There is no VISION probe.** A server that omits the array honestly keeps the floor default (`false`). Override with `[envelope] vision` for endpoints without introspection (e.g. vLLM serving a VL model). |
+
+The seed is deliberately optimistic where the endpoint gives a signal — the deep probe
+corrects it within minutes, and the repair loop plus downgrade ladders absorb an over-optimistic
+seed. It is **never cached**: only measured profiles are written to disk, so `probed_at` stays
+`None` and the deep probe still runs.
+
+### 2.2 Provenance: the `source` field
+
+Every profile says where its numbers came from, and `/envelope` prints it:
+
+| `source` | Meaning |
+|---|---|
+| `default` | Floor-conservative. Nothing measured, nothing introspected. |
+| `seeded` | Introspected at boot (§2.1). Provisional — a measurement is in flight. |
+| `probed` | Measured by the suite. |
+| `tuned` | Measured, then conservatively *lowered* by live evidence (§8). Treat as measured-and-adjusted, never as unprobed. |
 
 ## 3. The ladders (implemented, frozen)
 
@@ -98,7 +126,10 @@ coder   = "qwen2.5-coder:7b"      # every other turn executes on the fast 7B
 Envelope stores working defaults per model. Harness policy: temperature 0.1–0.3 for tool
 turns and edits; up to 0.7 only for brainstorm-type asks; retries resample at +0.2 (escape
 deterministic failure modes); best-of-n reserved for steps with a mechanical verifier
-(n answers → run the check → first pass wins).
+(n answers → run the check → first pass wins). Best-of-N shipped as `[engine] best_of_n`
+(default `1` = off, max 5): it fires only at the two mechanically verified seams — a tool call
+the repair ladder gave up on, and an edit that would not apply — and every candidate is
+charged to the turn budget and still passes the safety gate.
 
 ## 7. Endpoint notes
 
@@ -108,4 +139,36 @@ deterministic failure modes); best-of-n reserved for steps with a mechanical ver
 - **llama.cpp server**: GBNF grammars = the strongest strict_json rung available anywhere.
 - **vLLM**: guided decoding (`guided_json`) similarly strong; high-throughput best-of-n.
 - **Hosted OSS (OpenRouter/Together/Groq)**: treat as capable but *rate-limited*; envelope
-  records latency; NET-adjacent secret hygiene matters more (SAFETY.md §6).
+  records latency; NET-adjacent secret hygiene matters more (SAFETY.md §6). These endpoints
+  **require a real `[provider] api_key`** — set `IRONCORE_API_KEY` in your shell rather than
+  writing it into a file ([CONFIG.md](CONFIG.md) §2).
+
+## 8. The self-improvement loop (MS-8)
+
+The probe measures once. Live sessions produce the same *mechanical* evidence forever, so
+`envelope/outcomes.py` records it and folds it back — carefully.
+
+**What is recorded.** Per model, per profile generation: every provider-call iteration is one
+tool-protocol sample at the *active* rung; every real edit apply (success or a mechanical
+`patch_failure`) is one edit-format sample; verification pass/fail and turn drift are recorded
+alongside. Nothing about the *content* of your work is stored — only counters.
+
+**Where it lives.** `~/.ironcore/envelopes/<slug>.outcomes.json`, a sidecar next to that
+model's profile. Writes are atomic; a missing or corrupt sidecar loads as a fresh ledger, and
+reads never raise. Delete it to forget everything IronCore learned about a model.
+
+**How it is applied — downgrade only.** At session start `apply_tuning` may *lower* a ladder
+score or `coherence_horizon` that live evidence contradicts. It may never raise one: an
+upgrade needs a real measurement, so a suspiciously clean live rate emits a "run `/probe`"
+hint and nothing else. The frozen §3 ladders stay the sole selector — tuning edits the scores
+they read, so a lowered score makes the ladder fall a rung by itself. Hysteresis (minimum
+sample floors) stops one bad turn from moving anything, counters halve past a cap so old
+evidence decays, and the whole ledger resets whenever the profile generation changes — stale
+evidence must never re-downgrade a freshly measured profile.
+
+**What is not touched.** The tuned profile is an overlay recomputed at load time and never
+written back to the envelope JSON: the cached measurement stays honest, and `/probe` always
+re-measures from scratch. `/envelope` reports `source = tuned` rather than hiding the
+adjustment.
+
+**Off switch.** `[envelope] auto_tune = false` — no recording, no tuning.

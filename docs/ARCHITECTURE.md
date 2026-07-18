@@ -21,10 +21,12 @@ graph TD
         ENV["envelope/ — probes, profiles, ladders"]
         PROV["providers/ — OpenAI-compat, Ollama, Mock"]
     end
-    TOOLS["tools/ — read/edit/shell/search"]
+    TOOLS["tools/ — read/edit/shell/search/image"]
+    MCP["tools/mcp.py — MCP stdio client (NET tools)"]
     MEM["memory/ — sessions, handoff, IRONCORE.md"]
     SAFE["safety/ — modes, risk, policy, jail, audit"]
     CFG["config/ — layered settings"]
+    PLUG["plugins.py — entry-point discovery"]
 
     TUI --> CORE
     HEADLESS --> CORE
@@ -37,10 +39,20 @@ graph TD
     CORE --> MEM
     CORE --> SAFE
     TOOLS --> SAFE
+    TOOLS --> MCP
     ENV --> PROV
     CMD --> CFG
     CORE --> CFG
+    PLUG -.->|"tools · commands · probes · providers · edit formats"| TOOLS
+    PLUG -.-> CMD
+    PLUG -.-> ENV
+    PLUG -.-> PROV
 ```
+
+Dotted edges are *contributions*, not imports: `cli.py` / the TUI load plugins once and pass
+the result into the registries, so no registry imports `plugins.py` (§4 rule 7). MCP tools are
+built by `tools/mcp.py` and registered into the same `ToolRegistry` as builtins at
+`ToolRisk.NET` — they get no special path through the gate.
 
 ## 2. Module map
 
@@ -57,7 +69,22 @@ graph TD
 | `memory/` | sessions, compaction, handoff, project memory | `Handoff` | config |
 | `tui/` | Textual front end | (IC-701) | core events + commands ONLY |
 | `plugins.py` | entry-point plugin discovery (MS-5) | `LoadedPlugins`, `load_plugins()` | anything except tui (only the app/cli layer imports it; registries take a `plugins=` value) |
-| `cli.py` | entry point, doctor | — | anything |
+| `demo/` | the offline scripted session `ironcore demo` runs (ships in the wheel) | — | core and below + `MockProvider` — never a network or a real model |
+| `cli.py` | entry point, `doctor`, `init`, `demo` | — | anything |
+
+### 2.1 Modules worth knowing about
+
+The packages above are the dependency unit; these individual modules carry rules of their own.
+
+| Module | Responsibility | Import rule |
+|---|---|---|
+| `core/roles.py` | `RoleRouter` (MS-3): resolves a role to its provider **and that model's own envelope** from the shared cache; unresolvable roles degrade to the primary pair, never an error | imports providers + envelope + config; imported by `core/engine.py`; never imports tools/commands/tui |
+| `core/resample.py` | best-of-N racing at the two mechanically verified seams (MS-4) | core-internal; winners re-enter the normal gate |
+| `envelope/seed.py` | the ~1s instant-on profile from endpoint introspection (§2.1 of MODELS.md) | envelope → providers only; never raises |
+| `envelope/outcomes.py` | `OutcomeLedger` + downgrade-only tuning (MS-8) | pydantic + stdlib + `envelope.profile` **only** — nothing from core/tools/commands/tui |
+| `tools/mcp.py` | MCP stdio client + `MCPManager`; registers `mcp__<server>__<tool>` at `ToolRisk.NET` | obeys the `tools/` rule (safety + config); spawns via `create_subprocess_exec`, never a shell |
+| `tools/patch.py` | the deterministic edit appliers behind `edit_file` — **not** a registered tool | stdlib only; pure text transforms, touches no filesystem |
+| `tools/image.py` | `read_image`; attaches image parts only when vision is enabled | `tools/` rule; degrades to an honest error on a text-only model |
 
 ## 3. One turn, end to end
 
@@ -96,6 +123,10 @@ Everything above the provider call is deterministic and unit-testable with `Mock
 5. No module reads config files directly; only `config/` touches disk for settings.
 6. Frozen interfaces live in [CONTRACTS.md](CONTRACTS.md); changing one requires updating
    that file *in the same commit*.
+7. Only the app layer (`cli.py`, `tui/`) imports `plugins.py`. Registries never discover
+   plugins themselves — they accept an already-loaded `LoadedPlugins` as a `plugins=`
+   argument, which is what keeps `tools/` free of an `ironcore.plugins` import and keeps
+   every registry testable with no entry points installed.
 
 ## 5. State ownership
 
@@ -103,11 +134,20 @@ Everything above the provider call is deterministic and unit-testable with `Mock
 |---|---|---|
 | mode, goal, working set, plan cursor | session state (core) | `.ironcore/state.json` |
 | transcript | session store (memory) | `.ironcore/sessions/*.jsonl` |
-| capability profiles | envelope | `~/.ironcore/envelopes/*.json` |
+| capability profiles | envelope | `~/.ironcore/envelopes/<slug>.json` |
+| live outcome evidence (MS-8) | envelope | `~/.ironcore/envelopes/<slug>.outcomes.json` — a sidecar beside the profile; downgrade-only tuning input, never written back into the profile |
+| quarantined caches | envelope | `~/.ironcore/envelopes/<slug>.json.corrupt` — an unreadable cache is renamed aside, never deleted, and the model re-probes |
 | audit trail | safety | `.ironcore/audit/*.jsonl` (append-only) |
-| undo snapshots | safety | shadow git ref |
+| undo snapshots | safety | `.ironcore/snapshots/` — a private shadow git repo; never touches the user's index, branches or remotes |
+| settings | config | `~/.ironcore/config.toml` (user) + `.ironcore/config.toml` (project, committable, autonomy-clamped) |
 | project memory | memory | `IRONCORE.md` (committable) |
+| workflow definitions | workflows | `.ironcore/workflows/*.yaml` (committable; user-authored) — shadows the built-ins shipped in `ironcore/workflows/builtin/` |
 | contributor coordination | humans+agents | `TODO.md`, `HANDOFF.md` (committable) |
+
+Two rules hold for every row: nothing here is written outside `~/.ironcore/` or the
+workspace's `.ironcore/`, and every write that can be interrupted is **atomic** (stage to a
+unique sibling, `fsync`, `os.replace`) with a tolerant reader — a half-written file degrades
+to "unmeasured", never to a crash on next boot.
 
 The model owns **nothing**. Any state the model needs is re-presented at COMPOSE time.
 

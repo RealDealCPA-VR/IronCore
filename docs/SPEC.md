@@ -1,7 +1,15 @@
 # IronCore Specification
 
-> Version 1.0 · 2026-07-15 · Status: **binding** — implementation tasks in [TODO.md](../TODO.md)
-> reference sections here by number. If code and spec disagree, fix one and say which.
+> Version 1.1 · 2026-07-18 · describes shipped **v0.2.0** · Status: **binding** —
+> implementation tasks in [TODO.md](../TODO.md) reference sections here by number. If code and
+> spec disagree, fix one and say which.
+>
+> *Changes in 1.1:* §3.3 command table marked shipped; §4.1 lists the seventh probe; §4.2
+> names the additive profile fields; §6.1 corrected to the registered tool lineup (`apply_patch`
+> was never a registered tool; `read_image` and the `mcp__*` family were missing); §7.7
+> documents the shipped autonomy ceiling; §12 hands the reference to [CONFIG.md](CONFIG.md)
+> and drops the Windows-only MCP command spelling; §14 matches the real CI matrix; §15
+> restated against what v0.1 and v0.2 actually shipped.
 
 ---
 
@@ -37,15 +45,17 @@ watch it happen without fearing for their machine (§7).
 ## 2. Product definition
 
 **It is:** an interactive TUI agent for software work in a workspace directory: reads, edits,
-runs, tests, commits — under a graduated safety regime; plus a headless mode for scripting
-(`ironcore run "<prompt>"`, post-v0.1).
+runs, tests, commits — under a graduated safety regime; extensible through MCP servers and
+pip-installable plugins; plus a headless mode for scripting (`ironcore run "<prompt>"` —
+planned, §9).
 
 **Non-goals (v0.x):** an IDE plugin; a hosted service; multi-user anything; training or
 fine-tuning models; supporting closed models is *allowed* (any OpenAI-compatible endpoint
 works) but never a design driver.
 
-**Platforms:** Windows, macOS, Linux. Windows is a first-class citizen (developed there);
-every shell-touching feature must be tested on both cmd/pwsh and POSIX sh semantics.
+**Platforms:** Windows, macOS, Linux — all three exercised in CI (§14). Windows is a
+first-class citizen (developed there); every shell-touching feature must be tested on both
+cmd/pwsh and POSIX sh semantics.
 
 **Package:** Python ≥ 3.11, published as `ironcore`, entry point `ironcore`. Python was chosen
 over Rust/Go deliberately: contributor (and agent-contributor) velocity, Textual for the TUI,
@@ -86,23 +96,25 @@ model cannot act in plan mode even if it tries.
 
 ### 3.3 Slash commands
 
-Registry in `ironcore/commands/`. Grammar: `/name [args...]`. Full set with owning tasks:
+Registry in `ironcore/commands/`. Grammar: `/name [args...]`. All of these are **implemented**
+(`build_default_registry`); the last column records the task that landed each, and plugins may
+add more ([PLUGINS.md](PLUGINS.md)). `/help` lists whatever is actually registered.
 
-| Command | Behavior | Task |
+| Command | Behavior | Landed in |
 |---|---|---|
-| `/help` | list commands, honest `[planned]` labels | ✅ scaffold |
-| `/version` | version string | ✅ scaffold |
-| `/mode [m]` | cycle or set mode | ✅ scaffold (TUI wiring IC-703) |
+| `/help` | list commands (and the app's key bindings) | scaffold |
+| `/version` | version string | scaffold |
+| `/mode [m]` | cycle or set mode | scaffold + IC-703 (TUI wiring) |
 | `/goal <obj>` \| `show` \| `clear` | persistent objective; per-turn stop-condition (§3.4) | IC-803 |
 | `/loop [interval] <prompt>` | recurring prompt; fixed interval or self-paced | IC-804 |
 | `/workflow <name> [args]` | run a workflow from `.ironcore/workflows/` (§10) | IC-904 |
-| `/model [name]` | switch model / list endpoint models; triggers probe if unprofiled | IC-801 |
+| `/model [name]` | switch the live model / list endpoint models; seeds + probes an unprofiled one | IC-801, MS-2 |
 | `/init` | scan repo → generate `IRONCORE.md` project memory | IC-802 |
 | `/compact` | compress history into handoff-grade summary (§11.2) | IC-805 |
 | `/undo`, `/redo` | revert/reapply last change-set via git snapshots (§7.6) | IC-805 |
 | `/review` | review working diff for bugs (uses verifier role model) | IC-806 |
 | `/memory` | view/edit IRONCORE.md sections | IC-807 |
-| `/envelope` | render current model's capability profile as a report card | IC-608 |
+| `/envelope` | render current model's capability profile as a report card (with per-role status) | IC-608, MS-3 |
 | `/probe` | re-run the probe suite | IC-608 |
 
 ### 3.4 `/goal` semantics (the flagship command)
@@ -127,18 +139,23 @@ victory early. IronCore makes "done" a *verified state*, not a *claim*.
 ### 4.1 Probes
 
 On first use of a model (and on `/probe`), run the suite in `ironcore/envelope/probes.py`:
-`CTX-HONESTY`, `RETENTION`, `TOOL-FORM`, `JSON-STRICT`, `EDIT-FORMAT`, `CODE-SMOKE`.
-Requirements: ≤ ~2 min total on a local 30B; mechanical scoring only (no LLM judges); fixed
-seeds where the server supports them; partial failure of a probe degrades that score to 0,
-never blocks profiling. Full probe design: [MODELS.md](MODELS.md) §2.
+`CTX-HONESTY`, `RETENTION`, `TOOL-FORM`, `JSON-STRICT`, `EDIT-FORMAT`, `CODE-SMOKE`,
+`TOKEN-RATIO`. Requirements: ≤ ~2 min total on a local 30B; mechanical scoring only (no LLM
+judges); fixed seeds where the server supports them; partial failure of a probe degrades that
+score to 0, never blocks profiling. Before the suite runs, an **instant seed** (~1s, endpoint
+introspection) makes an unprobed model usable immediately; the deep probe refines it in the
+background. Full probe + seed design: [MODELS.md](MODELS.md) §2.
 
 ### 4.2 Profile
 
 `CapabilityProfile` (implemented, `ironcore/envelope/profile.py`): honest context, protocol
-reliabilities, edit-format reliabilities, retention, coherence horizon, sampling defaults.
-Cached at `~/.ironcore/envelopes/<slug>.json`. Unprobed models get floor-conservative defaults
-(text protocol, whole-file edits, 4k honest context) — IronCore is *safe-slow* before it is
-measured-fast.
+reliabilities, edit-format reliabilities, retention, coherence horizon, sampling defaults, plus
+the additive fields `chars_per_token` (measured tokenization), `vision` (image inputs), and
+`source` — `default` (floor) · `seeded` (introspected, provisional) · `probed` (measured) ·
+`tuned` (measured, then lowered by live evidence, §4.5). Cached at
+`~/.ironcore/envelopes/<slug>.json`; writes are atomic and a corrupt cache is quarantined and
+re-probed rather than raising. Unprobed models get floor-conservative defaults (text protocol,
+whole-file edits, 4k honest context) — IronCore is *safe-slow* before it is measured-fast.
 
 ### 4.3 Adapter ladders (implemented, frozen)
 
@@ -159,6 +176,20 @@ measured-fast.
 one model for everything. Typical splits: big-plans/small-executes for latency, or
 small-plans/big-executes for hard code. The router is config-driven; no automatic model
 selection in v0.x (predictability beats cleverness).
+
+### 4.5 The self-improvement loop (MS-8)
+
+Probes measure a model once; live sessions produce the same mechanical evidence forever. Each
+session records per-model outcomes — did the tool call parse at the active rung, did the edit
+apply, did verification pass, did the turn drift — into an `OutcomeLedger`
+(`~/.ironcore/envelopes/<slug>.outcomes.json`, a sidecar beside the profile). At session start
+a deterministic tuner folds it back **downgrade-only**: it may lower a ladder score or
+`coherence_horizon` that live evidence contradicts, never raise one (an upgrade needs a real
+measurement, so a suspiciously clean rate only emits a "run `/probe`" hint). The frozen §4.3
+ladders remain the sole selector — tuning edits the *scores* they read. Counters are
+generation-stamped (a fresh probe resets them) and decay, so old evidence fades. Off switch:
+`[envelope] auto_tune = false`. The tuned overlay is never written back to the cached
+profile: the measurement on disk stays honest.
 
 ## 5. Turn engine
 
@@ -211,13 +242,21 @@ Loop detection: same tool + same args twice in a row → intervention frame; thr
 
 ### 6.1 Core suite (phase 3)
 
+The registered lineup is exactly what `tools/default.py` assembles (pinned by
+`tests/test_docs_reference.py`):
+
 | Tool | Risk | Notes |
 |---|---|---|
 | `read_file`, `list_dir`, `glob`, `grep` | READ | output truncation with honest `[truncated]` markers |
+| `read_image` | READ | attach a workspace PNG/JPEG/GIF/WEBP; always registered — on a non-vision model it degrades to an honest error rather than letting the model guess |
 | `write_file`, `edit_file` | WRITE | edit via envelope-selected format; path-jailed (§7.3) |
-| `apply_patch` | WRITE | harness-side deterministic application, fuzzy anchors |
 | `shell` | EXEC | timeout, output caps, cwd=workspace, Windows+POSIX |
 | `fetch_url` | NET | registered only if `safety.network_tools=true` |
+| `mcp__<server>__<tool>` | NET | one per tool exported by each configured MCP server (§12, [CONFIG.md](CONFIG.md) §8); same NET rule — never registered unless `safety.network_tools=true` |
+
+`tools/patch.py` is **not** a registered tool: it is the harness-internal deterministic
+patcher (fuzzy anchors, mechanical failure reasons) that `edit_file` calls. The model never
+applies a patch itself — that is the point of §5.4's ladder.
 
 ### 6.2 Contract
 
@@ -281,6 +320,16 @@ index) → `/undo` restores byte-exact. Audit: append-only JSONL under `.ironcor
 every tool call, gate decision, approval, mode change, with timestamps and args hashes.
 Secrets are redacted (IC-404: env values, key-shaped strings) from context, transcript, and audit.
 
+### 7.7 Autonomy ceiling (SAFETY.md T8/T9/T10)
+
+The project config (`<ws>/.ironcore/config.toml`) is the only layer that arrives with a
+`git clone`, so it is the only untrusted one. `Settings.load` clamps it: it may lower
+autonomy freely and may never raise `safety.mode`, turn `safety.network_tools` or
+`plugins.enabled` back on, or introduce an `[mcp.servers.*]` entry (every configured server is
+spawned at launch to enumerate its tools). The ceiling is the *effective* user layer, defaults
+included — an absent `~/.ironcore/config.toml` is a floor, not an exemption. Env and Shift+Tab
+are never clamped: they are the human at the keyboard. Every clamp emits a note.
+
 ## 8. Providers
 
 ### 8.1 OpenAI-compatible client (IC-201/202)
@@ -300,7 +349,7 @@ envelope); keep-alive management so interactive sessions don't reload weights.
 Endpoint feature-detect: native `tools` support, `format=json` / grammar / guided-decoding
 availability, logprobs. Detection results feed the envelope's protocol scores as priors.
 
-## 9. Headless & scripting (post-v0.1)
+## 9. Headless & scripting (planned, v0.3)
 
 `ironcore run "<prompt>" --mode auto --max-turns N --json` → events as JSONL on stdout, exit
 code from stop_reason. The event contract (core/events.py) already anticipates this consumer.
@@ -337,12 +386,16 @@ we dogfood our own coordination format.
 ## 12. Configuration
 
 Implemented in `ironcore/config/settings.py`: defaults ← `~/.ironcore/config.toml` ←
-`<ws>/.ironcore/config.toml` ← `IRONCORE_*` env. Reference:
+`<ws>/.ironcore/config.toml` ← `IRONCORE_*` env, with the project layer under an autonomy
+ceiling (§7.7). **The complete reference — every section, key, type, default and env var, plus
+a full annotated config file — is [CONFIG.md](CONFIG.md)**; this is the orientation sketch:
 
 ```toml
 [provider]
 base_url = "http://localhost:11434/v1"
 model = "qwen3-coder:30b"
+api_key = "ironcore-local"   # local servers ignore it; hosted endpoints REQUIRE a real key
+type = "auto"                # "auto" | "ollama" | "openai" | a plugin provider's name
 
 [roles]                      # optional per-role routing (§4.4)
 planner = "llama3.3:70b"
@@ -353,10 +406,22 @@ mode = "manual"              # boot mode
 workspace_only = true
 network_tools = false
 
+[envelope]                   # how IronCore molds itself to the model (§4)
+auto_probe = true            # measure an unprobed model in the background on first launch
+instant_seed = true          # ~1s provisional profile from endpoint introspection first
+auto_tune = true             # downgrade-only ladder tuning from live evidence
+# vision = true              # UNSET by default = trust the seeded/measured flag
+
+[engine]
+best_of_n = 1                # 1 = off; N races up to N-1 resampled candidates per turn
+
+[plugins]
+enabled = true               # false = never consult entry points at all
+
 [mcp.servers.github]         # optional MCP tool servers (stdio; tools are NET-risk,
-command = "npx.cmd"          # registered only when safety.network_tools = true).
-args = ["-y", "@modelcontextprotocol/server-github"]  # command resolved via PATH,
-env = {}                     # never a shell -- on Windows name the real shim (npx.cmd)
+command = "npx"              # registered only when safety.network_tools = true).
+args = ["-y", "@modelcontextprotocol/server-github"]  # resolved via shutil.which, never a
+env = {}                     # shell -- a bare name is portable (PATHEXT finds npx.CMD)
 timeout_s = 30.0
 enabled = true
 # url = "https://..."        # accepted but skipped: http transport not shipped yet
@@ -378,14 +443,18 @@ deps. CI publishes to PyPI on tag (IC-1102). Version single-sourced from `pyproj
   asserting event streams.
 - TUI: Textual's `Pilot` for keyboard flows (Shift+Tab, approval modals).
 - Live smoke (manual, pre-release): scripted session against a real local Ollama.
-- CI gate: ruff + pytest on ubuntu & windows, 3.11 & 3.13. Coverage floor once the engine
-  lands: 85% on `core/`, `safety/`, `envelope/`.
+- CI gate: ruff + pytest on ubuntu & windows (3.11 and 3.13) plus macos (3.13); a `package`
+  job that builds the wheel, runs `twine check`, imports every module out of it and runs
+  `ironcore demo --smoke` from it. Coverage floor: `--cov=ironcore --cov-fail-under=90`
+  across the whole package.
 
 ## 15. Milestones
 
-| Version | Contents |
-|---|---|
-| v0.1 | phases 1–8: usable interactive agent (providers, tools, safety, engine, envelope, TUI, commands) |
-| v0.2 | phase 9–10: workflows, sessions/resume, project memory |
-| v0.3 | headless mode, coverage/perf hardening, packaging polish |
-| v1.0 | envelope v2 (auto-reprobe on model updates), workflow library, docs site |
+| Version | Status | Contents |
+|---|---|---|
+| v0.1 | shipped | phases 1–11: the whole usable agent — providers, tools, safety kernel, turn engine, capability envelope, TUI, slash commands, workflows, sessions/resume + `/compact`, project memory (`IRONCORE.md`), packaging |
+| v0.2 | shipped | the eight **moonshots**: model-aware tokenization (`TOKEN-RATIO`), live `/model` swaps, a model per role each measured, best-of-N escape hatches, the self-improvement loop (outcome ledger + downgrade-only tuning), vision (`read_image`), MCP tool servers, entry-point plugins — plus instant-on profiling and real server-side guided decoding |
+| v0.3 | next | headless `ironcore run` (§9), coverage/perf hardening, packaging polish |
+| v1.0 | later | envelope v2 (auto-reprobe on model updates), workflow library, docs site |
+
+Per-release detail, including what landed when, is in [CHANGELOG.md](../CHANGELOG.md).

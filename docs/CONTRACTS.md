@@ -172,7 +172,16 @@ owns them, then freezes the *budget shares* here).
 **Frozen:**
 - Precedence: defaults ← user toml ← project toml ← env. Env names `IRONCORE_BASE_URL`,
   `IRONCORE_MODEL`, `IRONCORE_API_KEY`, `IRONCORE_MODE`.
-- Section/key names shown in SPEC §12 (additive allowed).
+- *Additive (FIX-5):* the four per-role env names `IRONCORE_ROLE_PLANNER`,
+  `IRONCORE_ROLE_CODER`, `IRONCORE_ROLE_SUMMARIZER`, `IRONCORE_ROLE_VERIFIER` (mapping to
+  `roles.planner` / `.coder` / `.summarizer` / `.verifier`) join the frozen env surface.
+  They have been read by `_apply_env` since MS-3 but were documented nowhere; freezing them
+  records shipped behaviour rather than changing it. An empty value is ignored, as for every
+  other variable. *Migration:* none — no code change; `docs/CONFIG.md` §10 is the reference.
+- Section/key names (additive allowed). **The reference is
+  [CONFIG.md](CONFIG.md)** — every section, key, type and default, generated against these
+  models and pinned by `tests/test_docs_reference.py`, which fails when a model field stops
+  being documented. SPEC §12 keeps an orientation sketch only.
 - *Additive (MS-4):* `[engine] best_of_n` (int, default 1 = disabled, validated 1..5) is an
   additive section/key: up to N-1 extra candidates are raced per turn when a mechanical
   verifier fails (a tool call the repair ladder gives up on; an `edit_file` patch that does
@@ -180,7 +189,8 @@ owns them, then freezes the *budget shares* here).
   *Migration:* none — configs without `[engine]` behave byte-identically.
 - *Additive (MS-7):* `[mcp]` — `[mcp.servers.<name>]` tables (`command`, `args`, `env`,
   `url`, `timeout_s`, `enabled`; `command` or `url` required) configure MCP tool servers;
-  the reference block lives in SPEC §12. v1 connects stdio (`command`) servers only —
+  the reference block lives in [CONFIG.md](CONFIG.md) §8. v1 connects stdio (`command`)
+  servers only —
   url-only entries parse but are skipped with a note. Their tools register as
   `mcp__<server>__<tool>` at `ToolRisk.NET` (no new risk value): like every NET tool they
   are never registered unless `safety.network_tools` is true, and §1 gating applies

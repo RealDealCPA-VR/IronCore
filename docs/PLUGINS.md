@@ -11,6 +11,10 @@ The frozen surfaces live in [CONTRACTS.md §11](CONTRACTS.md); the trust model i
 Declare any of these in your plugin's `pyproject.toml`:
 
 ```toml
+[build-system]                 # required — without it your project cannot be built at all
+requires = ["hatchling"]       # (any PEP 517 backend works; this is the one IronCore uses)
+build-backend = "hatchling.build"
+
 [project]
 name = "ironcore-myplugin"
 version = "0.1.0"

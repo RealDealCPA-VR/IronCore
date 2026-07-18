@@ -38,9 +38,15 @@ one-pass sized, and verification is evidence, not claims.
 2. Flip the task to `[?]` (or `[x]` if Verify is fully mechanical) with evidence.
 3. Append a handoff block to `HANDOFF.md` (format: `docs/PROTOCOLS.md` §2 — the
    sentinels matter, `ironcore/memory/handoff.py` parses them).
-4. If your work completes a phase (or changes what "works today"), update README.md —
-   the roadmap table and the Quickstart status note — in the same change set. The README
-   must never claim less or more than what is actually shipped.
+4. If anything **user-facing** changed, update the docs that describe it *in the same change
+   set* — they must never claim less or more than what is actually shipped:
+   - `README.md` — the feature prose, the command table, or the Moonshots section.
+   - `CHANGELOG.md` — an entry under Unreleased (or the version you are cutting).
+   - `docs/CONFIG.md` — **any** new/changed/removed config key or `IRONCORE_*` env var.
+     A test walks the pydantic models and fails if a key is undocumented.
+   - `docs/SPEC.md` — spec sections are binding; if the code now disagrees with one, fix
+     one of them and say which in your commit message.
+   - `docs/TROUBLESHOOTING.md` — if you changed a `doctor` line a user is told to act on.
 5. Report: files changed, verify output, gotchas. Do **not** push unless explicitly asked.
 
 ## Never

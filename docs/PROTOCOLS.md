@@ -123,6 +123,8 @@ no CONTRACTS.md interfaces. The orchestrator checks this before fan-out, not aft
 [ ] tests green, ruff clean (or the redness is documented as the handoff's Context)
 [ ] TODO.md reflects reality (claims, states, evidence)
 [ ] HANDOFF.md block appended
-[ ] README.md roadmap/status updated if anything shipped (it must always match reality)
+[ ] user-facing docs updated if anything shipped -- README.md (feature prose, command
+    table, Moonshots), CHANGELOG.md, docs/CONFIG.md for any config key or IRONCORE_* env
+    var, docs/SPEC.md where the spec now disagrees with the code. They must match reality.
 [ ] no secrets, no absolute local paths, no personal identifiers in anything committed
 ```
