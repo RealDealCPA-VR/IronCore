@@ -10,7 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE)
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
-[![Tests: 1777](https://img.shields.io/badge/tests-1777%20offline-brightgreen.svg)](#built--proven)
+[![Tests: 1789](https://img.shields.io/badge/tests-1789%20offline-brightgreen.svg)](#built--proven)
 
 </div>
 
@@ -298,7 +298,7 @@ Four operating modes, cycled live with **Shift+Tab**:
 | ✏️ **Accept Edits** | ✅ | ✅ | ask | ask |
 | 🚀 **Auto** | ✅ | ✅ | ✅ sandboxed | ask |
 
-![Shift+Tab cycled through the whole safety loop, printing each mode's contract into the transcript with the mode name carrying its own autonomy colour: accept-edits on a filled amber block applies file edits automatically while commands still ask; auto on a filled red block is full auto inside the workspace sandbox with network still asking; plan in calm blue is read-only, explore and propose, nothing changed; manual in plain grey approves every file edit, command and network call. The status chip reads MANUAL.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/05-safety-modes.png)
+![Shift+Tab cycled through the whole safety loop, printing each mode's contract into the transcript with the mode name carrying its own autonomy colour: accept-edits on a filled amber block applies file edits automatically while commands still ask; auto on a filled red block is full auto inside the workspace sandbox with network still asking; plan in calm blue is read-only, explore and propose, nothing changed; manual in plain grey approves every file edit, command and network call. Below the four contract lines the session carries on — the user's two questions in amber, and list_dir, read_file and grep tool cards each led by a blue rule and a blue READ chip — so the modes are being chosen in the middle of real work rather than on an empty screen. The status chip reads MANUAL, turn 2, 4.2k tok.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/05-safety-modes.png)
 
 *Each mode announces its own contract as you cycle into it, so you always know what you just
 authorized.*
@@ -337,14 +337,14 @@ itself never prints or prompts. Type `/` to open the palette:
 stops being a slogan: the objective is re-anchored into every turn, and *the harness* — not the
 model's opinion of itself — runs the attached command to decide whether the work is done.
 
-![A session where /goal was set to 'make fib() correct for every n up to 30'. Each typed command is echoed back in amber above the reply it produced, so the three exchanges read as three groups. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' and 'Goal stop-condition MET — all 1 verify command passed.'](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
+![A session that opens with an ordinary question — 'what's in this project?', answered via a list_dir tool card led by a blue rule, a blue READ chip and a green ✓ ok — and then formalises the work with /goal set to 'make fib() correct for every n up to 30'. Each typed command is echoed back in amber above the reply it produced, so the three /goal exchanges read as three groups. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' and 'Goal stop-condition MET — all 1 verify command passed.'](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
 
 *The stop-condition is a command that really ran. "Done" is a test result, not a claim.*
 
 Sessions are recorded and resumable: `ironcore --resume` opens a picker of past sessions, and
 `ironcore --resume <id>` jumps straight to one.
 
-![The 'Resume a session' picker listing four past sessions, each with its age, its opening request and its turn count: 8m ago 'fix the failing fib tests' 3 turns, 2h ago 'add a --json flag to the report CLI' 6 turns, 1d ago 'why does the parser drop trailing commas?' 4 turns, 3d ago 'port the ingest script off requests' 11 turns. The first row is selected, shown as a steel-blue band with its text in bold. The panel is titled 'Resume a session' on its border, with 'enter resumes · esc starts fresh' along the bottom edge.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/08-session-picker.png)
+![The 'Resume a session' picker listing nine past sessions newest-first, each row an age, the opening request and a turn count — from 8m ago 'fix the failing fib tests' 3 turns and 52m ago 'why is the envelope probe picking whole_file?' 5 turns, through 2h ago 'add a --json flag to the report CLI' 6 turns and 1d ago 'why does the parser drop trailing commas?' 4 turns, down to 3d ago 'port the ingest script off requests' 11 turns and 6d ago 'audit the shell tool's timeout handling' 7 turns. The ages line up as a right-aligned column. The first row is selected, shown as a steel-blue band with its text in bold. The panel is titled 'Resume a session' on its border, with 'enter resumes · esc starts fresh' along the bottom edge.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/08-session-picker.png)
 
 *Sessions are listed by what you asked for, not by an opaque id — so you can find yesterday's
 thread without knowing its name.*
@@ -431,7 +431,7 @@ exactly this way.
 
 ```bash
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q   # 1777 tests, all offline — no model, no network
+uv run --extra dev pytest -q   # 1789 tests, all offline — no model, no network
 ```
 
 The suite sandboxes `HOME` itself, so running it cannot touch your own `~/.ironcore`. CI gates

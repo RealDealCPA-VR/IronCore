@@ -353,7 +353,11 @@ async def shot_approval_diff(tmp: Path) -> str:
         "    return a\n"
         ">>>>>>> REPLACE"
     )
+    # The orientation turn runs first so the modal is layered over a REAL
+    # session rather than over an empty frame: a gate is something that
+    # interrupts work in progress, and a half-empty backdrop said the opposite.
     script = [
+        *_orientation_script(),
         _text(
             "Here is the fix — the stub becomes the real recurrence.",
             [
@@ -372,6 +376,7 @@ async def shot_approval_diff(tmp: Path) -> str:
     broker = ApprovalBroker(timeout=120.0)
     app = _build_app(tmp, script, broker=broker)
     async with app.run_test(size=TERM_SIZE) as pilot:
+        await _drive_orientation(app, pilot)
         await _submit(app, pilot, "fix fib() with a two-variable loop")
         shown = await _wait_for(pilot, lambda: isinstance(app.screen, ApprovalScreen))
         if not shown:
@@ -412,24 +417,34 @@ async def shot_safety_modes(tmp: Path) -> str:
 
     The cycle runs BEFORE the turn (pick your autonomy level, then work), which
     is both the natural order and what leaves the frame with real content in it.
+    The turn that follows is the two-turn session, not the one-turn orientation:
+    with only one turn the frame's top third was empty black, which read as a
+    dead app rather than as a mode change made mid-work. Two turns fill it and
+    the four Mode lines still clear the top of the viewport.
     """
     _seed_project(tmp)
-    app = _build_app(tmp, _orientation_script())
+    app = _build_app(tmp, _session_script())
     async with app.run_test(size=TERM_SIZE) as pilot:
         await pilot.pause()
         for _ in range(4):  # manual -> accept-edits -> auto -> plan -> manual
             await pilot.press("shift+tab")
             await pilot.pause()
-        await _drive_orientation(app, pilot)
+        await _drive_session(app, pilot)
         return app.export_screenshot(title="IronCore")
 
 
 async def shot_goal_verified(tmp: Path) -> str:
-    """/goal: an objective whose stop-condition is proved by running a command."""
+    """/goal: an objective whose stop-condition is proved by running a command.
+
+    An orientation turn runs first: a goal is something you formalise once you
+    are already working, and starting cold left the frame's top third empty
+    while the three /goal exchanges bunched at the bottom.
+    """
     _seed_project(tmp, fixed=True)
     check = 'python -c "import fib; assert fib.fib(30) == 832040"'
-    app = _build_app(tmp)
+    app = _build_app(tmp, _orientation_script())
     async with app.run_test(size=TERM_SIZE) as pilot:
+        await _drive_orientation(app, pilot)
         await _submit(app, pilot, "/goal make fib() correct for every n up to 30")
         await _wait_for(pilot, lambda: "Goal set" in app.transcript_text())
         await _submit(app, pilot, f"/goal verify: {check}")
@@ -446,11 +461,21 @@ async def shot_session_picker(tmp: Path) -> str:
     """The resume picker over a store of real recorded sessions."""
     store = SessionStore(tmp)
     now = datetime.now()
+    # Nine sessions, not four. The picker's list is `max-height: 16`, so a
+    # four-row store drew a small band floating in a mostly empty frame and
+    # undersold both the widget and the idea that history accumulates. Nine
+    # rows fill the modal without hitting the cap, and the spread of ages is
+    # what makes the relative-age column legible as a column.
     seeded = (
         (timedelta(minutes=8), "fix the failing fib tests", 3),
+        (timedelta(minutes=52), "why is the envelope probe picking whole_file?", 5),
         (timedelta(hours=2), "add a --json flag to the report CLI", 6),
+        (timedelta(hours=6), "write tests for the retry backoff", 8),
         (timedelta(hours=27), "why does the parser drop trailing commas?", 4),
+        (timedelta(hours=31), "split the settings module into config + schema", 9),
+        (timedelta(days=2), "make doctor explain the unprobed model line", 5),
         (timedelta(days=3), "port the ingest script off requests", 11),
+        (timedelta(days=6), "audit the shell tool's timeout handling", 7),
     )
     for index, (age, prompt, turns) in enumerate(seeded):
         stamp = now - age

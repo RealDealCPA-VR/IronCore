@@ -80,6 +80,15 @@ All notable changes to IronCore are documented here. This project adheres to
   not tell which output answered what. The typed line is now shown as your own
   line above its result. Display only: slash commands are still not recorded to
   the session transcript.
+- **The README screenshots are reshot against the new design, and four of the
+  nine now show a fuller session.** Several shots framed a modal or a command
+  against a mostly empty transcript, which read as a dead app rather than as
+  work in progress: the approval gate and the `/goal` run now open on a real
+  session, the safety-mode cycle is followed by the two-turn investigation
+  instead of a single turn, and the resume picker lists nine recorded sessions
+  rather than four. These are scenario changes in `tools/make_screenshots.py`
+  only — every pixel is still a render of the shipping UI, and nothing renders
+  differently for capture.
 
 ### Fixed
 - **Doctor's "unprobed" line no longer wraps through its own marker column.** It
