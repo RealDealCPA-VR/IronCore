@@ -103,6 +103,104 @@ def test_probe_targets_the_openai_models_path_not_ollamas_api_version(monkeypatc
     assert result.models == ("llama3",)
 
 
+def _capture_get(monkeypatch, handler):
+    """Like _fake_httpx_get, but records the kwargs (headers) too."""
+    calls: list[dict] = []
+
+    def _get(url, **kwargs):
+        calls.append({"url": str(url), **kwargs})
+        return handler(str(url))
+
+    monkeypatch.setattr(httpx, "get", _get)
+    return calls
+
+
+def test_probe_authenticates_like_the_real_client_does(monkeypatch):
+    """Round 1 sent NO Authorization header, while openai_compat.py and
+    detect.py both send `Bearer <api_key>`. Against vLLM or llama.cpp started
+    with --api-key (or any hosted OpenAI-compatible provider) the anonymous
+    probe gets 401, so doctor failed the gate on a setup that works."""
+    calls = _capture_get(monkeypatch, lambda url: httpx.Response(200, json={"data": []}))
+    probe_endpoint("http://localhost:11434/v1", api_key="sk-secret-123")
+
+    assert calls[0]["headers"] == {"Authorization": "Bearer sk-secret-123"}
+
+
+def test_doctor_probes_with_the_configured_key(tmp_path, monkeypatch, capsys):
+    """End to end: the key from [provider] reaches the wire, and an endpoint
+    that requires it comes back [ok] rather than failing the install gate."""
+    key = "sk-live-abc"
+
+    def _handler(url):
+        return httpx.Response(200, json={"data": [{"id": "llama3"}]})
+
+    calls = _capture_get(monkeypatch, _handler)
+    user = tmp_path / "user.toml"
+    user.write_text(
+        f'[provider]\napi_key = "{key}"\nmodel = "llama3"\n',
+        encoding="utf-8",
+    )
+    rc = cmd_doctor(
+        project_dir=tmp_path,
+        user_config=user,
+        env={},
+        envelope_dir=tmp_path / "envelopes",
+        check_endpoint=True,
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert calls[0]["headers"] == {"Authorization": f"Bearer {key}"}
+    assert "[ok] endpoint reachable" in out
+    assert key not in out  # never echo the key
+
+
+def test_rejected_key_blames_api_key_not_base_url(tmp_path, capsys):
+    """401/403 means the endpoint IS OpenAI-shaped and talking to us -- it just
+    refused the key we sent. Sending the user to edit base_url would send them
+    to change the one field that is correct."""
+    probe = lambda url: EndpointProbe("unauthorized", f"{url}/models", code=401)  # noqa: E731
+    rc = _doctor(tmp_path, probe=probe)
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "endpoint rejected our API key" in out
+    assert "set [provider] api_key" in out
+    assert "IRONCORE_API_KEY" in out
+    assert "set [provider] base_url" not in out
+    assert "is this an OpenAI-compatible endpoint?" not in out
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_probe_classifies_auth_rejection_apart_from_other_http_errors(monkeypatch, code):
+    _fake_httpx_get(monkeypatch, lambda url: httpx.Response(code, text="nope"))
+    result = probe_endpoint("http://x/v1", api_key="k")
+
+    assert result.status == "unauthorized"
+    assert result.code == code
+
+
+def test_probe_never_carries_the_api_key_back_in_its_detail(monkeypatch):
+    """Redaction discipline (openai_compat.py's _redact): the key must not be
+    able to reach the terminal -- or a pasted bug report -- via an exception."""
+    key = "sk-secret-123"
+
+    def _boom(url, **kwargs):
+        raise httpx.ConnectError(f"failed to connect using header Bearer {key}")
+
+    monkeypatch.setattr(httpx, "get", _boom)
+    result = probe_endpoint("http://x/v1", api_key=key)
+
+    assert key not in result.detail
+    assert "[redacted]" in result.detail
+
+
+def test_probe_sends_no_header_when_no_key_is_configured(monkeypatch):
+    calls = _capture_get(monkeypatch, lambda url: httpx.Response(200, json={"data": []}))
+    probe_endpoint("http://x/v1", api_key="")
+    assert calls[0]["headers"] == {}
+
+
 def test_probe_reads_the_status_code_it_prints(monkeypatch):
     _fake_httpx_get(monkeypatch, lambda url: httpx.Response(404, text="not found"))
     result = probe_endpoint("http://localhost:11434/v1")
@@ -276,6 +374,68 @@ def test_no_config_file_is_not_reported_as_config_loaded(tmp_path, capsys):
     assert f"model {DEFAULT_MODEL}" in out
 
 
+def test_a_config_error_that_names_no_file_gets_one_named_for_it(tmp_path, capsys):
+    """A non-UTF8 byte surfaces as a bare codec message with no path in it, so
+    a user with both a user and a project config cannot tell which to open --
+    while the malformed-TOML branch right beside it does name the file."""
+    user = tmp_path / "user.toml"
+    user.write_bytes(b'[provider]\nmodel = "caf\xe9"\n')
+
+    rc = cmd_doctor(
+        project_dir=tmp_path,
+        user_config=user,
+        env={},
+        envelope_dir=tmp_path / "envelopes",
+        check_endpoint=False,
+    )
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "codec can't decode" in out
+    assert str(user) in out  # the question that actually matters: which file?
+
+
+def test_a_config_error_that_already_names_the_file_is_not_told_twice(tmp_path, capsys):
+    user = tmp_path / "user.toml"
+    user.write_text('[provider]\nmodel = "oops\n', encoding="utf-8")
+
+    assert (
+        cmd_doctor(
+            project_dir=tmp_path,
+            user_config=user,
+            env={},
+            envelope_dir=tmp_path / "envelopes",
+            check_endpoint=False,
+        )
+        == 1
+    )
+    out = capsys.readouterr().out
+    assert str(user) in out
+    assert "config file(s) doctor read" not in out
+
+
+def test_doctor_runs_when_home_cannot_be_resolved(tmp_path, capsys, monkeypatch):
+    """Every path doctor needs was injected, so an unresolvable home is not its
+    problem -- it used to compute Path.home() eagerly and discard the value."""
+
+    def _no_home():
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr("pathlib.Path.home", staticmethod(_no_home))
+
+    assert (
+        cmd_doctor(
+            project_dir=tmp_path,
+            user_config=tmp_path / "absent.toml",
+            env={},
+            envelope_dir=tmp_path / "envelopes",
+            check_endpoint=False,
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+
 def test_a_real_config_file_is_named_by_path(tmp_path, capsys):
     _doctor(tmp_path, config='[safety]\nmode = "plan"\n')
     out = capsys.readouterr().out
@@ -307,13 +467,36 @@ def test_present_git_is_reported(tmp_path, capsys, monkeypatch):
     assert "[ok] git found" in capsys.readouterr().out
 
 
-def test_mcp_command_missing_from_path_is_a_failure(tmp_path, capsys, monkeypatch):
+def test_mcp_command_missing_from_path_is_a_failure_when_it_would_be_launched(
+    tmp_path, capsys, monkeypatch
+):
     monkeypatch.setattr("ironcore.cli._which", lambda cmd: None if cmd == "nope.cmd" else "C:/x")
-    code = _doctor(tmp_path, config='[mcp.servers.gh]\ncommand = "nope.cmd"\n')
+    code = _doctor(
+        tmp_path,
+        config='[safety]\nnetwork_tools = true\n[mcp.servers.gh]\ncommand = "nope.cmd"\n',
+    )
     out = capsys.readouterr().out
 
     assert code == 1
     assert "[FAIL] mcp gh: command 'nope.cmd' not found on PATH" in out
+
+
+def test_mcp_command_missing_is_only_a_warning_while_the_server_stays_unregistered(
+    tmp_path, capsys, monkeypatch
+):
+    """Round 1 printed '...stay unregistered until safety.network_tools = true'
+    and then FAILED the gate on one of those very servers -- doctor refusing an
+    install over a component it had just declared inert, one line apart.
+    Nothing will ever launch that command, so it cannot break anything today."""
+    monkeypatch.setattr("ironcore.cli._which", lambda cmd: None if cmd == "nope.cmd" else "C:/x")
+    code = _doctor(tmp_path, config='[mcp.servers.gh]\ncommand = "nope.cmd"\n')
+    out = capsys.readouterr().out
+
+    assert code == 0  # `ironcore doctor && ironcore` must still run
+    assert "stay unregistered until safety.network_tools = true" in out
+    assert "[!!] mcp gh: command 'nope.cmd' not found on PATH" in out
+    assert "[FAIL]" not in out
+    assert "before" in out and "turning safety.network_tools on" in out
 
 
 def test_mcp_url_only_entry_matches_the_managers_wording(tmp_path, capsys, monkeypatch):
@@ -534,6 +717,21 @@ def test_starter_config_does_not_claim_a_default_for_vision(tmp_path):
 
     assert "# vision = false" not in STARTER_CONFIG
     assert "UNSET by default" in STARTER_CONFIG
+
+
+def test_starter_config_does_not_call_its_examples_defaults():
+    """The header promised 'uncommenting one changes nothing', but [roles] and
+    [mcp.servers.example] hold invented values -- uncommenting the mcp block
+    genuinely registers a server. The pinning test above only compares scalar
+    lines, so it cannot catch an over-broad claim in the prose."""
+    from ironcore.cli import STARTER_CONFIG
+
+    lines = STARTER_CONFIG.splitlines()
+    for header in ("# [roles]", "# [mcp.servers.example]"):
+        marked = [ln for ln in lines if ln.startswith(header)]
+        assert marked, f"{header} vanished from STARTER_CONFIG"
+        assert "EXAMPLE" in marked[0], f"{header} is not marked as an example"
+    assert "DOES change behaviour" in STARTER_CONFIG
 
 
 def test_init_on_a_directory_does_not_suggest_a_remedy_that_cannot_work(tmp_path, capsys):

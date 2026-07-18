@@ -146,11 +146,12 @@ class EndpointProbe:
     OpenAI-compatible server, and does it have the configured model?
 
     status:
-      ``ok``          -- 2xx and an intelligible model list (``models`` filled)
-      ``bad_url``     -- not a usable URL at all (missing scheme, bad syntax)
-      ``unreachable`` -- nothing answered (connection refused, DNS, timeout)
-      ``http_error``  -- something answered, but not with success
-      ``bad_payload`` -- 2xx whose body is not an OpenAI model list
+      ``ok``           -- 2xx and an intelligible model list (``models`` filled)
+      ``bad_url``      -- not a usable URL at all (missing scheme, bad syntax)
+      ``unreachable``  -- nothing answered (connection refused, DNS, timeout)
+      ``unauthorized`` -- 401/403: OpenAI-shaped, but rejected our api_key
+      ``http_error``   -- something else answered, but not with success
+      ``bad_payload``  -- 2xx whose body is not an OpenAI model list
     """
 
     status: str
@@ -184,22 +185,46 @@ def _model_ids(payload: object) -> tuple[str, ...] | None:
     return tuple(ids)
 
 
-def probe_endpoint(base_url: str, timeout: float = _PROBE_TIMEOUT_S) -> EndpointProbe:
-    """GET ``{base_url}/models`` once and classify the outcome. Never raises."""
+def probe_endpoint(
+    base_url: str, api_key: str = "", timeout: float = _PROBE_TIMEOUT_S
+) -> EndpointProbe:
+    """GET ``{base_url}/models`` once and classify the outcome. Never raises.
+
+    Sends the same ``Authorization: Bearer`` header the real client does
+    (providers/openai_compat.py, envelope/detect.py). Without it doctor asks a
+    different question than the app: vLLM or llama.cpp's server started with
+    ``--api-key``, and every hosted OpenAI-compatible provider, answer 401 to an
+    anonymous probe — so doctor would fail the gate on a setup that works, and
+    blame ``base_url``, the one field that is correct.
+
+    The key is never echoed: it is redacted out of any detail we carry back, so
+    it cannot reach the terminal (or a pasted bug report) through an exception
+    message.
+    """
     import httpx
 
     url = f"{base_url.rstrip('/')}/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+    def _redact(text: str) -> str:
+        return text.replace(api_key, "[redacted]") if api_key else text
+
     try:
-        resp = httpx.get(url, timeout=timeout)
+        resp = httpx.get(url, timeout=timeout, headers=headers)
     except (httpx.InvalidURL, httpx.UnsupportedProtocol) as exc:
         # A scheme typo used to print "fine if no local server is running" --
         # actively telling the user their broken config was OK.
-        return EndpointProbe("bad_url", url, detail=str(exc))
+        return EndpointProbe("bad_url", url, detail=_redact(str(exc)))
     except httpx.HTTPError as exc:
-        return EndpointProbe("unreachable", url, detail=str(exc))
+        return EndpointProbe("unreachable", url, detail=_redact(str(exc)))
     except Exception as exc:  # pragma: no cover -- defensive; doctor never crashes
-        return EndpointProbe("unreachable", url, detail=str(exc))
+        return EndpointProbe("unreachable", url, detail=_redact(str(exc)))
 
+    if resp.status_code in (401, 403):
+        # Distinct from a generic http_error: the endpoint IS OpenAI-shaped and
+        # is talking to us, it just rejected the key we sent. Pointing this user
+        # at base_url would send them to edit the one field that is correct.
+        return EndpointProbe("unauthorized", url, code=resp.status_code)
     if not 200 <= resp.status_code < 300:
         return EndpointProbe("http_error", url, code=resp.status_code)
     try:
@@ -247,11 +272,14 @@ def cmd_doctor(
     print(f"[{'ok' if version_ok else 'FAIL'}] python {sys.version.split()[0]} (need >= 3.11)")
     ok = ok and version_ok
 
-    from ironcore.config.settings import ConfigError, Settings
+    from ironcore.config.settings import Settings
 
     resolved_project = project_dir if project_dir is not None else Path.cwd()
-    default_user = Path.home() / ".ironcore" / "config.toml"
-    user_path = user_config if user_config is not None else default_user
+    # Path.home() only when we actually need it: it raises on a machine with no
+    # resolvable home, and doctor must still run when the path was injected.
+    user_path = (
+        user_config if user_config is not None else Path.home() / ".ironcore" / "config.toml"
+    )
     project_path = resolved_project / ".ironcore" / "config.toml"
 
     try:
@@ -260,11 +288,14 @@ def cmd_doctor(
             user_config=user_path,
             env=env,
         )
-    except ConfigError as exc:
+    except Exception as exc:  # ConfigError included: both need the same answer
+        # Not every loader error names its file -- a non-UTF8 byte surfaces as a
+        # bare codec message. "Which of my two config files do I open?" is the
+        # only question that matters here, and doctor already knows both.
         print(f"[FAIL] config: {exc}")
-        return 1
-    except Exception as exc:  # pragma: no cover — defensive
-        print(f"[FAIL] config: {exc}")
+        present = [p for p in (user_path, project_path) if p.exists()]
+        if present and not any(str(p) in str(exc) for p in present):
+            print(f"       config file(s) doctor read: {', '.join(str(p) for p in present)}")
         return 1
 
     # Name the files. "config loaded" printed when no config file existed at all
@@ -293,7 +324,13 @@ def cmd_doctor(
         print("     your code leaves this machine -- make sure that is what you want")
 
     if probe is not None or check_endpoint:
-        result = (probe or probe_endpoint)(endpoint)
+        # The real probe authenticates exactly like the client does; an injected
+        # test probe keeps the one-argument signature.
+        result = (
+            probe(endpoint)
+            if probe is not None
+            else probe_endpoint(endpoint, api_key=settings.provider.api_key)
+        )
         ok = _report_endpoint(result, settings, endpoint, user_path, project_path) and ok
 
     if envelope_dir is None:
@@ -395,17 +432,23 @@ def _report_endpoint(
     elif result.status == "unreachable":
         print(f"[--] endpoint not reachable: {result.url}")
         print("     start your local server (e.g. `ollama serve`), then re-run `ironcore doctor`")
-    elif result.status == "http_error":
+    elif result.status in ("unauthorized", "http_error"):
         # Something is listening but it is not talking OpenAI at this path. That
         # is a config error the user must fix -- same class as bad_url, NOT the
         # same as "nothing is running yet" -- so it fails the gate.
-        print(
-            f"[FAIL] got HTTP {result.code} from {result.url} "
-            "-- is this an OpenAI-compatible endpoint?"
-        )
-        if not endpoint.rstrip("/").endswith("/v1"):
-            print(f"       base_url usually ends with /v1 (yours is {endpoint})")
-        print(f"       set [provider] base_url in {where}")
+        if result.status == "unauthorized":
+            # We DID send the configured key, so base_url is not the suspect
+            # here and telling them to change it sends them the wrong way.
+            print(f"[FAIL] endpoint rejected our API key: HTTP {result.code} from {result.url}")
+            print(f"       set [provider] api_key in {where} (or the IRONCORE_API_KEY env var)")
+        else:
+            print(
+                f"[FAIL] got HTTP {result.code} from {result.url} "
+                "-- is this an OpenAI-compatible endpoint?"
+            )
+            if not endpoint.rstrip("/").endswith("/v1"):
+                print(f"       base_url usually ends with /v1 (yours is {endpoint})")
+            print(f"       set [provider] base_url in {where}")
         ok = False
     elif result.status == "bad_payload":
         print(f"[FAIL] {result.url} answered {result.code} but not with an OpenAI model list")
@@ -454,7 +497,13 @@ def _report_models(result: EndpointProbe, settings: Settings, where: str) -> boo
 
 
 def _report_mcp(settings: Settings) -> bool:
-    """MCP servers: configured, registerable, and actually launchable?"""
+    """MCP servers: configured, registerable, and actually launchable?
+
+    A missing command only fails the gate when the server would actually be
+    launched — i.e. when ``safety.network_tools`` is on. With it off, doctor has
+    just said these servers stay unregistered, so failing on one would be doctor
+    contradicting itself one line later and refusing an install that runs fine.
+    """
     servers = sorted(
         ((name, srv) for name, srv in settings.mcp.servers.items() if srv.enabled),
         key=lambda item: item[0],
@@ -462,7 +511,8 @@ def _report_mcp(settings: Settings) -> bool:
     if not servers:
         return True
     names = ", ".join(name for name, _ in servers)
-    if settings.safety.network_tools:
+    registered = settings.safety.network_tools
+    if registered:
         print(f"[ok] mcp: {len(servers)} server(s) configured ({names})")
     else:
         print(
@@ -479,8 +529,14 @@ def _report_mcp(settings: Settings) -> bool:
                 "(stdio only -- set 'command') -- will be skipped"
             )
         elif _which(srv.command) is None:
-            print(f"[FAIL] mcp {name}: command {srv.command!r} not found on PATH")
-            ok = False
+            missing = f"mcp {name}: command {srv.command!r} not found on PATH"
+            if registered:
+                print(f"[FAIL] {missing}")
+                ok = False
+            else:
+                print(f"[!!] {missing}")
+                print("     harmless today (this server is not registered); fix it before")
+                print("     turning safety.network_tools on")
     return ok
 
 
@@ -496,9 +552,11 @@ STARTER_CONFIG = """\
 #   user file:    ~/.ironcore/config.toml
 #   project file: <repo>/.ironcore/config.toml   (committable; wins over the user file)
 #   environment:  IRONCORE_BASE_URL / _MODEL / _API_KEY / _MODE / _ROLE_* (win over both)
-# Commented lines below show IronCore's actual default, so uncommenting one
-# changes nothing -- except where the comment says the setting is UNSET by
+# Commented `key = value` lines show IronCore's actual default, so uncommenting
+# one changes nothing -- except where the comment says the setting is UNSET by
 # default, which no value can express.
+# The two blocks marked EXAMPLE below are the exception: their values are made
+# up, so uncommenting those DOES change behaviour.
 
 [provider]
 # Any OpenAI-compatible server: Ollama, vLLM, llama.cpp's server, LM Studio.
@@ -515,7 +573,8 @@ mode = "manual"
 # workspace_only = true        # path jail: writes cannot escape the workspace
 # network_tools = false        # NET-risk tools are not even registered unless true
 
-# [roles]                      # optional per-role routing; unset = use provider.model
+# [roles]                      # EXAMPLE names -- optional per-role routing.
+#                              # Unset (the default) = every role uses provider.model.
 # planner = "big-model"
 # coder = "fast-model"
 # summarizer = "fast-model"
@@ -535,7 +594,8 @@ mode = "manual"
 # [plugins]
 # enabled = true               # false = never consult entry points at all
 
-# [mcp.servers.example]        # stdio transport only in v0.x
+# [mcp.servers.example]        # EXAMPLE server -- none configured by default.
+#                              # Uncommenting registers one. stdio transport only in v0.x.
 # command = "npx.cmd"          # on Windows use the real launcher name
 # args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
 # enabled = true
