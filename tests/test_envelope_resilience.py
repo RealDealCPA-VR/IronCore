@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,40 @@ def _engine(tmp_path: Path) -> TurnEngine:
 def _app(tmp_path: Path, **kwargs) -> IronCoreApp:
     engine = _engine(tmp_path)
     return IronCoreApp(engine, build_cmds(), engine.settings, **kwargs)
+
+
+#: a real Ollama id of the shape people actually paste in (an HF GGUF repo).
+LONG_MODEL = "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q4_K_M"
+
+
+def _app_with_model(tmp_path: Path, model: str) -> IronCoreApp:
+    """Same app, but the status bar renders ``model`` — the length of the model
+    name is what pushes the key hint off the end of the row."""
+    settings = Settings.model_validate(
+        {"safety": {"network_tools": False}, "provider": {"model": model}}
+    )
+    engine = TurnEngine(
+        MockProvider([CompletionResult(message=Message(role="assistant", content="hi"))]),
+        build_tools(settings, tmp_path),
+        settings,
+        CapabilityProfile(model_id=model, tool_protocols={"native": 1.0}),
+        Mode.MANUAL,
+        workspace=tmp_path,
+        snapshots=None,
+    )
+    return IronCoreApp(engine, build_cmds(), settings)
+
+
+def _status_row(app: IronCoreApp) -> str:
+    """The COMPOSITED status row — what the terminal actually shows.
+
+    Asserting on ``keys_hint()`` (the string constant) certified "always
+    visible" while measuring nothing about visibility: the bar is one CSS row
+    (``height: 1``), so an over-long line is clipped by the compositor and the
+    constant stays happily intact. This reads the pixels."""
+    bar = app.query_one(StatusBar)
+    region = app.screen._compositor.visible_widgets[bar][0]
+    return app.screen._compositor.render_strips()[region.y].text
 
 
 def _truncate(path: Path) -> None:
@@ -247,6 +282,35 @@ def test_failed_save_leaves_no_stale_staging_file(tmp_path, monkeypatch):
         OutcomeLedger(model_id="mock").save(tmp_path)
 
     assert sorted(p.name for p in tmp_path.iterdir()) == []
+
+
+def test_interrupted_save_droppings_are_swept_by_the_next_save(tmp_path):
+    """``_atomic_write_json``'s ``except OSError`` cleans up a failed write, but
+    a KeyboardInterrupt during the first-run probe — this package's whole
+    scenario — unwinds past it and strands a staging file. Every such quit used
+    to litter ``~/.ironcore/envelopes/`` permanently."""
+    target = tmp_path / f"{CapabilityProfile.slug('mock')}.json"
+    stale = tmp_path / f".{target.name}.abandoned.tmp"
+    stale.write_text("half a jso", encoding="utf-8")
+    old = time.time() - 7200
+    os.utime(stale, (old, old))
+    fresh = tmp_path / f".{target.name}.inflight.tmp"  # a CONCURRENT writer's file
+    fresh.write_text("{}", encoding="utf-8")
+
+    CapabilityProfile(model_id="mock").save(tmp_path)
+
+    assert not stale.exists(), "an abandoned staging file must be reaped"
+    assert fresh.exists(), "a live writer's staging file must survive the sweep"
+    assert json.loads(target.read_text(encoding="utf-8"))["model_id"] == "mock"
+
+
+def test_sweep_failure_never_fails_the_save(tmp_path, monkeypatch):
+    """Housekeeping is best-effort: a locked leftover must not block the write
+    it precedes (Windows holds locks a POSIX box would not)."""
+    from ironcore.envelope import profile as profile_mod
+
+    monkeypatch.setattr(profile_mod.Path, "glob", _raise_oserror)
+    assert CapabilityProfile(model_id="mock").save(tmp_path).exists()
 
 
 def test_saves_stage_under_unique_names_not_a_shared_tmp(tmp_path, monkeypatch):
@@ -481,6 +545,76 @@ def test_keybindings_are_always_visible_not_just_in_the_scrollback(tmp_path):
             assert "ctrl+c" in hint, "a stranger must always be told how to leave"
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("size", [(80, 24), (100, 24), (120, 24), (200, 40)])
+@pytest.mark.parametrize("model", ["qwen3-coder:30b", LONG_MODEL])
+@pytest.mark.parametrize("busy", [False, True])
+def test_quit_key_is_visible_in_the_rendered_row_at_every_width(tmp_path, size, model, busy):
+    """The regression the constant-based test could not see.
+
+    The hint used to be appended LAST on a left-flowing line, so at 80 columns
+    with the repo's OWN default model the row ended at '… esc stop' and
+    ``ctrl+c quit`` — the only way out of a full-screen app — was clipped. Mid
+    turn the line grew by ``working…`` and took ``esc stop`` with it."""
+    app = _app_with_model(tmp_path, model)
+
+    async def scenario():
+        async with app.run_test(size=size) as pilot:
+            await pilot.pause()
+            if busy:
+                app.query_one(StatusBar).set_running(True)
+                await pilot.pause()
+            row = _status_row(app)
+            assert "ctrl+c" in row, f"{size} {model} busy={busy}: {row!r}"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("model", ["qwen3-coder:30b", LONG_MODEL])
+def test_interrupt_key_is_visible_while_a_turn_is_running(tmp_path, model):
+    """``esc stop`` matters most exactly when the line is longest, so the busy
+    line keeps it and ellipsizes the model name instead."""
+    app = _app_with_model(tmp_path, model)
+
+    async def scenario():
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            app.query_one(StatusBar).set_running(True)
+            await pilot.pause()
+            row = _status_row(app)
+            assert "esc stop" in row and "ctrl+c" in row, row
+
+    asyncio.run(scenario())
+
+
+def test_wide_terminal_still_gets_the_full_hint_and_the_full_model(tmp_path):
+    """Degrading must be a narrow-terminal behavior only."""
+    app = _app_with_model(tmp_path, LONG_MODEL)
+
+    async def scenario():
+        async with app.run_test(size=(200, 40)) as pilot:
+            await pilot.pause()
+            row = _status_row(app)
+            assert StatusBar.keys_hint() in row, row
+            assert LONG_MODEL in row, row
+            assert "…" not in row, row
+
+    asyncio.run(scenario())
+
+
+def test_status_line_never_exceeds_the_row_it_is_given():
+    """Truncation is the bar's job, not the compositor's: anything the bar
+    hands over that is wider than the row is silently clipped from the RIGHT,
+    which is where the keys live."""
+    bar = StatusBar(mode=Mode.MANUAL, model=LONG_MODEL)
+    for busy in (False, True):
+        bar._busy = busy
+        for width in range(1, 240):
+            line = bar._fit(width)
+            assert len(line) <= width, (busy, width, line)
+            if width >= len("ctrl+c quit"):
+                assert "ctrl+c quit" in line, (busy, width, line)
 
 
 def test_help_lists_the_keybindings(tmp_path):

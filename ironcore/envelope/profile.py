@@ -15,6 +15,7 @@ import json
 import os
 import re
 import tempfile
+import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -27,6 +28,34 @@ EDIT_FORMAT_LADDER: tuple[str, ...] = ("unified_diff", "search_replace", "whole_
 EDIT_FORMAT_THRESHOLDS: dict[str, float] = {"unified_diff": 0.90, "search_replace": 0.85}
 
 
+#: a staging file older than this is nobody's live write, so it is safe to
+#: reap. Generous on purpose: a concurrent session's in-flight staging file
+#: must never be swept out from under it.
+_STAGING_STALE_SECONDS = 3600.0
+
+
+def _sweep_stale_staging(path: Path) -> None:
+    """Reap abandoned staging files for ``path``.
+
+    ``_atomic_write_json``'s own ``except OSError`` cleans up a failed write,
+    but an interruption that is not an ``OSError`` — a KeyboardInterrupt during
+    the first-run probe, which is precisely this package's scenario — unwinds
+    past it and strands a ``.<name>.xxxx.tmp``. Each such quit used to litter
+    ``~/.ironcore/envelopes/`` permanently. Best-effort: a sweep failure must
+    never fail the save it precedes."""
+    cutoff = time.time() - _STAGING_STALE_SECONDS
+    try:
+        stale = list(path.parent.glob(f".{path.name}.*.tmp"))
+    except OSError:
+        return
+    for leftover in stale:
+        try:
+            if leftover.stat().st_mtime < cutoff:
+                leftover.unlink()
+        except OSError:  # locked, or another writer got there first
+            continue
+
+
 def _atomic_write_json(path: Path, payload: dict) -> None:
     """Publish ``payload`` at ``path`` atomically: stage under a UNIQUE name in
     the target's own directory (same volume, so ``os.replace`` is atomic), fsync,
@@ -36,6 +65,7 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
     sessions probing the same model share the envelope dir with no lock, and a
     shared staging name lets writer A publish writer B's half-written bytes. A
     failed write takes its own droppings with it."""
+    _sweep_stale_staging(path)
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
