@@ -11,8 +11,11 @@ paths — the TUI (and Textual) are imported lazily inside ``main`` so none of
 them pay for it.
 
 Doctor's contract is *truth*: every line it prints is something it actually
-checked, and it exits non-zero when the setup would not work. It is meant to be
-usable as a scriptable setup gate.
+checked, and it exits non-zero when the setup is misconfigured — a bad
+``base_url``, an endpoint that is not OpenAI-compatible, a model that is not on
+the server, an MCP command that is not on PATH. A server that simply is not
+running yet exits 0: that is a thing to start, not a thing to fix. So
+``ironcore doctor && ironcore`` is a usable install gate.
 """
 
 from __future__ import annotations
@@ -43,7 +46,7 @@ BANNER = r"""
   Run `ironcore` in an interactive terminal to launch the TUI.
 
   Start here:
-    ironcore doctor    check python, config, endpoint, model, git -- exits 1 if broken
+    ironcore doctor    check python, config, endpoint, model, git -- exits 1 if misconfigured
     ironcore demo      a real IronCore session, fully offline (no model needed)
     ironcore init      write a commented starter config and print its path
 
@@ -83,7 +86,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
     sub.add_parser(
         "doctor",
-        help="check the local setup (python, config, endpoint, model, git); exit 1 if broken",
+        help="check the local setup (python, config, endpoint, model, git); "
+        "exit 1 if misconfigured",
     )
     demo = sub.add_parser(
         "demo", help="run a real IronCore session fully offline -- no model, no network"
@@ -392,15 +396,21 @@ def _report_endpoint(
         print(f"[--] endpoint not reachable: {result.url}")
         print("     start your local server (e.g. `ollama serve`), then re-run `ironcore doctor`")
     elif result.status == "http_error":
+        # Something is listening but it is not talking OpenAI at this path. That
+        # is a config error the user must fix -- same class as bad_url, NOT the
+        # same as "nothing is running yet" -- so it fails the gate.
         print(
-            f"[!!] got HTTP {result.code} from {result.url} "
+            f"[FAIL] got HTTP {result.code} from {result.url} "
             "-- is this an OpenAI-compatible endpoint?"
         )
         if not endpoint.rstrip("/").endswith("/v1"):
-            print(f"     base_url usually ends with /v1 (yours is {endpoint})")
+            print(f"       base_url usually ends with /v1 (yours is {endpoint})")
+        print(f"       set [provider] base_url in {where}")
+        ok = False
     elif result.status == "bad_payload":
-        print(f"[!!] {result.url} answered {result.code} but not with an OpenAI model list")
-        print("     point [provider] base_url at an OpenAI-compatible server")
+        print(f"[FAIL] {result.url} answered {result.code} but not with an OpenAI model list")
+        print(f"       point [provider] base_url at an OpenAI-compatible server ({where})")
+        ok = False
     else:
         print(f"[ok] endpoint reachable: {result.url} ({len(result.models)} model(s) listed)")
         ok = _report_models(result, settings, where) and ok
@@ -486,7 +496,9 @@ STARTER_CONFIG = """\
 #   user file:    ~/.ironcore/config.toml
 #   project file: <repo>/.ironcore/config.toml   (committable; wins over the user file)
 #   environment:  IRONCORE_BASE_URL / _MODEL / _API_KEY / _MODE / _ROLE_* (win over both)
-# Every commented line below shows IronCore's actual default.
+# Commented lines below show IronCore's actual default, so uncommenting one
+# changes nothing -- except where the comment says the setting is UNSET by
+# default, which no value can express.
 
 [provider]
 # Any OpenAI-compatible server: Ollama, vLLM, llama.cpp's server, LM Studio.
@@ -513,7 +525,9 @@ mode = "manual"
 # auto_probe = true            # false = never measure in the background; stay on floor defaults
 # instant_seed = true          # false = no ~1s seed from endpoint introspection at boot
 # auto_tune = true             # false = never record outcomes or downgrade a ladder rung
-# vision = false               # force image support on/off; unset = trust the profile
+# vision = true                # force image support on/off; UNSET by default =
+#                              # trust the measured profile (so setting it false
+#                              # disables vision on a model that really has it)
 
 # [engine]
 # best_of_n = 1                # 1 = off; N resamples up to N-1 extra candidates per turn
@@ -543,6 +557,12 @@ def cmd_init(
             user_config if user_config is not None else Path.home() / ".ironcore" / "config.toml"
         )
 
+    if target.is_dir():
+        # --force would not help here (the write fails with an OSError either
+        # way), so do not suggest a remedy that cannot work.
+        print(f"ironcore: {target} is a directory, not a config file")
+        print("ironcore: remove or rename it, then re-run `ironcore init`")
+        return 1
     if target.exists() and not force:
         print(f"ironcore: {target} already exists; pass --force to overwrite it")
         return 1
@@ -588,11 +608,19 @@ def cmd_demo(smoke: bool = False) -> int:
 # entry point
 # --------------------------------------------------------------------------
 
-#: Printed under any unhandled error out of the dispatch. Every path that can
+#: Printed under a config-file error out of the dispatch. Every path that can
 #: raise (a stray quote in TOML, a half-written state file) used to traceback
 #: straight out of the primary entry point.
-_ERROR_HINT = (
+_CONFIG_HINT = (
     "Fix the file or delete it to fall back to defaults; run `ironcore doctor` to re-check."
+)
+
+#: Printed under anything else. Deliberately says nothing about a file: this
+#: backstop catches errors that have no file behind them (a missing HOME, a
+#: broken terminal), and pointing those at "fix the file" is advice about a
+#: file that has nothing to do with the failure.
+_ERROR_HINT = (
+    f"Run `ironcore doctor` to check your setup; if it persists, report it at {ISSUES_URL}"
 )
 
 
@@ -621,22 +649,33 @@ def _dispatch(argv: list[str] | None) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None) -> int:
-    from ironcore.config.settings import ConfigError
+def _is_config_error(exc: BaseException) -> bool:
+    """Is this a ConfigError, without importing the module that defines it?
 
+    ``from ironcore.config.settings import ConfigError`` at the top of ``main``
+    would pull pydantic into every invocation, breaking the import-light
+    guarantee ``--version`` is built on. It is also unnecessary: a ConfigError
+    instance cannot exist unless something already imported that module, so if
+    it is absent from sys.modules the answer is simply no.
+    """
+    module = sys.modules.get("ironcore.config.settings")
+    return module is not None and isinstance(exc, module.ConfigError)
+
+
+def main(argv: list[str] | None = None) -> int:
     try:
         return _dispatch(argv)
-    except ConfigError as exc:
-        print(f"ironcore: {exc}", file=sys.stderr)
-        print(_ERROR_HINT, file=sys.stderr)
-        return 1
     except KeyboardInterrupt:  # pragma: no cover -- interactive only
         print("ironcore: interrupted", file=sys.stderr)
         return 130
     except Exception as exc:
         # Last line of defence: a stranger gets a sentence, not a traceback.
-        print(f"ironcore: {type(exc).__name__}: {exc}", file=sys.stderr)
-        print(_ERROR_HINT, file=sys.stderr)
+        if _is_config_error(exc):
+            print(f"ironcore: {exc}", file=sys.stderr)
+            print(_CONFIG_HINT, file=sys.stderr)
+        else:
+            print(f"ironcore: {type(exc).__name__}: {exc}", file=sys.stderr)
+            print(_ERROR_HINT, file=sys.stderr)
         return 1
 
 

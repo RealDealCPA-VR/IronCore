@@ -133,7 +133,7 @@ pip install ironcore        # or:  uv tool install ironcore  /  pipx install iro
 pip install git+https://github.com/RealDealCPA-VR/IronCore.git
 
 ironcore init               # write a commented starter config, and print its path
-ironcore doctor             # checks python, config, endpoint, model, git — exits 1 if broken
+ironcore doctor             # checks python, config, endpoint, model, git — exits 1 if misconfigured
 ironcore                    # launch the TUI (auto-probes your model on first run)
 ironcore --resume           # pick up a past session
 

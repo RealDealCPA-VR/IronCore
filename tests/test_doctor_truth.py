@@ -13,6 +13,8 @@ Fully offline: the endpoint probe is injected (``probe=``), never dialled.
 
 from __future__ import annotations
 
+import sys
+
 import httpx
 import pytest
 
@@ -53,15 +55,24 @@ def _ok_probe(*models: str):
 # --------------------------------------------------------------------------
 
 
-def test_http_error_is_never_reported_as_ok(tmp_path, capsys):
-    """v0.2.0 printed '[ok] endpoint reachable: ... (404)'."""
-    probe = lambda url: EndpointProbe("http_error", f"{url}/models", code=404)  # noqa: E731
-    _doctor(tmp_path, probe=probe)
+@pytest.mark.parametrize("code", [404, 500, 503])
+def test_http_error_is_never_reported_as_ok(tmp_path, capsys, code):
+    """v0.2.0 printed '[ok] endpoint reachable: ... (404)'.
+
+    The exit code matters as much as the text: the round-1 fix printed an honest
+    ``[!!]`` here but left ok untouched, so ``ironcore doctor && ironcore`` still
+    green-lit a server IronCore cannot talk to. This is the exact
+    vLLM/LM-Studio-shaped case -- /api/version answers, /v1/models 404s.
+    """
+    probe = lambda url: EndpointProbe("http_error", f"{url}/models", code=code)  # noqa: E731
+    rc = _doctor(tmp_path, probe=probe)
     out = capsys.readouterr().out
 
+    assert rc == 1  # a server that answers but is not OpenAI-compatible is broken config
     assert "[ok] endpoint reachable" not in out
-    assert "got HTTP 404" in out
+    assert f"got HTTP {code}" in out
     assert "OpenAI-compatible" in out
+    assert "[FAIL]" in out  # not a survivable warning
 
 
 def _fake_httpx_get(monkeypatch, handler):
@@ -164,11 +175,26 @@ def test_unreachable_names_the_fix_and_is_not_a_failure(tmp_path, capsys):
 
 
 def test_success_with_an_unusable_body_is_flagged(tmp_path, capsys):
+    """200 from something that is not a model server is misconfiguration, so it
+    must fail the gate too -- round 1 printed the truth but still exited 0."""
     probe = lambda url: EndpointProbe("bad_payload", url, code=200)  # noqa: E731
-    _doctor(tmp_path, probe=probe)
+    rc = _doctor(tmp_path, probe=probe)
     out = capsys.readouterr().out
+
+    assert rc == 1
     assert "not with an OpenAI model list" in out
     assert "[ok] endpoint reachable" not in out
+    assert "[FAIL]" in out
+
+
+def test_only_a_stopped_server_survives_the_gate(tmp_path, capsys):
+    """The one endpoint status that must NOT fail: nothing is listening yet.
+    Pins the boundary so a future 'make doctor stricter' cannot blur it."""
+    failing = ("bad_url", "http_error", "bad_payload")
+    for status in failing:
+        assert _doctor(tmp_path, probe=lambda url, s=status: EndpointProbe(s, url, code=500)) == 1
+    assert _doctor(tmp_path, probe=lambda url: EndpointProbe("unreachable", url)) == 0
+    capsys.readouterr()
 
 
 # --------------------------------------------------------------------------
@@ -363,6 +389,55 @@ def test_main_backstops_any_unexpected_exception(monkeypatch, capsys):
     assert "Traceback" not in err
 
 
+def test_a_non_file_error_is_not_given_file_advice(monkeypatch, capsys):
+    """The backstop catches errors with no file behind them (a missing HOME, a
+    broken terminal). Telling those users to 'fix the file or delete it' is
+    advice about a file that has nothing to do with the failure."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    def _boom(**kwargs):
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr("ironcore.tui.app.run_app", _boom)
+
+    assert main([]) == 1
+    err = capsys.readouterr().err
+    assert "Could not determine home directory" in err
+    assert "delete it to fall back to defaults" not in err
+    assert "ironcore doctor" in err  # still tells them what to do next
+
+
+def test_version_stays_import_light(monkeypatch, capsys):
+    """`ironcore --version` must not pay for pydantic. main()'s guard used to
+    import ConfigError unconditionally, which pulled the whole settings module
+    into every invocation -- contradicting the invariant stated in cli.py."""
+    import subprocess
+
+    probe = (
+        "import sys; from ironcore.cli import main; main(['--version']);"
+        " sys.exit(1 if 'pydantic' in sys.modules else 0)"
+    )
+    assert subprocess.run([sys.executable, "-c", probe], capture_output=True).returncode == 0
+
+
+def test_config_errors_are_still_recognised_through_the_lazy_guard(monkeypatch, capsys):
+    """The import-light guard identifies ConfigError via sys.modules rather than
+    importing it; make sure that still classifies a real one correctly (file
+    advice, and no 'ConfigError:' type prefix)."""
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+
+    def _boom(**kwargs):
+        raise ConfigError("malformed config file: bad (at line 3)")
+
+    monkeypatch.setattr("ironcore.tui.app.run_app", _boom)
+
+    assert main([]) == 1
+    err = capsys.readouterr().err
+    assert "ironcore: malformed config file" in err
+    assert "ConfigError" not in err  # the message, not the exception type
+    assert "delete it to fall back to defaults" in err
+
+
 def test_argparse_errors_still_exit_via_systemexit():
     with pytest.raises(SystemExit):
         main(["--nonsense"])
@@ -413,6 +488,67 @@ def test_init_refuses_to_clobber_without_force(tmp_path, capsys):
 
     assert cmd_init(scope="user", user_config=target, force=True) == 0
     assert "mine" not in target.read_text(encoding="utf-8")
+
+
+def test_starter_config_commented_defaults_are_really_the_defaults():
+    """The file promises a commented line shows the actual default, so
+    uncommenting it changes nothing. It said `# vision = false`, which is NOT
+    the default (unset = trust the probed profile), so uncommenting it would
+    silently disable vision on a model that measured as having it.
+
+    Checks every documented default against the live Settings model, so a future
+    default change that forgets this file fails here.
+    """
+    import re
+    import tomllib
+
+    from ironcore.cli import STARTER_CONFIG
+
+    defaults = Settings()
+    section: str | None = None
+    checked = 0
+    for line in STARTER_CONFIG.splitlines():
+        header = re.match(r"^#?\s*\[([a-z.]+)\]", line)
+        if header:
+            section = header.group(1)
+            continue
+        entry = re.match(r"^#\s*([a-z_]+)\s*=\s*(.+?)(?:\s+#.*)?$", line)
+        # roles.* and mcp.servers.* are examples, not defaults; UNSET keys have
+        # no value that could express their default.
+        if not entry or section in (None, "roles") or "UNSET by default" in line:
+            continue
+        if section.startswith("mcp"):
+            continue
+        key, raw = entry.group(1), entry.group(2)
+        documented = tomllib.loads(f"v = {raw}")["v"]
+        assert documented == getattr(getattr(defaults, section), key), (
+            f"STARTER_CONFIG documents [{section}] {key} = {raw}, "
+            f"but the default is {getattr(getattr(defaults, section), key)!r}"
+        )
+        checked += 1
+    assert checked >= 8, f"parsed only {checked} documented defaults -- the parser drifted"
+
+
+def test_starter_config_does_not_claim_a_default_for_vision(tmp_path):
+    from ironcore.cli import STARTER_CONFIG
+
+    assert "# vision = false" not in STARTER_CONFIG
+    assert "UNSET by default" in STARTER_CONFIG
+
+
+def test_init_on_a_directory_does_not_suggest_a_remedy_that_cannot_work(tmp_path, capsys):
+    """--force would just hit the OSError branch, so do not offer it."""
+    target = tmp_path / "config.toml"
+    target.mkdir()
+
+    assert cmd_init(scope="user", user_config=target) == 1
+    out = capsys.readouterr().out
+    assert "is a directory" in out
+    assert "--force" not in out
+    assert "remove or rename it" in out
+
+    assert cmd_init(scope="user", user_config=target, force=True) == 1  # still no crash
+    assert "is a directory" in capsys.readouterr().out
 
 
 def test_doctor_sees_the_config_init_just_wrote(tmp_path, capsys):
