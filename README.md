@@ -156,7 +156,9 @@ ironcore init
 
 That writes `~/.ironcore/config.toml` — every section, every real default and every off-switch
 already commented in — and prints the path. (`ironcore init --project` writes a committable
-`./.ironcore/config.toml` instead; `--force` overwrites an existing file.) You do not strictly
+`./.ironcore/config.toml` instead; `--force` overwrites an existing file, saving what was there
+to `config.toml.bak` first — so re-running `init` to start clean cannot lose the `model =` line
+you are about to edit in step 2.) You do not strictly
 need a config file — every key has a default — but starting from the annotated one is easier
 than starting from this README.
 

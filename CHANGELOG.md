@@ -3,6 +3,20 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **`ironcore init --force` no longer silently eats a hand-edited config.** It
+  now copies the existing file to a sibling `config.toml.bak` before writing the
+  template over it, and says on stdout where the backup went. A file that is
+  unchanged from the template is not backed up (nothing to lose, no litter), and
+  if the backup cannot be written — unwritable directory, a directory sitting on
+  the `.bak` path — the overwrite is **refused** rather than performed, because
+  losing the original is the exact failure being prevented. One `.bak` slot,
+  overwritten each time: it always means "the config as it was before the last
+  `--force`". Found by a newcomer who lost their `model =` edit re-running `init`
+  to start clean, then could not explain why `doctor` had regressed.
+
 ## [0.2.0] — 2026-07-17
 
 The moonshots release: every bet in the README's Moonshots section has landed —

@@ -630,6 +630,61 @@ mode = "manual"
 """
 
 
+def _backup_before_overwrite(target: Path) -> int:
+    """Preserve ``target``'s current bytes beside it before ``--force`` writes over them.
+
+    Returns 0 when the overwrite may proceed (a backup was taken, or there was
+    nothing to lose). Non-zero means REFUSE: a backup that could not be written
+    is not a licence to destroy the original anyway -- silently losing a
+    hand-typed `model =` line is the exact failure this exists to prevent.
+    """
+    try:
+        current = target.read_bytes()
+    except OSError as exc:
+        print(f"ironcore: could not read {_display_path(target)} to back it up: {exc}")
+        print("ironcore: refusing to overwrite a file whose contents cannot be preserved")
+        return 1
+
+    # Unchanged since init wrote it: nothing is at risk, so do not litter the
+    # directory with a .bak that only duplicates the template.
+    #
+    # Compared as decoded text with newlines normalised, NOT as raw bytes: on
+    # Windows `write_text` translates \n -> \r\n, so init's own output never
+    # equals STARTER_CONFIG byte for byte there. A byte compare would therefore
+    # always miss, and the .bak policy below leans on this check to guarantee a
+    # real backup is never replaced by a copy of the template. Bytes that are
+    # not valid UTF-8 are, by definition, not the template -- back them up.
+    try:
+        unchanged = current.decode("utf-8").replace("\r\n", "\n") == STARTER_CONFIG
+    except UnicodeDecodeError:
+        unchanged = False
+    if unchanged:
+        return 0
+
+    backup = target.with_name(target.name + ".bak")
+    # Policy: ONE backup path, overwritten each time -- not config.toml.bak.1,
+    # .bak.2, ... A numbered chain leaves a pile nobody can tell apart, whereas
+    # this single path always means "the config as it was before the last
+    # --force". Overwriting is safe *because* of the identical-content check
+    # above: a second `init --force` finds the template already in place and
+    # returns before reaching here, so a real backup can never be replaced by a
+    # copy of the template. The only way to lose a .bak is edit-force-edit-force,
+    # where the newer edit is the one worth keeping.
+    if backup.is_dir():
+        print(f"ironcore: {_display_path(backup)} is a directory, not a backup file")
+        print("ironcore: remove or rename it, then re-run `ironcore init --force`")
+        print(f"ironcore: leaving {_display_path(target)} untouched")
+        return 1
+    try:
+        backup.write_bytes(current)
+    except OSError as exc:
+        print(f"ironcore: could not write the backup {_display_path(backup)}: {exc}")
+        print(f"ironcore: leaving {_display_path(target)} untouched")
+        return 1
+    print(f"backed up the config that was there to {_display_path(backup)}")
+    return 0
+
+
 def cmd_init(
     scope: str = "user",
     project_dir: Path | None = None,
@@ -654,6 +709,13 @@ def cmd_init(
     if target.exists() and not force:
         print(f"ironcore: {target} already exists; pass --force to overwrite it")
         return 1
+    # --force is the only path that can destroy something a user typed by hand,
+    # so the old contents are preserved first -- and if they cannot be, the
+    # overwrite does not happen at all.
+    if target.exists() and force:
+        backup_code = _backup_before_overwrite(target)
+        if backup_code != 0:
+            return backup_code
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(STARTER_CONFIG, encoding="utf-8")

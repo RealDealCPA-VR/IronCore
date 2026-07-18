@@ -15,7 +15,9 @@ built-in defaults  ←  ~/.ironcore/config.toml  ←  <workspace>/.ironcore/conf
 
 - **You need no config file at all.** Every key below has a default; `ironcore` boots without
   one. `ironcore init` writes a fully commented starter file (`ironcore init --project` for
-  the project layer; `--force` overwrites), and `ironcore doctor` prints which files it
+  the project layer; `--force` overwrites, first copying the existing file to a sibling
+  `config.toml.bak` unless it is unchanged from the template — and refusing the overwrite
+  outright if that backup cannot be written), and `ironcore doctor` prints which files it
   actually loaded.
 - The **project layer is committable** — it arrives with a `git clone`, so it is the only
   untrusted layer. It may *lower* autonomy freely and may never raise it (§6).

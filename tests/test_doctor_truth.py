@@ -721,6 +721,91 @@ def test_init_refuses_to_clobber_without_force(tmp_path, capsys):
     assert "mine" not in target.read_text(encoding="utf-8")
 
 
+def test_init_force_backs_up_the_config_it_overwrites(tmp_path, capsys):
+    """--force used to eat hand-edited configs silently -- a newcomer who re-ran
+    init to 'start clean' lost the `model =` line from step 2 and could not
+    explain why doctor regressed. The old bytes must survive, and the user must
+    be told where they went."""
+    target = tmp_path / "config.toml"
+    original = "[provider]\nmodel = 'the-model-i-actually-pulled'\n"
+    target.write_text(original, encoding="utf-8")
+
+    assert cmd_init(scope="user", user_config=target, force=True) == 0
+
+    backup = tmp_path / "config.toml.bak"
+    assert backup.read_text(encoding="utf-8") == original  # the ORIGINAL bytes
+    from ironcore.cli import STARTER_CONFIG
+
+    assert target.read_text(encoding="utf-8") == STARTER_CONFIG
+    out = capsys.readouterr().out
+    assert "backed up" in out
+    assert "config.toml.bak" in out
+
+
+def test_init_force_backup_path_prints_as_tilde(tmp_path, capsys, monkeypatch):
+    """The backup line is user-facing output like every other path we print."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    target = tmp_path / ".ironcore" / "config.toml"
+    target.parent.mkdir()
+    target.write_text("[provider]\nmodel = 'mine'\n", encoding="utf-8")
+
+    assert cmd_init(scope="user", user_config=target, force=True) == 0
+    out = capsys.readouterr().out
+    assert f"~{os.sep}.ironcore{os.sep}config.toml.bak" in out
+
+
+def test_init_force_writes_no_bak_when_there_is_nothing_to_lose(tmp_path, capsys):
+    """Byte-identical to the template = no work at risk. Do not litter a .bak
+    that only duplicates what init is about to write."""
+    from ironcore.cli import STARTER_CONFIG
+
+    target = tmp_path / "config.toml"
+    target.write_text(STARTER_CONFIG, encoding="utf-8")
+
+    assert cmd_init(scope="user", user_config=target, force=True) == 0
+    assert not (tmp_path / "config.toml.bak").exists()
+    assert "backed up" not in capsys.readouterr().out
+
+
+def test_init_force_refuses_rather_than_destroying_what_it_cannot_back_up(tmp_path, capsys):
+    """The whole point: if the backup cannot be written, the overwrite must not
+    happen. A directory sitting on the .bak path is the cheap way to force that
+    failure without depending on filesystem permissions (Windows-safe)."""
+    target = tmp_path / "config.toml"
+    original = "[provider]\nmodel = 'precious'\n"
+    target.write_text(original, encoding="utf-8")
+    (tmp_path / "config.toml.bak").mkdir()
+
+    assert cmd_init(scope="user", user_config=target, force=True) == 1
+    assert target.read_text(encoding="utf-8") == original  # NOT destroyed
+    out = capsys.readouterr().out
+    assert "is a directory" in out
+    assert "untouched" in out
+    assert "Traceback" not in out
+
+
+def test_init_force_bak_holds_the_newest_edit_not_the_template(tmp_path, capsys):
+    """Documented policy: one .bak, overwritten. Re-running --force on the
+    template returns before the backup step, so the second run cannot replace a
+    real backup with a copy of the template."""
+    target = tmp_path / "config.toml"
+    backup = tmp_path / "config.toml.bak"
+
+    target.write_text("[provider]\nmodel = 'first-edit'\n", encoding="utf-8")
+    assert cmd_init(scope="user", user_config=target, force=True) == 0
+    assert "first-edit" in backup.read_text(encoding="utf-8")
+
+    # Idempotent re-run: file is now the template, so the real backup survives.
+    assert cmd_init(scope="user", user_config=target, force=True) == 0
+    assert "first-edit" in backup.read_text(encoding="utf-8")
+
+    # A second genuine edit wins the slot -- the newer work is the one at risk.
+    target.write_text("[provider]\nmodel = 'second-edit'\n", encoding="utf-8")
+    assert cmd_init(scope="user", user_config=target, force=True) == 0
+    assert "second-edit" in backup.read_text(encoding="utf-8")
+    capsys.readouterr()
+
+
 def test_starter_config_commented_defaults_are_really_the_defaults():
     """The file promises a commented line shows the actual default, so
     uncommenting it changes nothing. It said `# vision = false`, which is NOT
