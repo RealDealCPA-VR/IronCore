@@ -3,7 +3,16 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.1] — 2026-07-18
+
+The fit-for-strangers release. 0.2.0 shipped the features; a six-lens release audit
+then found that the seam a newcomer actually touches was the weak part — `doctor`
+reported all-green against a server that could not serve a token, the offline demo
+never reached an installed environment, an interrupted first-run probe could brick
+the next boot, and `docs/SAFETY.md` documented a project-config autonomy ceiling the
+code did not implement. All of that is fixed and regression-tested here. The app also
+got a real visual design: one palette, colour used semantically and only semantically,
+and nine screenshots in the README that show what you actually get.
 
 ### Added
 - **Slash commands can return styled text, so the report card reads its own
@@ -322,10 +331,12 @@ probes, and proof-tested end-to-end against real files, subprocesses, and git.
 - `ironcore demo` — a fully offline narrated walkthrough of a real session.
 
 <!--
-Release links are only added once the tag actually exists. 0.1.0 was never tagged and is
-not being tagged retroactively, so it has no link on purpose — a link that 404s is worse
-than no link. Pushing a `v*` tag runs .github/workflows/release.yml, which creates the
-GitHub Release (sdist + wheel attached) using the matching section above as its notes.
+Release links are only added once the tag actually exists. 0.1.0 and 0.2.0 were never
+tagged and are not being tagged retroactively, so they have no link on purpose — a link
+that 404s is worse than no link. Their sections stay as the record of what landed when;
+v0.2.1 is the first tag, and it ships everything in all three. Pushing a `v*` tag runs
+.github/workflows/release.yml, which creates the GitHub Release (sdist + wheel attached)
+using the matching section above as its notes.
 -->
 
-[0.2.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.0
+[0.2.1]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.1
