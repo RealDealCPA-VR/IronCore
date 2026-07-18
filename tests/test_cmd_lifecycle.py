@@ -22,15 +22,8 @@ _GIT_FLAGS = [
 ]
 
 
-def _has_git() -> bool:
-    try:
-        subprocess.run(["git", "--version"], capture_output=True)
-        return True
-    except OSError:
-        return False
-
-
-requires_git = pytest.mark.skipif(not _has_git(), reason="git required for snapshot commands")
+# git detection lives in tests/conftest.py so one rule covers the whole suite
+requires_git = pytest.mark.requires_git
 
 
 def _git(ws: Path, *args: str) -> None:

@@ -117,7 +117,10 @@ def test_dead_endpoint_degrades_to_floor_without_crashing(tmp_path, monkeypatch)
 # --- /envelope + /probe through the registry -------------------------------
 
 
-def test_envelope_command_renders_the_profile(tmp_path):
+def test_envelope_command_renders_the_profile(tmp_path, monkeypatch):
+    # /probe below really runs, so pin the cache dir like the two tests above:
+    # without this the probe wrote ~/.ironcore/envelopes/mock.json for real
+    monkeypatch.setattr("ironcore.envelope.suite.default_envelope_dir", lambda: tmp_path / "env")
     engine = _engine(tmp_path, MockProvider([]), _profile(tool_protocols={"native": 1.0}))
     registry = build_cmds()
     captured: list = []

@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import subprocess
 
+import pytest
+
 from ironcore.commands import build_default_registry as build_cmds
 from ironcore.commands.base import CommandContext
 from ironcore.config.settings import Settings
@@ -211,6 +213,7 @@ def test_memory_add_appends_to_the_user_section(tmp_path):
     assert "remember the staging URL" in md
 
 
+@pytest.mark.requires_git
 def test_undo_restores_a_real_git_edit(tmp_path):
     def git(*args):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)

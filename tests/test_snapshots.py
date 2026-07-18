@@ -106,12 +106,16 @@ def roundtrip(ws: Path) -> SnapshotStore:
     return store
 
 
+@pytest.mark.requires_git
 def test_user_git_roundtrip(tmp_path):
     ws = make_user_ws(tmp_path)
     store = roundtrip(ws)
     assert store.backend == "user-git"
 
 
+# "non-git" means the WORKSPACE is not a repo — the private shadow backend is
+# still a bare repo driven by the git binary, so this needs git just as much.
+@pytest.mark.requires_git
 def test_non_git_roundtrip(tmp_path):
     ws = make_plain_ws(tmp_path)
     store = roundtrip(ws)
@@ -120,6 +124,7 @@ def test_non_git_roundtrip(tmp_path):
     assert (ws / ".ironcore" / "snapshots" / "git" / "HEAD").exists()
 
 
+@pytest.mark.requires_git
 def test_snapshot_transparent_to_user_repo(tmp_path):
     ws = make_user_ws(tmp_path)
     # a live session dir already exists (audit writes there), so `?? .ironcore/`
@@ -150,6 +155,7 @@ def test_snapshot_transparent_to_user_repo(tmp_path):
     assert probe() == before
 
 
+@pytest.mark.requires_git
 def test_multi_step_undo_redo_chain(tmp_path):
     ws = make_plain_ws(tmp_path)
     store = SnapshotStore(ws)
@@ -169,6 +175,7 @@ def test_multi_step_undo_redo_chain(tmp_path):
     assert [label for _, label in store.list_snapshots()] == ["v1", "v2", "v3"]
 
 
+@pytest.mark.requires_git
 def test_undo_banks_dirty_state_for_redo(tmp_path):
     ws = make_plain_ws(tmp_path)
     store = SnapshotStore(ws)
@@ -184,6 +191,7 @@ def test_undo_banks_dirty_state_for_redo(tmp_path):
     assert entries[1][0] == rid  # the automatic pre-undo snapshot
 
 
+@pytest.mark.requires_git
 def test_empty_store_has_nothing_to_undo(tmp_path):
     ws = make_plain_ws(tmp_path)
     store = SnapshotStore(ws)
@@ -193,6 +201,7 @@ def test_empty_store_has_nothing_to_undo(tmp_path):
     assert not (ws / ".ironcore").exists()  # no-ops leave no droppings
 
 
+@pytest.mark.requires_git
 def test_redo_refuses_after_new_changes(tmp_path):
     ws = make_plain_ws(tmp_path)
     store = SnapshotStore(ws)

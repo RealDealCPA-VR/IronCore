@@ -3,6 +3,8 @@
 import tomllib
 from pathlib import Path
 
+import pytest
+
 import ironcore
 from ironcore.cli import build_parser, cmd_doctor, main
 
@@ -150,6 +152,7 @@ def test_doctor_mcp_ok_when_network_tools_on(tmp_path, capsys, monkeypatch):
     assert "[ok] mcp: 1 server(s) configured (gh)" in out  # disabled entries not counted
 
 
+@pytest.mark.requires_git
 def test_doctor_no_warning_for_localhost_or_network_tools_off(tmp_path, capsys):
     # localhost endpoint + network_tools on -> no warning
     user = tmp_path / "user.toml"

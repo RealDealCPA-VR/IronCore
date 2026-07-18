@@ -245,6 +245,7 @@ def _init_user_repo(workspace: Path) -> None:
     _git(workspace, "commit", "-m", "initial")
 
 
+@pytest.mark.requires_git
 @pytest.mark.parametrize("user_git", [True, False])
 def test_snapshot_undo_redo_is_byte_exact(tmp_path, user_git):
     workspace = tmp_path / "proj"
@@ -284,6 +285,7 @@ def test_snapshot_undo_redo_is_byte_exact(tmp_path, user_git):
     assert not (workspace / "delete_me.txt").exists()
 
 
+@pytest.mark.requires_git
 def test_snapshot_is_transparent_to_the_users_git_state(tmp_path):
     workspace = tmp_path / "proj"
     _init_user_repo(workspace)
