@@ -8,11 +8,15 @@
 
 [![CI](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml/badge.svg)](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen.svg)](CHANGELOG.md)
-[![Tests: 1546](https://img.shields.io/badge/tests-1546%20offline-brightgreen.svg)](#built--proven)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE)
+[![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
+[![Tests: 1772](https://img.shields.io/badge/tests-1772%20offline-brightgreen.svg)](#built--proven)
 
 </div>
+
+![A two-turn IronCore session in MANUAL mode: the agent runs list_dir, read_file and grep — each shown as a tool card with its name, a [read] risk chip, a done state and a result line — then explains in plain English that fib() is an unfinished stub returning 0. The status bar reads MANUAL, qwen3-coder:30b, turn 2, 4.2k tok.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/01-session-tool-cards.png)
+
+*Every tool call is named, risk-classified and gated on screen — nothing happens invisibly.*
 
 ---
 
@@ -26,6 +30,9 @@ knowing when to stop — moves into deterministic code. What's left for the mode
 thing it's genuinely good at: local reasoning over a well-framed context. The result is a
 terminal agent that squeezes frontier-*shaped* behavior out of the intelligence you actually
 have, on hardware you actually own — no API keys, no data leaving the box.
+
+Runs on Linux, macOS and Windows (Python 3.11+). CI exercises Ubuntu and Windows on 3.11 and
+3.13, plus macOS on 3.13.
 
 ## It measures your model, then adapts to it
 
@@ -61,6 +68,11 @@ The middle rung is real: a model routed to **strict JSON** is driven with server
 its output is *constrained* to a well-formed `{"tool", "args"}` object — guaranteed-parseable
 tool calls, not best-effort — with a `done` action so a constrained model can still finish.
 
+![The /envelope report card for qwen3-coder:30b: source measured, honest context 49,152 against an advertised 262,144, 3.6 chars per token, a tool-protocol ladder choosing native at 0.98, an edit-format ladder rejecting unified_diff at 0.71 and choosing search_replace at 0.93, plus JSON adherence, retention, coherence and a usable verdict.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/03-envelope-report-card.png)
+
+*`/envelope` — the measurement, not a guess. This model advertises 262k of context; it honestly
+retrieves at 49k, and it cannot be trusted with unified diffs, so IronCore stopped using them.*
+
 A capable 30B gets native tool calls and unified diffs. A scrappy 7B gets the IRONCALL text
 protocol, whole-file edits, and an anchor every other turn — and *still finishes the task*.
 Run `/envelope` to see the report card; run `/probe` anytime to re-measure. **You point; it
@@ -68,6 +80,164 @@ molds.**
 
 > Because the harness owns all state, every model call is nearly stateless: the model never has
 > to *remember* — IronCore **re-presents**. Small models drift; IronCore doesn't let them.
+
+---
+
+# Getting started
+
+From nothing to a working first turn. If you have no model server yet, skip to
+[Try it with no model at all](#try-it-with-no-model-at-all) — that path works right now.
+
+## Prerequisites
+
+- **Python 3.11 or newer.**
+- **A local OpenAI-compatible model server.** [Ollama](https://ollama.com) is the smoothest
+  path — it keeps your model resident between turns, so there are no reload stalls. vLLM,
+  llama.cpp's server and LM Studio all work too.
+- **git on your PATH** — a *soft* dependency. Without it IronCore runs fine, but change-set
+  snapshots are disabled, so `/undo` and `/redo` do nothing. `ironcore doctor` tells you
+  which case you are in.
+
+With Ollama, a complete cold start looks like this:
+
+```bash
+ollama serve                      # start the server (a background service on some installs)
+ollama pull qwen2.5-coder:7b      # ~4.7GB — a model most machines can actually run
+```
+
+IronCore's shipped default model is `qwen3-coder:30b`, which is roughly 18GB. If you have the
+hardware, pull that instead. If you don't, pull something smaller and point IronCore at it —
+the next section shows how, and `ironcore doctor` will name the models you actually have.
+
+## Install
+
+PyPI publishing is not live yet, so install from the repository:
+
+```bash
+pip install git+https://github.com/RealDealCPA-VR/IronCore.git
+```
+
+Once a release is tagged you can also install the attached wheel directly:
+
+```bash
+uv tool install https://github.com/RealDealCPA-VR/IronCore/releases/download/v0.2.0/ironcore-0.2.0-py3-none-any.whl
+```
+
+`pip install ironcore` from PyPI is **not** available yet — treat any instruction that says
+otherwise as premature.
+
+## Try it with no model at all
+
+```bash
+ironcore demo
+```
+
+This runs a **real IronCore session, fully offline** — no server, no model, no network. The
+engine, the safety gate, the patcher and the verification loop are the shipping ones; only the
+model's replies are scripted. You watch it read a file, propose an edit as a real diff, pass
+through a gate decision, apply the patch and then *verify* the result before calling itself
+done. It is the fastest way to see whether this tool is for you.
+
+`ironcore demo --smoke` collapses the same run into one PASS/FAIL line — that is the form for
+CI.
+
+## Set it up
+
+```bash
+ironcore init      # write a commented starter config, and print its path
+ironcore doctor    # check python, config, endpoint, model, git
+ironcore           # launch the TUI
+```
+
+`ironcore init` writes `~/.ironcore/config.toml` with every section, every real default and
+every off-switch already commented in. (`ironcore init --project` writes a committable
+`./.ironcore/config.toml` instead; `--force` overwrites an existing file.) You do not strictly
+need a config file — every key has a default — but starting from the annotated one is easier
+than starting from this README.
+
+**`ironcore doctor` is the gate.** It exits 1 when something is genuinely misconfigured — an
+unusable `base_url`, an endpoint that isn't OpenAI-compatible, a configured model the server
+doesn't have, an MCP command that isn't on PATH — which makes `ironcore doctor && ironcore` an
+honest one-liner. A server you simply haven't started yet exits **0**: that is a thing to
+start, not a thing to fix.
+
+![Real ironcore doctor output on a fresh machine: python 3.11.13 ok; no config file, using defaults, with a pointer to ironcore init; effective model and mode; endpoint not reachable with the next step 'start your local server (e.g. ollama serve), then re-run' and the fallback 'no model ready yet? ironcore demo runs a real session fully offline'; envelope cache writable; git found; model unprobed; no plugins loaded.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/07-doctor.png)
+
+*What a stranger actually sees first. Every `[--]` and `[FAIL]` line carries the next step, and
+[`docs/TROUBLESHOOTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/TROUBLESHOOTING.md)
+is keyed line-by-line to this output.*
+
+The minimum config that gets you running against a different model or endpoint:
+
+```toml
+# ~/.ironcore/config.toml
+[provider]
+base_url = "http://localhost:11434/v1"
+model    = "qwen2.5-coder:7b"     # must already exist on that server
+api_key  = "ironcore-local"       # local servers ignore this; hosted ones reject you without it
+
+[safety]
+mode = "manual"                   # plan | manual | accept-edits | auto
+```
+
+Or skip the file entirely for a one-off:
+
+```bash
+IRONCORE_MODEL=qwen2.5-coder:7b ironcore
+```
+
+## Your first session
+
+Launch `ironcore` from the directory you want to work in — that directory is the workspace, and
+the write jail is drawn around it. Then just type what you want.
+
+**Reading the transcript.** Each tool call renders as a card: the tool's name, a risk chip
+(`[read]`, `[write]`, `[shell]`, `[net]`), its state (`awaiting approval` → `done`), the
+arguments it was called with, and a result line. There is no other path to a tool — if it
+happened, there is a card for it, and the gate decided about it first.
+
+**Approving a change.** In the default MANUAL mode, anything that writes stops at the gate and
+shows you the exact edit before it lands:
+
+![The approval modal over a colored search/replace diff: 'Approval required — WRITE', edit_file fib.py [search_replace], the removed lines in red and the added lines in green, and three labeled buttons — Deny (n), Approve (y), and Approve all writes (a). The tool card behind the modal reads 'awaiting approval'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/02-approval-diff.png)
+
+*The keys are on the buttons: `y` approves this one, `n` denies it, `a` approves writes for the
+rest of the session. You are approving a specific diff, not a vague intention.*
+
+**The keys you need**, always visible in the status bar:
+
+| Key | What it does |
+|---|---|
+| **Shift+Tab** | cycle the safety mode (plan → manual → accept-edits → auto) |
+| **Esc** | interrupt the running turn |
+| **Ctrl+C** | quit |
+| **/** | open the slash-command palette |
+
+`/help` lists every command and ends with the same key reference.
+
+### What to expect on the very first run
+
+Launching on a model IronCore has never measured kicks off the probe battery: roughly **80
+short calls**, typically **1–3 minutes** on a local model. Your turns keep working the whole
+time — the session starts on an instantly-seeded profile and hot-swaps the refined one in when
+it's ready. Turn it off with `auto_probe = false` under `[envelope]` if you'd rather not spend
+the tokens.
+
+Interrupting mid-probe is safe. The cache under `~/.ironcore/envelopes/` is written atomically
+and heals itself: a profile that got truncated, emptied or corrupted is quarantined to
+`<model>.json.corrupt`, reported by name in a boot note, and simply re-measured. You never have
+to clean it up by hand.
+
+### When something goes wrong
+
+Run `ironcore doctor` first — it also prints any setting that was clamped, so "my config didn't
+take effect" has a visible cause. Then see
+[`docs/TROUBLESHOOTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/TROUBLESHOOTING.md),
+which is organized by the exact line doctor printed.
+
+---
+
+# Day-to-day reference
 
 ## Safety, baked in — not bolted on
 
@@ -80,6 +250,11 @@ Four operating modes, cycled live with **Shift+Tab**:
 | ✏️ **Accept Edits** | ✅ | ✅ | ask | ask |
 | 🚀 **Auto** | ✅ | ✅ | ✅ sandboxed | ask |
 
+![Shift+Tab cycled through the whole safety loop, printing each mode's contract into the transcript: accept-edits applies file edits automatically while commands still ask; auto is full auto inside the workspace sandbox with network still asking; plan is read-only, explore and propose, nothing changed; manual approves every file edit, command and network call. The status chip reads MANUAL.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/05-safety-modes.png)
+
+*Each mode announces its own contract as you cycle into it, so you always know what you just
+authorized.*
+
 - **No tool executes without a policy decision** — there is no other path to a tool, and the
   engine literally can't construct one.
 - **Network is never auto-allowed**, even in Auto. Plan mode *cannot* mutate — the gate denies
@@ -90,14 +265,15 @@ Four operating modes, cycled live with **Shift+Tab**:
 - Byte-exact **git-snapshot undo** for every change set, and an "is-it-really-done?"
   **verification loop** — IronCore refuses to report unverified work as done.
 
-## The interactive terminal app
+Full threat model and the honest limits:
+[`docs/SAFETY.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SAFETY.md).
+
+## Commands
 
 A streaming **Textual** UI, and a thin client over the engine's event stream — the engine
-itself never prints or prompts.
+itself never prints or prompts. Type `/` to open the palette:
 
-- Live **streaming transcript** with tool cards (name · risk chip · gate decision · result).
-- An **approval modal** with a colored **diff viewer** — see the exact edit before it lands.
-- A **slash-command palette** with completion, and **resumable sessions** (`--resume`).
+![The slash-command palette open over a live session, listing the registered commands with a one-line summary each; Tab completes the top match.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/04-command-palette.png)
 
 | Command | What it does |
 |---|---|
@@ -107,45 +283,53 @@ itself never prints or prompts.
 | `/model` · `/init` | List models / live-swap the running session to another model (envelope-cache aware) · scan the repo into `IRONCORE.md` project memory |
 | `/loop [5m] <prompt>` | Run a prompt on an interval, or let the agent self-pace |
 | `/undo` · `/redo` · `/compact` · `/review` · `/memory` | Snapshot undo · history compaction · diff review · project memory |
+| `/mode` · `/help` · `/version` | Set or cycle the operating mode · list commands and keys · print the version |
 
-## Works with what you run
+Sessions are recorded and resumable: `ironcore --resume` opens a picker of past sessions, and
+`ironcore --resume <id>` jumps straight to one.
 
-Built for **Ollama** first — it keeps your model resident between turns (`keep_alive`, no
-reload stalls). One OpenAI-compatible client also covers **vLLM, llama.cpp server, LM Studio,
-OpenRouter, Together, and Groq**. Configure it in one TOML file:
+## Configuration
 
-```toml
-# ~/.ironcore/config.toml  (or <project>/.ironcore/config.toml)
-[provider]
-base_url = "http://localhost:11434/v1"
-model    = "qwen3-coder:30b"
+Built for **Ollama** first. One OpenAI-compatible client also covers **vLLM, llama.cpp server,
+LM Studio, OpenRouter, Together, and Groq** — note that the hosted providers, and any local
+server started with `--api-key`, **require a real `[provider] api_key`**; the shipped
+`"ironcore-local"` default is a placeholder that only local servers ignore. Without it you get
+an HTTP 401.
 
-[safety]
-mode = "manual"          # plan | manual | accept-edits | auto
+Settings come from four layers, later winning:
+
+```
+built-in defaults  ←  ~/.ironcore/config.toml  ←  <workspace>/.ironcore/config.toml  ←  IRONCORE_* env
 ```
 
-## Quickstart
+Environment overrides — the fastest way to try something without editing TOML:
 
-```bash
-# install (Python 3.11+) — once published to PyPI:
-pip install ironcore        # or:  uv tool install ironcore  /  pipx install ironcore
-# latest from source:
-pip install git+https://github.com/RealDealCPA-VR/IronCore.git
+| Variable | Overrides |
+|---|---|
+| `IRONCORE_BASE_URL` | `[provider] base_url` |
+| `IRONCORE_MODEL` | `[provider] model` |
+| `IRONCORE_API_KEY` | `[provider] api_key` |
+| `IRONCORE_MODE` | `[safety] mode` |
+| `IRONCORE_ROLE_PLANNER` · `_CODER` · `_SUMMARIZER` · `_VERIFIER` | `[roles] planner` · `coder` · `summarizer` · `verifier` |
 
-ironcore init               # write a commented starter config, and print its path
-ironcore doctor             # checks python, config, endpoint, model, git — exits 1 if misconfigured
-ironcore                    # launch the TUI (auto-probes your model on first run)
-ironcore --resume           # pick up a past session
+**A project config can lower autonomy, but never raise it.** The `<workspace>/.ironcore/config.toml`
+layer arrives with a `git clone`, so it is the only untrusted one: a cloned repo cannot put you
+in AUTO, cannot switch `safety.network_tools` on, cannot re-enable plugins you disabled, and
+cannot declare an MCP server. Every clamp prints a note in `ironcore doctor` and as a boot note.
+If you want more autonomy, grant it in your own `~/.ironcore/config.toml`, export
+`IRONCORE_MODE`, or press Shift+Tab — those are you at the keyboard, and they are never clamped.
 
-ironcore demo               # a fully offline, no-model walkthrough of a real session
-```
+The same rule is why **MCP servers and `safety.network_tools = true` must live in your user
+config**; requested from a project file, they are clamped off with a note. For MCP secrets, use
+placeholders rather than literals — `env = { GITHUB_TOKEN = "${GITHUB_TOKEN}" }` is expanded
+from your shell at load time (a bare `$VAR` is not), and an unset variable skips that server
+with a visible note instead of starting it. Never paste a live token into a committable file.
 
-Developing on IronCore itself:
+Full reference — every key, type and default:
+[`docs/CONFIG.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/CONFIG.md).
 
-```bash
-git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q   # 1546 tests, all offline — no model, no network
-```
+State lives under `~/.ironcore/` and `<workspace>/.ironcore/`. Project memory (`IRONCORE.md`)
+is written at your workspace root on purpose, so you can commit it.
 
 ## Architecture at a glance
 
@@ -169,15 +353,34 @@ notice.
 ## Built & proven
 
 All eleven build phases are shipped, and all eight moonshots landed on top (**v0.2**). Every
-phase was validated the same way: a full
-offline test suite, an *independent adversarial review* that verifies findings by execution,
-and real proof tests against files, subprocesses, git, and the headless UI — **evidence, not
-claims.** Multiple real bugs (a redaction ReDoS, a false-"done", a compaction secret-leak, a
-Plan-mode workflow escape) were caught and fixed exactly this way.
+phase was validated the same way: a full offline test suite, an *independent adversarial review*
+that verifies findings by execution, and real proof tests against files, subprocesses, git, and
+the headless UI — **evidence, not claims.** Multiple real bugs (a redaction ReDoS, a
+false-"done", a compaction secret-leak, a Plan-mode workflow escape) were caught and fixed
+exactly this way.
 
-- 📖 [`docs/SPEC.md`](docs/SPEC.md) — the full specification · 🏗️ [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layers & dependency rules
-- 🛡️ [`docs/SAFETY.md`](docs/SAFETY.md) — threat model & controls · 🧠 [`docs/MODELS.md`](docs/MODELS.md) — the envelope in depth
-- 📝 [`CHANGELOG.md`](CHANGELOG.md) — what's in each release
+```bash
+git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
+uv run --extra dev pytest -q   # 1772 tests, all offline — no model, no network
+```
+
+The suite sandboxes `HOME` itself, so running it cannot touch your own `~/.ironcore`. CI gates
+coverage at 90% across the whole `ironcore` package, and builds and smoke-tests the wheel on
+every pull request.
+
+## Documentation
+
+Start at the index: [`docs/README.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/README.md).
+
+**Using IronCore** — [`docs/CONFIG.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/CONFIG.md) (every setting, with defaults) ·
+[`docs/TROUBLESHOOTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/TROUBLESHOOTING.md) (keyed to doctor's output) ·
+[`docs/MODELS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/MODELS.md) (the envelope in depth) ·
+[`docs/SAFETY.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SAFETY.md) (threat model & controls)
+
+**Extending or contributing** — [`docs/PLUGINS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/PLUGINS.md) (author guide) ·
+[`docs/SPEC.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SPEC.md) (the full specification) ·
+[`docs/ARCHITECTURE.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/ARCHITECTURE.md) (layers & dependency rules) ·
+[`CHANGELOG.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md) (what's in each release)
 
 ## 🌙 Moonshots — landed
 
@@ -224,10 +427,10 @@ and open up to plugins — and as of **v0.2**, every one of them has shipped:
   from config (resolved via PATH, never through a shell) and registers every remote tool
   as `mcp__<server>__<tool>` at **NET risk** — the strictest class, so nothing an MCP
   server exposes is ever auto-approved, and Plan mode denies it outright. Like the
-  built-in `fetch_url`, MCP tools exist only when `safety.network_tools = true`; their
-  output rides the same UNTRUSTED fence and injection scan as every tool, servers
-  connect in the background at launch (tools appear on the next turn), and
-  `ironcore doctor` reports the configured lineup honestly.
+  built-in `fetch_url`, MCP tools exist only when `safety.network_tools = true` **in your
+  user config** (see [Configuration](#configuration)); their output rides the same UNTRUSTED
+  fence and injection scan as every tool, servers connect in the background at launch (tools
+  appear on the next turn), and `ironcore doctor` reports the configured lineup honestly.
 - **Drop-in extensibility.** Providers, tools, slash commands, probes, and edit formats
   now plug in as standard Python entry points (`ironcore.providers` / `ironcore.tools` /
   `ironcore.commands` / `ironcore.probes` / `ironcore.edit_formats`): `pip install` a
@@ -237,18 +440,22 @@ and open up to plugins — and as of **v0.2**, every one of them has shipped:
   included), its probes join `/probe`'s battery, and its edit formats join `edit_file`.
   Built-ins win every name clash, a broken plugin is skipped and reported by
   `ironcore doctor` — never a crashed boot — and `[plugins] enabled = false` turns
-  discovery off. Author guide: [`docs/PLUGINS.md`](docs/PLUGINS.md).
+  discovery off. Author guide:
+  [`docs/PLUGINS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/PLUGINS.md).
 
-*What's next:* smaller follow-ups noted in the handoff log — an HTTP transport for MCP
-servers (the config surface is already reserved) and background seeding of role models.
+## Contributing
 
-## Contributing (humans *and* agents)
+Start with [`CONTRIBUTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/CONTRIBUTING.md)
+— how to set up, run the suite, and open a change. Security reports go through
+[`.github/SECURITY.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/.github/SECURITY.md);
+IronCore executes model-proposed shell commands, so please use that channel rather than a
+public issue.
 
-IronCore is built the way it works: state lives in the repo, not in anyone's head. Start with
-[`AGENTS.md`](AGENTS.md), follow the pickup ritual in [`docs/PROTOCOLS.md`](docs/PROTOCOLS.md),
-and leave a handoff block when you stop. Interfaces in [`docs/CONTRACTS.md`](docs/CONTRACTS.md)
-are frozen — change the contract first, or don't.
+Interfaces in [`docs/CONTRACTS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/CONTRACTS.md)
+are frozen — change the contract first, or don't. If you are an *AI agent* working in this
+repo, your instructions are [`AGENTS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/AGENTS.md)
+and the pickup ritual in [`docs/PROTOCOLS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/PROTOCOLS.md).
 
 ## License
 
-[MIT](LICENSE) © 2026 RealDealCPA
+[MIT](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE) © 2026 RealDealCPA

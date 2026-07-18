@@ -9,7 +9,7 @@ The moonshots release: every bet in the README's Moonshots section has landed â€
 five that mold the harness *deeper* to the measured model, two that take it
 beyond text, and one that opens it up â€” plus the two envelope upgrades shipped
 since 0.1.0 (instant-on profiling and real server-side guided decoding).
-**1546 tests, offline-first (no model, no network).**
+**1772 tests, offline-first (no model, no network).**
 
 ### Molds deeper
 - **Model-aware tokenization.** The probe battery now *measures* each model's
