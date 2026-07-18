@@ -30,10 +30,20 @@ from textual.widget import Widget
 from textual.widgets import Button, Label, Static
 
 from ironcore.core.approvals import ApprovalAnswer, ApprovalRequest
+from ironcore.tui import theme
 from ironcore.tui.widgets.diffview import DiffView, looks_like_diff
 
 #: Risk classes for which Approve must not be the default-focused button.
 _HIGH_RISK = frozenset({"exec", "net"})
+
+#: What each risk class means, in the words a stranger needs at the moment of
+#: deciding. The gate's own class names (SAFETY §2) are jargon on their own.
+_CONSEQUENCE: dict[str, str] = {
+    "read": "this reads a file outside the workspace",
+    "write": "this changes files in your workspace",
+    "exec": "this runs a command on your machine",
+    "net": "this sends a request over the network",
+}
 
 
 class ApprovalScreen(ModalScreen[ApprovalAnswer]):
@@ -51,13 +61,34 @@ class ApprovalScreen(ModalScreen[ApprovalAnswer]):
 
     def compose(self) -> ComposeResult:
         risk = self.request.risk
-        with Vertical(id="approval-box"):
-            yield Label(Text(f"Approval required — {risk.upper()}"), id="approval-title")
+        box = Vertical(id="approval-box", classes=f"risk-{risk}")
+        # The border carries the colour; the chip inside carries the word. The
+        # title deliberately does NOT repeat the risk class — saying "WRITE"
+        # in the frame AND in the chip one line below just read as a stutter.
+        box.border_title = "Approval required"
+        with box:
+            yield Label(self._title_text(), id="approval-title")
             yield self._preview_widget()
             with Horizontal(id="approval-buttons"):
-                yield Button("Deny (n)", id="deny", variant="error")
-                yield Button("Approve (y)", id="approve", variant="success")
-                yield Button("Approve all writes (a)", id="approve-all", variant="warning")
+                yield Button("Deny (n)", id="deny")
+                yield Button("Approve (y)", id="approve")
+                yield Button("Approve all writes (a)", id="approve-all")
+
+    def _title_text(self) -> Text:
+        """The risk chip plus what that class actually MEANS, in plain words.
+
+        Deliberately quiet — the diff below is the hero of this screen — but
+        not empty: "WRITE" tells a stranger nothing on its own, and this is the
+        one moment where the consequence has to be legible before they choose.
+        The chip repeats the border colour in text, so a terminal that drops
+        border titles (or all colour) still shows the risk class.
+        """
+        risk = self.request.risk
+        text = Text()
+        because = _CONSEQUENCE.get(risk, "this needs your approval")
+        text.append(theme.risk_chip(risk), style=theme.risk_style(risk))
+        text.append(f"  {because}", style=theme.STYLE_MUTED)
+        return text
 
     def _preview_widget(self) -> Widget:
         """The exact-effect preview: a colored diff for write/edit requests,

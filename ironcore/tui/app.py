@@ -94,8 +94,10 @@ from ironcore.providers.registry import ProviderRegistry, select_provider_factor
 from ironcore.safety.modes import DESCRIPTIONS, Mode, next_mode
 from ironcore.tools.default import build_default_registry as build_tool_registry
 from ironcore.tools.mcp import MCPManager
+from ironcore.tui import theme
 from ironcore.tui.screens.approval import ApprovalScreen
 from ironcore.tui.screens.sessions import SessionPicker
+from ironcore.tui.theme import IRONCORE_THEME, RISK_VARIABLES
 from ironcore.tui.widgets import InputBar, StatusBar, Transcript
 
 #: ``--resume`` with no id: open the picker at launch instead of resuming one.
@@ -128,62 +130,145 @@ def _new_session_id() -> str:
     return f"{datetime.now():%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
 
 
-def _render_palette(matches: list[SlashCommand]) -> str:
-    lines = []
+def _render_palette(matches: list[SlashCommand]) -> Text:
+    """The slash palette as styled ``Text``.
+
+    Three ranks: the top match's ``›`` marker is the accent (Tab/Enter takes
+    it), the command NAMES are what you scan so they carry the weight, and the
+    summaries recede. The wording and column layout are unchanged — only the
+    emphasis is new.
+    """
+    text = Text(no_wrap=True)
     for i, cmd in enumerate(matches):
-        tag = "" if cmd.implemented else "   [planned]"
-        marker = "›" if i == 0 else " "
-        lines.append(f"{marker} /{cmd.name} — {cmd.summary}{tag}")
-    return "\n".join(lines)
+        if i:
+            text.append("\n")
+        top = i == 0
+        text.append("› " if top else "  ", style=theme.STYLE_USER)
+        text.append(f"/{cmd.name}", style=theme.STYLE_TOOL_NAME if top else theme.FOREGROUND)
+        text.append(f" — {cmd.summary}", style=theme.STYLE_MUTED)
+        if not cmd.implemented:
+            text.append("   [planned]", style=theme.STYLE_MUTED)
+    return text
 
 
 class IronCoreApp(App):
     """The interactive TUI. Tests inject their own MockProvider-backed engine
     and command registry; production builds them via ``from_settings``."""
 
+    #: The look is documented in ``tui/theme.py``; this sheet only spends the
+    #: tokens that theme registers. Two rules drive most of what is below:
+    #: emphasis comes from weight and spacing (not from more colour), and every
+    #: colour has to mean something (risk, outcome, autonomy).
     CSS = """
-    Screen { layout: vertical; }
-    #transcript { height: 1fr; padding: 0 1; }
-    #transcript .user { text-style: bold; color: $accent; }
+    Screen { layout: vertical; background: $background; }
+
+    /* -- transcript ------------------------------------------------------- */
+    /* Bottom-aligned like a shell: a short session sits just above the input
+       where the eye already is, instead of stranding it against a black void
+       at the top of the frame. Content taller than the pane scrolls normally. */
+    #transcript {
+        height: 1fr;
+        padding: 0 2;
+        align-vertical: bottom;
+        scrollbar-size-vertical: 1;
+    }
+    /* Turn rhythm: the user's line opens a turn, so it carries the whitespace
+       above it. Everything the assistant does in reply stays tight to it. */
+    #transcript .user { text-style: bold; color: $accent; margin: 1 0 0 0; }
     #transcript .assistant { color: $text; }
-    #transcript .note { text-style: dim; }
-    #transcript .tool-card { color: $secondary; margin: 0 0 0 1; }
+    #transcript .note { color: $text-muted; }
+    #transcript .masthead { margin: 0 0 1 0; }
+
+    /* Tool cards: a risk-coloured accent rule plus a faint panel, rather than
+       a full border — see ToolCard's docstring for why a box loses here. */
+    /* `wide` (▎) rather than `outer` (▌): a slim rule reads as an accent, a
+       fat one reads as a slab of colour competing with the risk chip. */
+    #transcript .tool-card {
+        background: $panel 35%;
+        border-left: wide $primary;
+        padding: 0 1;
+        margin: 0 0 1 0;
+    }
+    #transcript .tool-card.risk-read { border-left: wide $risk-read; }
+    #transcript .tool-card.risk-write { border-left: wide $risk-write; }
+    #transcript .tool-card.risk-exec { border-left: wide $risk-exec; }
+    #transcript .tool-card.risk-net { border-left: wide $risk-net; }
+    /* A card that wants a human, or that went wrong, earns a brighter bed. */
+    #transcript .tool-card.state-awaiting { background: $warning 12%; }
+    #transcript .tool-card.state-bad { background: $error 12%; }
+
+    /* -- slash palette ---------------------------------------------------- */
     #palette {
         display: none;
         height: auto;
         max-height: 8;
         background: $panel;
         color: $text;
+        border-left: wide $accent;
         padding: 0 1;
     }
-    InputBar { height: 3; border: tall $primary; }
-    StatusBar { height: 1; background: $boost; color: $text; padding: 0 1; }
-    ApprovalScreen { align: center middle; }
+
+    /* -- input + status --------------------------------------------------- */
+    /* `round` instead of `tall`: the tall variant paints thick blocks down
+       both sides, which is the single most dated thing on the old frame. */
+    InputBar { height: 3; border: round $panel; background: $surface; }
+    InputBar:focus { border: round $primary; }
+    StatusBar { height: 1; background: $panel; padding: 0 1; }
+
+    /* -- modals ----------------------------------------------------------- */
+    /* A translucent scrim, not a blackout: the tool card that raised this ask
+       must stay readable BEHIND the modal, because "what am I approving and
+       where did it come from" is answered by that context. */
+    ApprovalScreen { align: center middle; background: $background 70%; }
     #approval-box {
         width: 80%;
         max-width: 100;
         height: auto;
-        border: thick $warning;
+        border: round $warning;
         background: $surface;
         padding: 1 2;
     }
-    #approval-title { text-style: bold; width: 100%; }
+    /* The border is the risk signal here too, so an EXEC/NET ask is red before
+       it is read. Defaulting to $warning keeps an unknown class visible. */
+    #approval-box.risk-exec, #approval-box.risk-net { border: round $error; }
+    #approval-box.risk-read { border: round $primary; }
+    #approval-title { width: 100%; }
     #approval-preview { height: auto; max-height: 20; margin: 1 0; }
     #approval-buttons { height: auto; align: center middle; }
-    #approval-buttons Button { margin: 0 1; }
+    /* Flat one-row actions. The diff above is the evidence being judged; three
+       saturated blocks used to shout louder than the thing they act on. */
+    #approval-buttons Button {
+        border: none;
+        height: 1;
+        min-width: 0;
+        margin: 0 1;
+        padding: 0 2;
+        background: transparent;
+        color: $text-muted;
+        text-style: none;
+    }
+    #approval-buttons Button:focus { background: $boost; text-style: bold; }
+    #approval-buttons #approve { color: $success; }
+    #approval-buttons #deny { color: $error; }
+    #approval-buttons #approve-all { color: $warning; }
+
     SessionPicker { align: center middle; }
     #session-box {
         width: 80%;
         max-width: 100;
         height: auto;
         max-height: 24;
-        border: thick $primary;
+        border: round $primary;
         background: $surface;
         padding: 1 2;
     }
-    #session-title { text-style: bold; width: 100%; }
-    #session-list { height: auto; max-height: 16; margin: 1 0; }
-    #session-empty { margin: 1 0; }
+    #session-list { height: auto; max-height: 16; background: $surface; }
+    /* No `background` here: an #id rule out-specifies ListView's own
+       `.-highlight` cursor rule and would silently erase the selection band. */
+    #session-list > ListItem { padding: 0 1; }
+    /* The row cursor itself is themed (theme.py `block-cursor-*`), not styled
+       here — ListView's own :focus rule out-specifies this sheet. */
+    #session-empty { margin: 1 0; color: $text-muted; }
     """
 
     BINDINGS = [
@@ -209,6 +294,11 @@ class IronCoreApp(App):
         plugin_probes: Sequence[object] = (),
     ) -> None:
         super().__init__()
+        # Before anything renders: the app ships its own palette (tui/theme.py)
+        # rather than inheriting Textual's default, so the first frame is
+        # already IronCore rather than a generic purple.
+        self.register_theme(IRONCORE_THEME)
+        self.theme = IRONCORE_THEME.name
         self.engine = engine
         self.registry = registry
         self.settings = settings
@@ -261,6 +351,17 @@ class IronCoreApp(App):
         yield InputBar()
         yield StatusBar(mode=self.engine.mode, model=self.settings.provider.model)
 
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """Design tokens this app's CSS spends that no built-in theme defines.
+
+        Textual parses ``CSS`` before any theme is applied, and a variable
+        referenced in CSS but defined nowhere is a startup crash — so the risk
+        tokens are declared HERE as fallbacks rather than only inside
+        ``IRONCORE_THEME``. That also means switching to a stock Textual theme
+        (the command palette can) still resolves them instead of failing.
+        """
+        return dict(RISK_VARIABLES)
+
     def on_mount(self) -> None:
         self.transcript = self.query_one(Transcript)
         self.status_bar = self.query_one(StatusBar)
@@ -268,10 +369,7 @@ class IronCoreApp(App):
         # broker's on_request to our modal is how the ask becomes a keystroke.
         self.engine.approvals.on_request = self._on_approval_request
         self.query_one(InputBar).focus()
-        self._post_note(
-            "IronCore ready. Type a message or /help. "
-            "Shift+Tab cycles mode · Esc interrupts."
-        )
+        self.call_later(self.transcript.add_masthead)
         for note in self._boot_notes:  # MS-8: tuning adjustments / re-probe hints
             self._post_note(note)
         # Resume flow (IC-706): a picker for a bare --resume, a direct rehydrate
@@ -389,7 +487,7 @@ class IronCoreApp(App):
         if value.startswith("/") and " " not in value:
             self._matches = match_commands(self.registry, value[1:])
             if self._matches:
-                palette.update(Text(_render_palette(self._matches)))
+                palette.update(_render_palette(self._matches))
                 palette.display = True
                 return
         self._matches = []
@@ -415,6 +513,12 @@ class IronCoreApp(App):
         self._dispatch(value)
 
     def _dispatch(self, line: str) -> None:
+        # Echo the command as the user's own line before running it. A command
+        # session used to render as an unbroken column of grey results with the
+        # question missing — you could not tell which output answered what, and
+        # scrolling back told you nothing. The echo is display-only: slash
+        # commands are still not recorded to the session transcript.
+        self.call_later(self.transcript.add_user, line)
         ctx = self._command_context()
         try:
             result = self.registry.dispatch(line, ctx)
@@ -499,7 +603,9 @@ class IronCoreApp(App):
         self.engine.mode = mode  # the engine reads self.mode at gate time
         self.status_bar.set_mode(mode)
         if announce:
-            self._post_note(f"Mode → {mode.value}: {DESCRIPTIONS[mode]}")
+            # Announced with the mode's own colour, so the transcript line and
+            # the status chip agree at a glance about the new posture.
+            self.call_later(self.transcript.add_mode_note, mode.value, DESCRIPTIONS[mode])
 
     # -- turn driving ---------------------------------------------------------
 

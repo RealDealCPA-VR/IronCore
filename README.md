@@ -14,7 +14,7 @@
 
 </div>
 
-![A two-turn IronCore session in MANUAL mode: the agent runs list_dir, read_file and grep — each shown as a tool card with its name, a [read] risk chip, a done state and a result line — then explains in plain English that fib() is an unfinished stub returning 0. The status bar reads MANUAL, qwen3-coder:30b, turn 2, 4.2k tok.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/01-session-tool-cards.png)
+![A two-turn IronCore session in MANUAL mode, opening with a three-line IRONCORE masthead. The agent runs list_dir, read_file and grep — each a tool card on a faint panel with a blue rule down its left edge, the tool name in bold, a blue READ chip, a done state, dim arguments and a green ✓ ok result line — then explains in plain English that fib() is an unfinished stub returning 0. The user's own two questions read in amber above each turn. The status bar reads MANUAL, qwen3-coder:30b, turn 2, 4.2k tok.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/01-session-tool-cards.png)
 
 *Every tool call is named, risk-classified and gated on screen — nothing happens invisibly.*
 
@@ -237,15 +237,16 @@ Because doctor's exit code is honest, you can chain the two once you trust the s
 Launch `ironcore` from the directory you want to work in — that directory is the workspace, and
 the write jail is drawn around it. Then just type what you want.
 
-**Reading the transcript.** Each tool call renders as a card: the tool's name, a risk chip
-(`[read]`, `[write]`, `[shell]`, `[net]`), its state (`awaiting approval` → `done`), the
-arguments it was called with, and a result line. There is no other path to a tool — if it
-happened, there is a card for it, and the gate decided about it first.
+**Reading the transcript.** Each tool call renders as a card with a risk-coloured rule down its
+left edge: the tool's name, a risk chip (`READ`, `WRITE`, `EXEC`, `NET` — the elevated three are
+drawn as filled blocks, so one write stands out of a wall of reads), its state (`awaiting
+approval` → `done`), the arguments it was called with, and a result line. There is no other path
+to a tool — if it happened, there is a card for it, and the gate decided about it first.
 
 **Approving a change.** In the default MANUAL mode, anything that writes stops at the gate and
 shows you the exact edit before it lands:
 
-![The approval modal over a colored search/replace diff: 'Approval required — WRITE', edit_file fib.py [search_replace], the removed lines in red and the added lines in green, and three labeled buttons — Deny (n), Approve (y), and Approve all writes (a). The tool card behind the modal reads 'awaiting approval'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/02-approval-diff.png)
+![The approval modal, an amber-bordered panel titled 'Approval required', over a dimmed transcript. Inside: a filled amber WRITE chip beside the plain-language line 'this changes files in your workspace', then edit_file fib.py [search_replace] and the search/replace diff with the removed lines in red and the added lines in green, then three flat text actions — Deny (n), Approve (y) which has focus and reads bold green, and Approve all writes (a). The amber-ruled edit_file tool card that raised the ask is still visible behind the modal.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/02-approval-diff.png)
 
 *The keys are on the buttons: `y` approves this one, `n` denies it, `a` approves writes for the
 rest of the session. You are approving a specific diff, not a vague intention.*
@@ -297,7 +298,7 @@ Four operating modes, cycled live with **Shift+Tab**:
 | ✏️ **Accept Edits** | ✅ | ✅ | ask | ask |
 | 🚀 **Auto** | ✅ | ✅ | ✅ sandboxed | ask |
 
-![Shift+Tab cycled through the whole safety loop, printing each mode's contract into the transcript: accept-edits applies file edits automatically while commands still ask; auto is full auto inside the workspace sandbox with network still asking; plan is read-only, explore and propose, nothing changed; manual approves every file edit, command and network call. The status chip reads MANUAL.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/05-safety-modes.png)
+![Shift+Tab cycled through the whole safety loop, printing each mode's contract into the transcript with the mode name carrying its own autonomy colour: accept-edits on a filled amber block applies file edits automatically while commands still ask; auto on a filled red block is full auto inside the workspace sandbox with network still asking; plan in calm blue is read-only, explore and propose, nothing changed; manual in plain grey approves every file edit, command and network call. The status chip reads MANUAL.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/05-safety-modes.png)
 
 *Each mode announces its own contract as you cycle into it, so you always know what you just
 authorized.*
@@ -320,7 +321,7 @@ Full threat model and the honest limits:
 A streaming **Textual** UI, and a thin client over the engine's event stream — the engine
 itself never prints or prompts. Type `/` to open the palette:
 
-![The slash-command palette open over a live session, listing the registered commands with a one-line summary each; Tab completes the top match.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/04-command-palette.png)
+![The slash-command palette open over a live session on an amber-ruled panel, listing the registered commands with a one-line summary each — the top match is marked with an amber › and its name is bold, the rest of the names lighter and every summary dimmed. Tab completes the top match.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/04-command-palette.png)
 
 | Command | What it does |
 |---|---|
@@ -336,14 +337,14 @@ itself never prints or prompts. Type `/` to open the palette:
 stops being a slogan: the objective is re-anchored into every turn, and *the harness* — not the
 model's opinion of itself — runs the attached command to decide whether the work is done.
 
-![A session where /goal was set to 'make fib() correct for every n up to 30'. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' and 'Goal stop-condition MET — all 1 verify command passed.'](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
+![A session where /goal was set to 'make fib() correct for every n up to 30'. Each typed command is echoed back in amber above the reply it produced, so the three exchanges read as three groups. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' and 'Goal stop-condition MET — all 1 verify command passed.'](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
 
 *The stop-condition is a command that really ran. "Done" is a test result, not a claim.*
 
 Sessions are recorded and resumable: `ironcore --resume` opens a picker of past sessions, and
 `ironcore --resume <id>` jumps straight to one.
 
-![The 'Resume a session' picker listing four past sessions, each with its age, its opening request and its turn count: 8m ago 'fix the failing fib tests' 3 turns, 2h ago 'add a --json flag to the report CLI' 6 turns, 1d ago 'why does the parser drop trailing commas?' 4 turns, 3d ago 'port the ingest script off requests' 11 turns. The first row is selected.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/08-session-picker.png)
+![The 'Resume a session' picker listing four past sessions, each with its age, its opening request and its turn count: 8m ago 'fix the failing fib tests' 3 turns, 2h ago 'add a --json flag to the report CLI' 6 turns, 1d ago 'why does the parser drop trailing commas?' 4 turns, 3d ago 'port the ingest script off requests' 11 turns. The first row is selected, shown as a steel-blue band with its text in bold. The panel is titled 'Resume a session' on its border, with 'enter resumes · esc starts fresh' along the bottom edge.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/08-session-picker.png)
 
 *Sessions are listed by what you asked for, not by an opaque id — so you can find yesterday's
 thread without knowing its name.*

@@ -28,6 +28,7 @@ from rich.text import Text
 from textual.widgets import Static
 
 from ironcore.safety.modes import Mode
+from ironcore.tui import theme
 
 #: Key hints, widest first. Narrower terminals fall down the ladder; every rung
 #: keeps ``ctrl+c quit``, because "how do I leave this thing" is the one hint a
@@ -50,6 +51,9 @@ _FLOOR_HINT = _KEY_TIERS[-1]
 _GAP = 2
 
 _SEP = "  ·  "
+
+#: The in-flight marker, matched back out of the fitted line to accent it.
+_BUSY = "working…"
 
 
 def _humanize(n: int) -> str:
@@ -87,7 +91,34 @@ class StatusBar(Static):
         # Width is only known once the compositor has placed us, and it changes
         # on every terminal resize — so the line is fitted here, at draw time.
         self._plain = self._fit(self._width())
-        return Text(self._plain)
+        return self._stylize(self._plain)
+
+    def _stylize(self, line: str) -> Text:
+        """Paint the fitted line: mode chip by autonomy, model name in the
+        foreground, everything else supporting detail.
+
+        Styling is applied to the ALREADY-FITTED string by offset, so a line
+        that ``_fit`` truncated or ellipsized is coloured exactly as far as it
+        actually goes — there is no second, unconstrained render to disagree
+        with ``_plain``.
+        """
+        # Base: the meter, the separators and the keys hint are all supporting
+        # detail. The two things worth reading get lifted back out below.
+        text = Text(line, style=theme.STYLE_MUTED, no_wrap=True)
+        chip = f"[{self._mode.value.upper()}]"
+        if not line.startswith(chip):  # squeezed past the chip: nothing to paint
+            return text
+        # The autonomy posture is the one thing that must never be missed: PLAN
+        # and MANUAL stay flat, accept-edits and auto fill (theme.MODE_STYLE).
+        text.stylize(theme.mode_style(self._mode.value), 0, len(chip))
+        start = len(chip) + len(_SEP)
+        if line[len(chip) :].startswith(_SEP):
+            end = line.find(_SEP, start)
+            text.stylize(theme.FOREGROUND, start, end if end != -1 else len(line))
+        busy = line.find(_BUSY)
+        if busy != -1:
+            text.stylize(theme.ACCENT, busy, busy + len(_BUSY))
+        return text
 
     def on_resize(self) -> None:
         self._refresh()
@@ -135,7 +166,7 @@ class StatusBar(Static):
         parts = [f"[{self._mode.value.upper()}]", model]
         parts.append(f"turn {self._turn} · {_humanize(self._tokens)} tok")
         if self._busy:
-            parts.append("working…")
+            parts.append(_BUSY)
         return _SEP.join(parts)
 
     def _fit(self, width: int) -> str:

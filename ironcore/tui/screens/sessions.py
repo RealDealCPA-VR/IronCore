@@ -25,6 +25,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Label, ListItem, ListView
 
 from ironcore.memory.sessions import SessionRecord, SessionStore
+from ironcore.tui import theme
 
 #: Longest first-prompt label shown before it is elided on a row.
 _LABEL_MAX = 60
@@ -58,13 +59,35 @@ def relative_age(created_at: str, now: datetime | None = None) -> str:
     return f"{hours // 24}d ago"
 
 
-def _row_label(record: SessionRecord, now: datetime | None = None) -> str:
-    """One picker row: ``  2h ago   fix the parser bug   · 3 turn(s)``."""
+def _row_parts(record: SessionRecord, now: datetime | None = None) -> tuple[str, str, str]:
+    """The three columns of a picker row: right-aligned age, prompt, turn count.
+
+    Split out so the plain string and the styled ``Text`` are assembled from
+    one source — a row can never render differently from what ``_row_label``
+    reports.
+    """
     label = record.first_prompt.strip() or "(no prompt)"
     if len(label) > _LABEL_MAX:
         label = label[: _LABEL_MAX - 1] + "…"
-    turns = f"{record.turn_count} turn(s)"
-    return f"{relative_age(record.created_at, now):>8}   {label}   · {turns}"
+    return f"{relative_age(record.created_at, now):>8}", label, f"{record.turn_count} turn(s)"
+
+
+def _row_label(record: SessionRecord, now: datetime | None = None) -> str:
+    """One picker row: ``  2h ago   fix the parser bug   · 3 turn(s)``."""
+    age, label, turns = _row_parts(record, now)
+    return f"{age}   {label}   · {turns}"
+
+
+def _row_text(record: SessionRecord, now: datetime | None = None) -> Text:
+    """``_row_label`` with emphasis: the prompt is what you are choosing
+    between, so it reads bright; the age and the turn count support it."""
+    age, label, turns = _row_parts(record, now)
+    text = Text(no_wrap=True)
+    text.append(age, style=theme.STYLE_MUTED)
+    text.append("   ")
+    text.append(label, style=theme.FOREGROUND)
+    text.append(f"   · {turns}", style=theme.STYLE_MUTED)
+    return text
 
 
 class SessionPicker(ModalScreen[str | None]):
@@ -79,8 +102,10 @@ class SessionPicker(ModalScreen[str | None]):
         self.records: list[SessionRecord] = store.list_sessions()
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="session-box"):
-            yield Label(Text("Resume a session"), id="session-title")
+        box = Vertical(id="session-box")
+        box.border_title = "Resume a session"
+        box.border_subtitle = "enter resumes · esc starts fresh"
+        with box:
             if not self.records:
                 yield Label(
                     Text("No sessions yet — press Esc to start fresh."),
@@ -88,7 +113,7 @@ class SessionPicker(ModalScreen[str | None]):
                 )
                 return
             items = [
-                ListItem(Label(Text(_row_label(record))), name=record.id)
+                ListItem(Label(_row_text(record)), name=record.id)
                 for record in self.records
             ]
             yield ListView(*items, id="session-list")

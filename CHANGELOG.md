@@ -5,6 +5,44 @@ All notable changes to IronCore are documented here. This project adheres to
 
 ## [Unreleased]
 
+### Changed
+- **The TUI has a coherent visual design.** It rendered as one flat grey wall:
+  tool cards were dim monochrome blue with no structure, mode changes and gate
+  outcomes were the same colour as everything else, and the approval modal's
+  `thick` border drew as a chunky orange checkerboard. There is now one palette
+  (`ironcore/tui/theme.py` — a cool slate ground, one ember accent, semantic
+  green/red/blue) registered as a real `textual.theme.Theme`, so the whole app
+  spends design tokens instead of ad-hoc colours.
+
+  Colour is **semantic only**, and escalates rather than decorates — the calm,
+  common case stays flat and the elevated case fills, so a single `WRITE` card
+  stands out of a wall of `READ` cards and the current autonomy posture is
+  unmissable. Nothing is encoded in colour *alone*: every chip keeps its word,
+  every result keeps its `ok`/`error` text, every diff line keeps its `+`/`-`,
+  and Rich drops colour automatically when stdout is not a TTY. Specifically:
+  - **Tool cards** get a risk-coloured left rule and a faint panel (not a
+    border — a bordered box costs two columns per card and a scrolling column
+    of boxes reads as a form), a bold tool name, a `READ`/`WRITE`/`EXEC`/`NET`
+    chip, dim arguments and a green/red result line.
+  - **The approval modal** loses the `thick` border for a risk-coloured `round`
+    one with a border title, and gains a plain-language statement of what the
+    risk class actually does ("this changes files in your workspace"). Its three
+    actions are flat text so the diff stays the loudest thing on screen, and the
+    scrim is translucent so the tool card that raised the ask stays readable.
+  - **The status bar's mode chip** is coloured by autonomy: `plan` blue,
+    `manual` grey, `accept-edits` filled amber, `auto` filled red.
+  - **Mode changes** are announced with the same colour the chip just took.
+  - **The transcript** gets vertical rhythm between turns, and system notes have
+    their leading `[tag]` lifted out (red when the tag reports a failure).
+  - **The empty state** is a three-line masthead instead of a single grey line,
+    and the transcript is bottom-aligned like a shell, so a short session sits
+    above the input rather than stranded against a void.
+- **Slash commands are echoed into the transcript.** A command session rendered
+  as an unbroken column of grey results with the question missing — you could
+  not tell which output answered what. The typed line is now shown as your own
+  line above its result. Display only: slash commands are still not recorded to
+  the session transcript.
+
 ### Fixed
 - **The README no longer documents an install command that 404s.** The Install
   section offered a concrete versioned wheel URL
