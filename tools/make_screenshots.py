@@ -15,7 +15,13 @@ Pipeline, per shot:
 for real as a subprocess and its captured stdout is replayed through a recording
 ``rich.Console`` (rich ships with textual) into the same SVG -> PNG rasterizer.
 Only the ``$ ironcore <cmd>`` prompt line is added as a label; every other
-character is the command's own output.
+character — and every colour — is the command's own output, parsed back out of
+its ANSI with ``Text.from_ansi``. ``_color_env`` is what makes that possible and
+what keeps it honest: a subprocess writes into a *pipe*, and IronCore correctly
+drops colour when stdout is not a terminal, so the capture asks for exactly the
+stream a real terminal gets (``FORCE_COLOR``, truecolor, UTF-8, and the same
+column count as the frame). Nothing is styled here that the command did not
+style itself; run the same command in Windows Terminal and you get these bytes.
 
 Constraints this script must keep:
 
@@ -460,6 +466,45 @@ async def shot_session_picker(tmp: Path) -> str:
         return app.export_screenshot(title="IronCore")
 
 
+def _color_env(env: dict[str, str], width: int) -> dict[str, str]:
+    """Ask a piped run for the byte stream an interactive terminal would get.
+
+    Four settings, each closing one gap between a pipe and a console:
+
+    * ``FORCE_COLOR`` — Rich disables colour when stdout is not a tty (which is
+      the behaviour the test suite depends on), so a capture has to opt back in.
+    * ``COLORTERM`` — a modern terminal takes 24-bit colour; without this the
+      palette is quantized to 256 and IronCore's hues shift.
+    * ``PYTHONIOENCODING`` — a Windows *console* is UTF-8, but a redirected
+      stdout is cp1252, and IronCore honestly degrades its box-drawing to ASCII
+      on a stream that cannot encode it. The screenshot must show the Unicode
+      form a user actually sees.
+    * ``COLUMNS`` — the frame is rendered at ``width``; the command should lay
+      its rules out for the same terminal it is being shown in.
+    """
+    return {
+        **env,
+        "FORCE_COLOR": "1",
+        "COLORTERM": "truecolor",
+        "PYTHONIOENCODING": "utf-8",
+        "COLUMNS": str(width),
+    }
+
+
+def _replay(output: str, width: int, label: str, title: str) -> str:
+    """Captured stdout -> a recording Console -> SVG, colour and all.
+
+    ``Text.from_ansi`` turns the command's own escape codes back into styled
+    spans; nothing else is added, and because the text arrives as ``Text`` the
+    command's own ``[ok]`` tags can never be re-read as Rich markup.
+    """
+    console = Console(record=True, width=width, file=io.StringIO(), force_terminal=True)
+    console.print(Text(label, style="bold"))
+    for line in output.splitlines():
+        console.print(Text.from_ansi(line))
+    return console.export_svg(title=title)
+
+
 def _doctor_output(tmp: Path) -> str:
     """Run the REAL ``ironcore doctor`` and return its stdout verbatim.
 
@@ -477,9 +522,10 @@ def _doctor_output(tmp: Path) -> str:
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
         [sys.executable, "-m", "ironcore.cli", "doctor"],
         cwd=project,
-        env=env,
+        env=_color_env(env, DOCTOR_WIDTH),
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=180,
     )
     if not proc.stdout.strip():
@@ -488,20 +534,8 @@ def _doctor_output(tmp: Path) -> str:
 
 
 def render_doctor(tmp: Path) -> str:
-    """Replay captured doctor stdout through a recording Console -> SVG.
-
-    Lines are wrapped in ``Text`` so ``[ok]`` / ``[--]`` tags can never be read
-    as Rich markup, and no styling is invented: doctor prints plain text and
-    this renders plain text.
-    """
-    output = _doctor_output(tmp)
-    console = Console(
-        record=True, width=DOCTOR_WIDTH, file=io.StringIO(), force_terminal=True
-    )
-    console.print(Text("$ ironcore doctor", style="bold"))
-    for line in output.splitlines():
-        console.print(Text(line))
-    return console.export_svg(title="ironcore doctor")
+    """Replay captured doctor stdout through a recording Console -> SVG."""
+    return _replay(_doctor_output(tmp), DOCTOR_WIDTH, "$ ironcore doctor", "ironcore doctor")
 
 
 async def shot_doctor(tmp: Path) -> str:
@@ -573,9 +607,10 @@ def _demo_output() -> str:
         proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
             [str(python), "-m", "ironcore.cli", "demo"],
             cwd=tmp,
-            env=env,
+            env=_color_env(env, DEMO_WIDTH),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=300,
         )
         if proc.returncode != 0:
@@ -595,15 +630,9 @@ def render_demo() -> str:
     shots' 30 — taller, but every line earns its place (the header is where the
     reader learns the model is scripted; the tail is where the edit is verified
     and the turn stops on evidence), and the one screenshot a stranger reaches
-    first is the wrong place to economise. Lines are wrapped in ``Text`` so the
-    demo's own ``[ok ]`` tags can never be read as Rich markup.
+    first is the wrong place to economise.
     """
-    output = _demo_output()
-    console = Console(record=True, width=DEMO_WIDTH, file=io.StringIO(), force_terminal=True)
-    console.print(Text("$ ironcore demo", style="bold"))
-    for line in output.splitlines():
-        console.print(Text(line))
-    return console.export_svg(title="ironcore demo")
+    return _replay(_demo_output(), DEMO_WIDTH, "$ ironcore demo", "ironcore demo")
 
 
 async def shot_demo(tmp: Path) -> str:
@@ -634,6 +663,21 @@ SHOTS: tuple[tuple[str, Callable[[Path], Awaitable[str]]], ...] = (
 # --------------------------------------------------------------------------- #
 
 _VIEWBOX_RE = re.compile(r'viewBox="0 0 ([\d.]+) ([\d.]+)"')
+
+#: Rich exports its SVGs asking for Fira Code and falling back to the generic
+#: ``monospace``. No machine here has Fira Code, and the browser's generic
+#: monospace is Courier New — a font whose box-drawing glyphs do not join, so
+#: every rule and every widget border rasterized as a dotted line. The two names
+#: inserted below are real terminal fonts that ship with Windows (Cascadia Mono
+#: comes with Windows Terminal, Consolas with the OS), which is both a truer
+#: picture of what a user sees and a font that draws ``─`` as a continuous line.
+_SVG_FONT_FROM = "font-family: Fira Code, monospace"
+_SVG_FONT_TO = 'font-family: Fira Code, "Cascadia Mono", Consolas, monospace'
+
+
+def _with_terminal_font(svg: str) -> str:
+    """Widen the exported SVG's font stack to fonts this machine actually has."""
+    return svg.replace(_SVG_FONT_FROM, _SVG_FONT_TO)
 
 _WRAPPER = (
     '<!doctype html><meta charset="utf-8">'
@@ -713,7 +757,9 @@ def main() -> int:
         shot_dir = work / name.split("-", 1)[0]
         shot_dir.mkdir(parents=True, exist_ok=True)
         svg_path = work / f"{name}.svg"
-        svg_path.write_text(asyncio.run(builder(shot_dir)), encoding="utf-8")
+        svg_path.write_text(
+            _with_terminal_font(asyncio.run(builder(shot_dir))), encoding="utf-8"
+        )
         svgs.append((name, svg_path))
         print(f"[svg] {name}")
 

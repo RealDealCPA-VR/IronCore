@@ -141,6 +141,18 @@ and env is never clamped. An empty value is ignored (it does not blank the key).
 | `IRONCORE_ROLE_SUMMARIZER` | `roles.summarizer` |
 | `IRONCORE_ROLE_VERIFIER` | `roles.verifier` |
 
+Two variables IronCore does not define but does obey, because they are the cross-tool
+convention for terminal colour. They change nothing about behaviour or output *text* —
+only whether escape codes are written:
+
+| Variable | Effect |
+|---|---|
+| `NO_COLOR` | Set to anything: `doctor`, `demo` and `init` print with no colour, even on a terminal. |
+| `FORCE_COLOR` | Set to anything: colour is written even when stdout is a pipe or a file. On Windows this also forces ANSI escape codes rather than the legacy console colour API, which a redirect cannot carry. |
+
+Without either, colour follows the stream: on a terminal you get it, piped or redirected you
+do not, so `ironcore doctor > report.txt` is always plain text.
+
 ## 11. A complete config.toml
 
 Every key, every default, annotated. `ironcore init` writes a shorter commented version of

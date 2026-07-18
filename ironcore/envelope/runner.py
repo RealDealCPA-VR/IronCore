@@ -247,12 +247,52 @@ async def probe_and_save(
 def _rung_line(
     rung: str, scores: dict[str, float], thresholds: dict[str, float], recommended: str
 ) -> str:
+    """One ladder rung as a four-column row: marker, rung, score, verdict.
+
+    The ladder is the product's whole thesis, so a reader must be able to see
+    which rung was TAKEN and which were refused without decoding two numbers per
+    line. The old row said ``0.71  (needs >= 0.90, below)`` and left "below" as
+    the only, easily-missed signal that the rung was thrown out. Now the outcome
+    is a word in its own column — ``SELECTED`` / ``REJECTED`` / ``ok, fallback``
+    — and a rejection says how far short it fell.
+
+    The card is deliberately ASCII (``tests/test_report_card.py`` pins it): it is
+    printed into a Windows console and pasted into issues, and it is rendered by
+    the TUI transcript as plain text, so its structure has to survive with no
+    colour and no box-drawing at all. Words and columns are all it gets, so the
+    words do the work.
+    """
     marker = "->" if rung == recommended else "  "
-    if rung in thresholds:
-        score = scores.get(rung, 0.0)
-        status = "ok" if score >= thresholds[rung] else "below"
-        return f"  {marker} {rung:<15} {score:.2f}  (needs >= {thresholds[rung]:.2f}, {status})"
-    return f"  {marker} {rung:<15} floor (always works)"
+    selected = rung == recommended
+    if rung not in thresholds:  # the floor rung: no measurement can disqualify it
+        floor = "floor (always works)"
+        status = f"SELECTED - {floor}" if selected else floor
+        # The dash sits right-aligned in the SCORE column and the threshold
+        # column is blanked, so "no measurement applies here" lines up with the
+        # numbers above it instead of floating between two columns.
+        return f"  {marker} {rung:<15} {'-':>4}{' ' * 14}{status}"
+
+    threshold = thresholds[rung]
+    need = f"needs {threshold:.2f}"
+    # ABSENT from scores means no probe ever ran this rung — which is a different
+    # fact from a probe that ran and scored it 0.0 (the runner writes that
+    # explicitly when a probe fails). Saying "REJECTED (0.95 short)" for a rung
+    # nobody has measured would be the card inventing a measurement, on the one
+    # screen whose whole job is telling guesses from evidence. The wording is
+    # "not probed" rather than "not measured" because the provenance pins in
+    # tests/test_report_card.py forbid the substring "measured" anywhere above
+    # the verdict — and this line is exactly the kind of claim they guard.
+    score = scores.get(rung)
+    if score is None:
+        unscored = "SELECTED" if selected else "not probed"
+        return f"  {marker} {rung:<15} {'-':>4}  {need}  {unscored}"
+    if selected:
+        status = "SELECTED"
+    elif score >= threshold:
+        status = "ok, fallback"
+    else:
+        status = f"REJECTED ({threshold - score:.2f} short)"
+    return f"  {marker} {rung:<15} {score:.2f}  {need}  {status}"
 
 
 def _is_measured(profile: CapabilityProfile) -> bool:

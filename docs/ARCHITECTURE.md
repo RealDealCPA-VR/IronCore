@@ -85,6 +85,7 @@ The packages above are the dependency unit; these individual modules carry rules
 | `tools/mcp.py` | MCP stdio client + `MCPManager`; registers `mcp__<server>__<tool>` at `ToolRisk.NET` | obeys the `tools/` rule (safety + config); spawns via `create_subprocess_exec`, never a shell |
 | `tools/patch.py` | the deterministic edit appliers behind `edit_file` — **not** a registered tool | stdlib only; pure text transforms, touches no filesystem |
 | `tools/image.py` | `read_image`; attaches image parts only when vision is enabled | `tools/` rule; degrades to an honest error on a text-only model |
+| `term.py` | the palette + styled stdout for everything printed OUTSIDE the app (`doctor`, `demo`, `init`, the banner) — colour auto-off when stdout is not a TTY, glyphs degrade to ASCII on a stream that cannot encode them | leaf: rich + stdlib, imports nothing from `ironcore`. Duplicates `tui/theme.py`'s palette because §4 forbids importing `tui/`; `tests/test_term.py` pins the two together |
 
 ## 3. One turn, end to end
 

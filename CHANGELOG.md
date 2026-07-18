@@ -6,6 +6,44 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Changed
+- **`ironcore demo`, `doctor` and the report card read as the same product as the
+  app.** The TUI got a palette; everything printed *outside* it was still one
+  undifferentiated grey, with `======` and `+-`/`|` ASCII furniture standing in
+  for structure. `ironcore/term.py` now carries the same palette and the same
+  rules the app theme states, and the two are pinned together by
+  `tests/test_term.py` so they cannot drift apart.
+  - **`ironcore demo`** renders the session the way the TUI renders it: a real
+    rule under the masthead, the autonomy mode as a chip, the request in the
+    accent, and each tool call as a card with a risk-coloured rule down its left
+    edge, a `READ`/`WRITE` chip, muted arguments, a red/green diff and a
+    green `✓ ok` / red `✗ error`. `verify passed` and `stop_reason: done` are
+    green because they are the evidence the run turned on.
+  - **`ironcore doctor`** colours its marker column — green `[ok]`, steel `[--]`,
+    amber `[!!]`, bold red `[FAIL]` — and dims the indented follow-up under each
+    finding so advice reads as attached to the line it belongs to. The wording,
+    the markers and the exit codes are untouched: styling is derived from the
+    text, so it cannot reword what doctor says. The one exception is noted under
+    Fixed below.
+  - **The `/envelope` report card** gains an outcome column: every ladder rung
+    now says `SELECTED`, `ok, fallback`, `REJECTED (0.19 short)` or
+    `floor (always works)` instead of leaving a bare `below` as the only sign a
+    rung was thrown out, and the columns line up. It stays ASCII and plain-text
+    on purpose — it is pasted into issues and rendered by the transcript.
+  - Colour follows the stream: on a terminal you get it, piped or redirected you
+    do not, so `ironcore doctor > report.txt` is plain text and every string the
+    test suite pins is byte-identical. `NO_COLOR` and `FORCE_COLOR` are obeyed
+    ([docs/CONFIG.md](docs/CONFIG.md) §10). Box-drawing degrades to ASCII as a
+    set on a stream that cannot encode it (a redirected Windows console is
+    cp1252), so a redirect can never fail halfway through a transcript.
+  - The screenshot generator captures the CLI shots *with* colour, by asking a
+    piped run for exactly the byte stream an interactive terminal would get; and
+    it now widens the exported SVG's font stack to terminal fonts that are
+    actually installed, so box-drawing rasterizes as continuous lines instead of
+    the dotted ones Courier New produced.
+- **The report card no longer invents measurements it does not have.** A ladder
+  rung that was never scored said `REJECTED (0.95 short)`, which reads as a
+  measurement that failed; it now says `not probed`, distinct from a probe that
+  really ran and scored 0.0.
 - **The TUI has a coherent visual design.** It rendered as one flat grey wall:
   tool cards were dim monochrome blue with no structure, mode changes and gate
   outcomes were the same colour as everything else, and the approval modal's
@@ -44,6 +82,10 @@ All notable changes to IronCore are documented here. This project adheres to
   the session transcript.
 
 ### Fixed
+- **Doctor's "unprobed" line no longer wraps through its own marker column.** It
+  was a single 133-character sentence, so in any normal terminal it folded back
+  to column 0 and broke the one column a reader scans. It is now a finding plus
+  an indented remedy, the shape every other multi-line check already used.
 - **The README no longer documents an install command that 404s.** The Install
   section offered a concrete versioned wheel URL
   (`…/releases/download/v0.2.0/ironcore-0.2.0-py3-none-any.whl`) hedged with

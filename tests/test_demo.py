@@ -28,8 +28,11 @@ def test_run_demo_returns_zero_and_narrates_the_key_beats(tmp_path):
     code, text = _run_capture(tmp_path)
 
     assert code == 0
-    # a tool card for the edit + the applied change (edit_file result line)
-    assert "tool: edit_file" in text
+    # a tool card for the edit + the applied change (edit_file result line).
+    # The card header is `<name>  <RISK CHIP>  <gate>`, matching the TUI's tool
+    # cards; pinning the chip alongside the name is strictly narrower than the
+    # old "tool: edit_file" (it also proves the WRITE risk is surfaced).
+    assert "edit_file   WRITE " in text
     assert "applied" in text  # "applied search_replace edit to greeter.py ..."
     # verification really ran and passed
     assert "verify passed" in text
@@ -43,8 +46,8 @@ def test_narration_shows_the_full_arc_in_order(tmp_path):
     _, text = _run_capture(tmp_path)
     # read happens before the edit, which happens before verify + completion
     order = [
-        "tool: read_file",
-        "tool: edit_file",
+        "read_file  READ",
+        "edit_file   WRITE ",
         "verify passed",
         "stop_reason: done",
     ]

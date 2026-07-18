@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -54,6 +55,45 @@ BANNER = r"""
   Docs:   {repo}
   Issues: {issues}
 """
+
+
+#: Matches one ``Start here:`` row of BANNER above: four spaces, the command,
+#: a run of padding, then what it does. Anchored to that exact shape so a line
+#: it does not describe falls through to the plain branch instead of being
+#: mis-split.
+_BANNER_COMMAND_RE = re.compile(r"^(    )(ironcore \w+)(\s{2,})(.+)$")
+
+
+def _print_banner() -> None:
+    """Print BANNER with the hierarchy it already implies made visible.
+
+    Text in, same text out: this styles the template above line by line and
+    invents nothing, so the ``test_cli_banner_*`` pins keep reading exactly what
+    they read before. It matters less than doctor or demo — the banner only
+    prints when stdout is NOT a terminal, which is also when colour is dropped —
+    but a terminal that has been told to keep colour (``FORCE_COLOR``) should
+    see the same product as every other surface, not a grey block.
+    """
+    from rich.text import Text
+
+    from ironcore import term
+
+    for raw in BANNER.format(version=__version__, repo=REPO_URL, issues=ISSUES_URL).splitlines():
+        command = _BANNER_COMMAND_RE.match(raw)
+        if raw.startswith("  IronCore v"):
+            term.line(Text(raw, style=f"bold {term.ACCENT}"))
+        elif command is not None:
+            indent, name, pad, description = command.groups()
+            out = Text(indent)
+            out.append(name, style="bold")
+            out.append(pad)
+            out.append(description, style=term.STYLE_MUTED)
+            term.line(out)
+        elif raw.strip().endswith(":") or raw.startswith(("  Docs:", "  Issues:")):
+            term.line(Text(raw, style=term.STYLE_LABEL))
+        else:
+            term.line(Text(raw, style=term.STYLE_MUTED))
+    term.line()
 
 
 #: ``--resume`` given with no id: open the session picker at launch. Mirrors
@@ -266,6 +306,25 @@ def _model_available(model: str, available: tuple[str, ...]) -> bool:
 # --------------------------------------------------------------------------
 
 
+def _say(text: str) -> None:
+    """Print one doctor line, coloured by the marker it already carries.
+
+    Every doctor string in this module is composed exactly as it always was and
+    handed here whole: ``ironcore.term.doctor_line`` derives the styling from
+    the leading ``[ok]`` / ``[--]`` / ``[!!]`` / ``[FAIL]`` marker (or from the
+    indent of a follow-up line), so painting cannot change a single character of
+    what is printed — which is the property the doctor tests and
+    docs/TROUBLESHOOTING.md both lean on. Colour is dropped entirely when stdout
+    is not a terminal.
+
+    Imported inside the call so ``ironcore --version`` stays import-light: it
+    returns before any of this runs and must not pay for rich.
+    """
+    from ironcore.term import doctor_line
+
+    doctor_line(text)
+
+
 def cmd_doctor(
     project_dir: Path | None = None,
     user_config: Path | None = None,
@@ -284,7 +343,7 @@ def cmd_doctor(
     ok = True
 
     version_ok = sys.version_info >= (3, 11)
-    print(f"[{'ok' if version_ok else 'FAIL'}] python {sys.version.split()[0]} (need >= 3.11)")
+    _say(f"[{'ok' if version_ok else 'FAIL'}] python {sys.version.split()[0]} (need >= 3.11)")
     ok = ok and version_ok
 
     from ironcore.config.settings import Settings
@@ -307,11 +366,11 @@ def cmd_doctor(
         # Not every loader error names its file -- a non-UTF8 byte surfaces as a
         # bare codec message. "Which of my two config files do I open?" is the
         # only question that matters here, and doctor already knows both.
-        print(f"[FAIL] config: {exc}")
+        _say(f"[FAIL] config: {exc}")
         present = [p for p in (user_path, project_path) if p.exists()]
         if present and not any(str(p) in str(exc) for p in present):
             names = ", ".join(_display_path(p) for p in present)
-            print(f"       config file(s) doctor read: {names}")
+            _say(f"       config file(s) doctor read: {names}")
         return 1
 
     # Name the files. "config loaded" printed when no config file existed at all
@@ -320,29 +379,29 @@ def cmd_doctor(
         return "loaded" if path.exists() else "absent"
 
     if user_path.exists() or project_path.exists():
-        print(
+        _say(
             f"[ok] config: {_display_path(user_path)} ({_state(user_path)}) "
             f"+ {_display_path(project_path)} ({_state(project_path)})"
         )
     else:
-        print(f"[--] no config file -- using defaults (model: {settings.provider.model})")
+        _say(f"[--] no config file -- using defaults (model: {settings.provider.model})")
         starter = _display_path(user_path)
-        print(f"     `ironcore init` writes a commented starter config at {starter}")
-    print(f"[ok] effective: model {settings.provider.model}, mode {settings.safety.mode}")
+        _say(f"     `ironcore init` writes a commented starter config at {starter}")
+    _say(f"[ok] effective: model {settings.provider.model}, mode {settings.safety.mode}")
     # T8 clamps / skipped MCP servers: doctor reports the EFFECTIVE setup, so a
     # project config that asked for more than it got has to show up right here.
     for note in config_notes:
-        print(f"     {note}")
+        _say(f"     {note}")
     for role in _ROLE_NAMES:
         model = getattr(settings.roles, role)
         if model:
-            print(f"[ok] role {role}: {model}")
+            _say(f"[ok] role {role}: {model}")
 
     endpoint = settings.provider.base_url
     if settings.safety.network_tools and not _is_localhost(endpoint):
         # SAFETY.md section 6: hosted endpoint + network tools = code leaves this machine.
-        print(f"[!!] endpoint {endpoint} is not localhost and safety.network_tools is on:")
-        print("     your code leaves this machine -- make sure that is what you want")
+        _say(f"[!!] endpoint {endpoint} is not localhost and safety.network_tools is on:")
+        _say("     your code leaves this machine -- make sure that is what you want")
 
     if probe is not None or check_endpoint:
         # The real probe authenticates exactly like the client does; an injected
@@ -358,17 +417,17 @@ def cmd_doctor(
         envelope_dir = Path.home() / ".ironcore" / "envelopes"
     try:
         envelope_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[ok] envelope cache writable: {_display_path(envelope_dir)}")
+        _say(f"[ok] envelope cache writable: {_display_path(envelope_dir)}")
     except OSError as exc:  # pragma: no cover — defensive
-        print(f"[FAIL] envelope cache: {exc}")
+        _say(f"[FAIL] envelope cache: {exc}")
         ok = False
 
     # git backs /undo, /redo and change-set snapshots -- a headline feature that
     # silently degrades to nothing when git is missing.
     if _which("git"):
-        print("[ok] git found (undo/redo and change-set snapshots available)")
+        _say("[ok] git found (undo/redo and change-set snapshots available)")
     else:
-        print("[!!] git not found -- /undo, /redo and change-set snapshots are disabled")
+        _say("[!!] git not found -- /undo, /redo and change-set snapshots are disabled")
 
     # whether the configured model has been measured — the molds-to-the-model status
     from ironcore.envelope.profile import CapabilityProfile
@@ -381,18 +440,21 @@ def cmd_doctor(
     if quarantine_note:
         # same sentence the boot note uses, minus its "[envelope]" tag -- doctor's
         # own marker column already carries the severity.
-        print(f"[!!] {quarantine_note.removeprefix('[envelope] ')}")
+        _say(f"[!!] {quarantine_note.removeprefix('[envelope] ')}")
     if profile is not None and (profile.source == "probed" or profile.probed_at is not None):
-        print(
+        _say(
             f"[ok] model {settings.provider.model} measured "
             f"(tools: {profile.recommended_tool_protocol()}, edits: "
             f"{profile.recommended_edit_format()}, ctx: {profile.honest_context})"
         )
     else:
-        print(
-            f"[--] model {settings.provider.model} unprobed -- the app instant-seeds it "
-            "from the endpoint in ~1s then measures in the background (or run /probe)"
-        )
+        # Finding on the marker line, remedy indented under it -- the same shape
+        # every other multi-line check uses. As one 133-character sentence it
+        # wrapped to column 0 in any normal terminal, which broke the marker
+        # column exactly where a reader is scanning it.
+        _say(f"[--] model {settings.provider.model} unprobed")
+        _say("     the app instant-seeds it in ~1s from the endpoint, then measures it")
+        _say("     in the background -- or run /probe to measure it now")
 
     ok = _report_mcp(settings) and ok
 
@@ -403,18 +465,18 @@ def cmd_doctor(
 
     plugin_provider_types: set[str] = set()
     if not settings.plugins.enabled:
-        print("[--] plugins: disabled ([plugins] enabled = false)")
+        _say("[--] plugins: disabled ([plugins] enabled = false)")
     else:
         loaded = load_plugins(settings, resolved_project)
-        print(f"[ok] plugins: {loaded.summary()}")
+        _say(f"[ok] plugins: {loaded.summary()}")
         for skip in loaded.skipped:
-            print(f"[--] plugin skipped: {skip.group}:{skip.name} -- {skip.reason}")
+            _say(f"[--] plugin skipped: {skip.group}:{skip.name} -- {skip.reason}")
         plugin_provider_types = set(loaded.provider_factories)
     ptype = settings.provider.type
     if ptype not in ("auto", "ollama", "openai") and ptype not in plugin_provider_types:
         # boot keeps the pinned unknown-type -> auto fallthrough; say so here
         # instead of silently building the wrong client.
-        print(
+        _say(
             f"[!!] provider.type {ptype!r} matches no built-in or plugin provider "
             "factory; boot falls back to auto-selection"
         )
@@ -446,13 +508,13 @@ def _report_endpoint(
     ok = True
     where = _config_hint(user_path, project_path)
     if result.status == "bad_url":
-        print(f"[FAIL] provider.base_url is not a usable URL: {endpoint}")
-        print("       expected something like http://localhost:11434/v1")
-        print(f"       set [provider] base_url in {where}")
+        _say(f"[FAIL] provider.base_url is not a usable URL: {endpoint}")
+        _say("       expected something like http://localhost:11434/v1")
+        _say(f"       set [provider] base_url in {where}")
         ok = False
     elif result.status == "unreachable":
-        print(f"[--] endpoint not reachable: {result.url}")
-        print("     start your local server (e.g. `ollama serve`), then re-run `ironcore doctor`")
+        _say(f"[--] endpoint not reachable: {result.url}")
+        _say("     start your local server (e.g. `ollama serve`), then re-run `ironcore doctor`")
     elif result.status in ("unauthorized", "http_error"):
         # Something is listening but it is not talking OpenAI at this path. That
         # is a config error the user must fix -- same class as bad_url, NOT the
@@ -460,27 +522,27 @@ def _report_endpoint(
         if result.status == "unauthorized":
             # We DID send the configured key, so base_url is not the suspect
             # here and telling them to change it sends them the wrong way.
-            print(f"[FAIL] endpoint rejected our API key: HTTP {result.code} from {result.url}")
-            print(f"       set [provider] api_key in {where} (or the IRONCORE_API_KEY env var)")
+            _say(f"[FAIL] endpoint rejected our API key: HTTP {result.code} from {result.url}")
+            _say(f"       set [provider] api_key in {where} (or the IRONCORE_API_KEY env var)")
         else:
-            print(
+            _say(
                 f"[FAIL] got HTTP {result.code} from {result.url} "
                 "-- is this an OpenAI-compatible endpoint?"
             )
             if not endpoint.rstrip("/").endswith("/v1"):
-                print(f"       base_url usually ends with /v1 (yours is {endpoint})")
-            print(f"       set [provider] base_url in {where}")
+                _say(f"       base_url usually ends with /v1 (yours is {endpoint})")
+            _say(f"       set [provider] base_url in {where}")
         ok = False
     elif result.status == "bad_payload":
-        print(f"[FAIL] {result.url} answered {result.code} but not with an OpenAI model list")
-        print(f"       point [provider] base_url at an OpenAI-compatible server ({where})")
+        _say(f"[FAIL] {result.url} answered {result.code} but not with an OpenAI model list")
+        _say(f"       point [provider] base_url at an OpenAI-compatible server ({where})")
         ok = False
     else:
-        print(f"[ok] endpoint reachable: {result.url} ({len(result.models)} model(s) listed)")
+        _say(f"[ok] endpoint reachable: {result.url} ({len(result.models)} model(s) listed)")
         ok = _report_models(result, settings, where) and ok
 
     if not ok or result.status != "ok":
-        print("     no model ready yet? `ironcore demo` runs a real session fully offline")
+        _say("     no model ready yet? `ironcore demo` runs a real session fully offline")
     return ok
 
 
@@ -498,8 +560,8 @@ def _report_models(result: EndpointProbe, settings: Settings, where: str) -> boo
             wanted.append((f"roles.{role}", model))
 
     if not result.models:
-        print(f"[FAIL] {result.url} answered, but lists no models at all")
-        print(f"       pull one first (e.g. `ollama pull {settings.provider.model}`)")
+        _say(f"[FAIL] {result.url} answered, but lists no models at all")
+        _say(f"       pull one first (e.g. `ollama pull {settings.provider.model}`)")
         return False
 
     shown = ", ".join(result.models[:5])
@@ -508,11 +570,11 @@ def _report_models(result: EndpointProbe, settings: Settings, where: str) -> boo
     ok = True
     for label, model in wanted:
         if _model_available(model, result.models):
-            print(f"[ok] {label} {model} is available at the endpoint")
+            _say(f"[ok] {label} {model} is available at the endpoint")
         else:
-            print(f"[FAIL] model {model} is not available at {result.url} (from {label})")
-            print(f"       models you have: {shown}")
-            print(f"       fix: `ollama pull {model}`, or set [provider] model in {where}")
+            _say(f"[FAIL] model {model} is not available at {result.url} (from {label})")
+            _say(f"       models you have: {shown}")
+            _say(f"       fix: `ollama pull {model}`, or set [provider] model in {where}")
             ok = False
     return ok
 
@@ -534,9 +596,9 @@ def _report_mcp(settings: Settings) -> bool:
     names = ", ".join(name for name, _ in servers)
     registered = settings.safety.network_tools
     if registered:
-        print(f"[ok] mcp: {len(servers)} server(s) configured ({names})")
+        _say(f"[ok] mcp: {len(servers)} server(s) configured ({names})")
     else:
-        print(
+        _say(
             f"[--] mcp: {len(servers)} server(s) configured ({names}) but MCP tools "
             "are NET-risk and stay unregistered until safety.network_tools = true"
         )
@@ -545,19 +607,19 @@ def _report_mcp(settings: Settings) -> bool:
         if not srv.command:
             # the exact wording MCPManager.from_settings emits, so doctor and
             # the TUI never disagree about why an entry was dropped.
-            print(
+            _say(
                 f"[--] mcp {name}: url-only entries are not supported yet "
                 "(stdio only -- set 'command') -- will be skipped"
             )
         elif _which(srv.command) is None:
             missing = f"mcp {name}: command {srv.command!r} not found on PATH"
             if registered:
-                print(f"[FAIL] {missing}")
+                _say(f"[FAIL] {missing}")
                 ok = False
             else:
-                print(f"[!!] {missing}")
-                print("     harmless today (this server is not registered); fix it before")
-                print("     turning safety.network_tools on")
+                _say(f"[!!] {missing}")
+                _say("     harmless today (this server is not registered); fix it before")
+                _say("     turning safety.network_tools on")
     return ok
 
 
@@ -630,6 +692,26 @@ mode = "manual"
 """
 
 
+def _init_say(text: str) -> None:
+    """Print one ``init`` line. Like :func:`_say`, the styling is derived from
+    the text and cannot alter it: an ``ironcore:`` prefix means init refused to
+    do something (so the prefix carries the error colour), ``wrote …`` is the
+    result the user came for, and everything else is supporting detail."""
+    from rich.text import Text
+
+    from ironcore import term
+
+    if text.startswith("ironcore: "):
+        out = Text()
+        out.append("ironcore:", style=term.STYLE_FAIL)
+        out.append(text[len("ironcore:") :])
+        term.line(out)
+    elif text.startswith("wrote "):
+        term.line(Text(text, style="bold"))
+    else:
+        term.line(Text(text, style=term.STYLE_MUTED))
+
+
 def _backup_before_overwrite(target: Path) -> int:
     """Preserve ``target``'s current bytes beside it before ``--force`` writes over them.
 
@@ -641,8 +723,8 @@ def _backup_before_overwrite(target: Path) -> int:
     try:
         current = target.read_bytes()
     except OSError as exc:
-        print(f"ironcore: could not read {_display_path(target)} to back it up: {exc}")
-        print("ironcore: refusing to overwrite a file whose contents cannot be preserved")
+        _init_say(f"ironcore: could not read {_display_path(target)} to back it up: {exc}")
+        _init_say("ironcore: refusing to overwrite a file whose contents cannot be preserved")
         return 1
 
     # Unchanged since init wrote it: nothing is at risk, so do not litter the
@@ -671,17 +753,17 @@ def _backup_before_overwrite(target: Path) -> int:
     # copy of the template. The only way to lose a .bak is edit-force-edit-force,
     # where the newer edit is the one worth keeping.
     if backup.is_dir():
-        print(f"ironcore: {_display_path(backup)} is a directory, not a backup file")
-        print("ironcore: remove or rename it, then re-run `ironcore init --force`")
-        print(f"ironcore: leaving {_display_path(target)} untouched")
+        _init_say(f"ironcore: {_display_path(backup)} is a directory, not a backup file")
+        _init_say("ironcore: remove or rename it, then re-run `ironcore init --force`")
+        _init_say(f"ironcore: leaving {_display_path(target)} untouched")
         return 1
     try:
         backup.write_bytes(current)
     except OSError as exc:
-        print(f"ironcore: could not write the backup {_display_path(backup)}: {exc}")
-        print(f"ironcore: leaving {_display_path(target)} untouched")
+        _init_say(f"ironcore: could not write the backup {_display_path(backup)}: {exc}")
+        _init_say(f"ironcore: leaving {_display_path(target)} untouched")
         return 1
-    print(f"backed up the config that was there to {_display_path(backup)}")
+    _init_say(f"backed up the config that was there to {_display_path(backup)}")
     return 0
 
 
@@ -703,11 +785,11 @@ def cmd_init(
     if target.is_dir():
         # --force would not help here (the write fails with an OSError either
         # way), so do not suggest a remedy that cannot work.
-        print(f"ironcore: {target} is a directory, not a config file")
-        print("ironcore: remove or rename it, then re-run `ironcore init`")
+        _init_say(f"ironcore: {target} is a directory, not a config file")
+        _init_say("ironcore: remove or rename it, then re-run `ironcore init`")
         return 1
     if target.exists() and not force:
-        print(f"ironcore: {target} already exists; pass --force to overwrite it")
+        _init_say(f"ironcore: {target} already exists; pass --force to overwrite it")
         return 1
     # --force is the only path that can destroy something a user typed by hand,
     # so the old contents are preserved first -- and if they cannot be, the
@@ -720,10 +802,10 @@ def cmd_init(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(STARTER_CONFIG, encoding="utf-8")
     except OSError as exc:
-        print(f"ironcore: could not write {target}: {exc}")
+        _init_say(f"ironcore: could not write {target}: {exc}")
         return 1
-    print(f"wrote {target}")
-    print("edit [provider] base_url + model, then run `ironcore doctor`")
+    _init_say(f"wrote {target}")
+    _init_say("edit [provider] base_url + model, then run `ironcore doctor`")
     return 0
 
 
@@ -742,7 +824,7 @@ def cmd_demo(smoke: bool = False) -> int:
     from ironcore.demo.scenario import run_demo
 
     if not smoke:
-        return run_demo(emit=print)
+        return run_demo()  # narrated to the shared console, styled when on a TTY
 
     captured: list[str] = []
     code = run_demo(emit=captured.append)
@@ -794,7 +876,7 @@ def _dispatch(argv: list[str] | None) -> int:
         from ironcore.tui.app import run_app
 
         return run_app(resume=args.resume)
-    print(BANNER.format(version=__version__, repo=REPO_URL, issues=ISSUES_URL))
+    _print_banner()
     print("no interactive terminal; try `ironcore doctor` or `ironcore demo`", file=sys.stderr)
     return 1
 
