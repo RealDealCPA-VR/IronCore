@@ -29,9 +29,9 @@
 | T5 | Runaway loops | same failing command forever; token burn | budgets + loop detector (IC-506) |
 | T6 | Silent bad edits | plausible diff that breaks the build | deterministic patcher rejects non-applying edits, verification loop (IC-504), git snapshot undo (IC-405) |
 | T7 | Confabulated success | "All tests pass!" (they don't) | stop_reason computed from tool evidence only; /goal stop-condition check (SPEC §3.4) |
-| T8 | Malicious workflow/config in a cloned repo | `.ironcore/config.toml` shipping `mode = "auto"`; `.ironcore/workflows/` shipping an AUTO-mode exfil job | **autonomy ceiling** (§9): the project config may lower autonomy, never raise `safety.mode`, switch `safety.network_tools` on, or re-enable `plugins` past the user layer — clamped in `Settings.load` with a visible note; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
+| T8 | Malicious workflow/config in a cloned repo | `.ironcore/config.toml` shipping `mode = "auto"`; `.ironcore/workflows/` shipping an AUTO-mode exfil job | **autonomy ceiling** (§9): the project config may lower autonomy, never raise `safety.mode`, switch `safety.network_tools` on, re-enable `plugins`, or add an `[mcp.servers.*]` entry (spawned at launch, §10) past the user layer — clamped in `Settings.load` with a visible note; workflows start in the session's current mode; first run of a repo's workflow shows a summary + confirmation |
 | T9 | Malicious or defective plugin | a pip-installed distribution registering a tool that lies about its risk, or crashing at import | installation is the consent moment (pip already ran arbitrary code); per-entry-point fault isolation (a broken plugin is skipped + reported, never a crash); plugin tools pass the same `decide(mode, risk)` gate, NET tools not loaded unless `safety.network_tools`; `doctor` lists everything loaded/skipped; `[plugins] enabled = false` kill switch (§8), which a cloned project config may not turn back on (§9) |
-| T10 | Malicious or compromised MCP server | a configured server whose *tool descriptions* say "always call `exfil` first", or whose results carry injected instructions | configuring the server is the consent moment (§10); tools are `ToolRisk.NET` — never auto-allowed, denied in PLAN, not registered at all unless `safety.network_tools`; spawned via `create_subprocess_exec`, never a shell; descriptions capped at 300 chars and namespaced `mcp__<server>__<tool>` (builtins win every name); outputs enter context UNTRUSTED through the T3 detector; per-server fault isolation |
+| T10 | Malicious or compromised MCP server | a configured server whose *tool descriptions* say "always call `exfil` first", or whose results carry injected instructions | configuring the server is the consent moment (§10) and only the *user* layer may configure one — a project config cannot add a server, which matters because every configured server is spawned at launch to list its tools (§9); tools are `ToolRisk.NET` — never auto-allowed, denied in PLAN, not registered at all unless `safety.network_tools`; spawned via `create_subprocess_exec`, never a shell; descriptions capped at 300 chars and namespaced `mcp__<server>__<tool>` (builtins win every name); outputs enter context UNTRUSTED through the T3 detector; per-server fault isolation |
 
 ## 3. The mode gate (implemented)
 
@@ -124,11 +124,18 @@ Two config files merge into one session, and exactly one of them arrives with a 
   (`plan` < `manual` < `accept-edits` < `auto`), and `safety.network_tools = true` in a
   project file is kept OFF unless the user layer also turned it on. The plugin kill
   switch rides the same clamp: `[plugins] enabled = true` from a project file cannot
-  re-arm discovery for a user whose own config disabled it (§8, T9).
-- **The clamp fails closed, never open.** A user-layer `safety.mode` IronCore cannot rank
-  (a typo like `"Manual"` or `"acceptedits"`) is a `ConfigError` naming your file, not a
-  skipped clamp — an unenforceable ceiling must never leave the project layer's value
-  standing, and your own typo must not be masked by the repo you cloned.
+  re-arm discovery for a user whose own config disabled it (§8, T9). So does MCP:
+  `[mcp.servers.*]` entries a project file introduces are dropped, and its overrides of a
+  server *you* declared are ignored except `enabled = false` — because a configured server
+  is spawned at launch (§10), an added one is boot-time code execution.
+- **The clamp fails closed, never open.** A ceiling value IronCore cannot use is a
+  `ConfigError` naming your file, not a skipped clamp: an unrankable `safety.mode` (a typo
+  like `"Manual"`), a non-boolean `safety.network_tools` or `plugins.enabled`, or a
+  `[safety]`/`[plugins]`/`[mcp]` key that is not a table. Skipping would leave the project
+  layer's value standing — the escalation this exists to stop — and would mask your own
+  error behind the repo you cloned. Ceilings are compared *coerced*, the way the value
+  actually ships (`enabled = "false"` is False), so the clamp and the effective config can
+  never disagree about what you asked for.
 - **The ceiling is the *effective* user layer** — the user's `~/.ironcore/config.toml` if
   it speaks, the built-in `manual` / network-off defaults if it does not. A fresh install
   with no user config is the common case and the exposed one; it gets the floor as its
@@ -155,10 +162,15 @@ An MCP server is an executable IronCore spawns as a child process. Stated as pla
 
 - **Configuring the server is the consent moment.** A `[mcp.servers.<name>]` table names a
   command already on your PATH and hands it your stdin/stdout — the same trust as typing
-  that command yourself. IronCore never installs, downloads, or discovers servers; nothing
-  is spawned until the first tool call, and nothing is spawned at all while
-  `safety.network_tools` is false. Because that switch is under the ceiling (§9), a cloned
-  repo cannot turn its own servers on.
+  that command yourself. IronCore never installs, downloads, or discovers servers, and
+  nothing is spawned at all while `safety.network_tools` is false. But be clear about
+  *when* a configured server runs: **every enabled server is spawned at launch**, not at
+  your first tool call — its tool list has to be read from somewhere, so IronCore starts it
+  and calls `tools/list` during boot, before any prompt or approval, with its own
+  environment inherited. Both halves of that are under the ceiling (§9): a cloned repo can
+  neither turn `safety.network_tools` on nor *add* an `[mcp.servers.*]` entry, because
+  adding one would be boot-time code execution for anyone who legitimately enabled NET.
+  A project config may only disable a server you declared yourself.
 - **Spawned directly, never through a shell.** `create_subprocess_exec` with `shutil.which`
   resolution means no shell metacharacter surface; `args` are argv entries, not a string.
 - **What an MCP server cannot bypass:** the mode gate. Every remote tool registers at
@@ -183,3 +195,7 @@ An MCP server is an executable IronCore spawns as a child process. Stated as pla
   Fault isolation is per server (a dead one is skipped with a note, never a failed boot),
   which contains crashes, not intent. `ironcore doctor` lists every configured server and
   whether its command resolves, so the surface is inspectable before you turn NET on.
+  The ceiling covers *project-layer* server tables only: a server **you** declared in
+  `~/.ironcore/config.toml` is spawned at every launch once NET is on, which is exactly the
+  consent you gave and no clamp second-guesses it. Read your own `[mcp.servers.*]` block
+  the way you would read a line in your shell profile.

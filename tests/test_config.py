@@ -1,5 +1,6 @@
 """Layered settings: defaults <- user <- project <- env."""
 
+import codecs
 from pathlib import Path
 
 import pytest
@@ -447,6 +448,139 @@ def test_unreadable_and_non_utf8_config_files_raise_configerror_not_a_traceback(
     a_directory.mkdir()
     with pytest.raises(ConfigError):
         Settings.load(project_dir=tmp_path, user_config=a_directory, env={})
+
+
+# --------------------------------------------------------------------------- #
+# FIX-3 round 2: the ceiling must read the user layer the way pydantic does, and
+# `[mcp.servers.*]` is under the ceiling too because a configured server is
+# spawned AT LAUNCH (register_into -> tools/list), not at the first tool call.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("raw", ['"false"', "0", '"no"'])
+def test_a_coercible_user_plugins_switch_is_still_a_ceiling(tmp_path: Path, raw: str):
+    """Round-2 major: the clamp read RAW TOML while the effective value is
+    pydantic-COERCED, so `enabled = "false"` (which pydantic honours, and which
+    disables plugins when the user file is alone) fell back to the PERMISSIVE
+    default as the ceiling -- and a cloned repo re-armed entry-point plugin code
+    at boot for the one user who explicitly disarmed it."""
+    user = tmp_path / "user.toml"
+    user.write_text(f"[plugins]\nenabled = {raw}\n")
+    assert Settings.load(project_dir=None, user_config=user, env={}).plugins.enabled is False
+
+    project = _project_with(tmp_path / raw.strip('"'), "[plugins]\nenabled = true\n")
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.plugins.enabled is False
+    assert notes and str(user) in "\n".join(notes)
+
+
+@pytest.mark.parametrize("section", ["plugins", "safety", "mcp"])
+def test_a_non_table_user_section_raises_instead_of_being_skipped(tmp_path: Path, section: str):
+    """Round-2 major, worse variant: `plugins = 5` alone raised loudly, but adding
+    a project `[plugins] enabled = true` made the untrusted layer both escalate
+    AND mask the user's own config error."""
+    user = tmp_path / "user.toml"
+    user.write_text(f"{section} = 5\n")
+    project = _project_with(
+        tmp_path,
+        "[plugins]\nenabled = true\n[safety]\nmode = 'auto'\n"
+        '[mcp.servers.evil]\ncommand = "calc"\n',
+    )
+
+    with pytest.raises(ConfigError) as excinfo:
+        Settings.load(project_dir=project, user_config=user, env={})
+    assert section in str(excinfo.value) and str(user) in str(excinfo.value)
+
+
+def test_a_non_boolean_user_ceiling_raises_rather_than_falling_back(tmp_path: Path):
+    """Same defect class as the round-1 mode fix: a ceiling IronCore cannot read
+    must be loud, never a skipped clamp."""
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nnetwork_tools = "sometimes"\n')
+    project = _project_with(tmp_path, "[safety]\nnetwork_tools = true\n")
+
+    with pytest.raises(ConfigError) as excinfo:
+        Settings.load(project_dir=project, user_config=user, env={})
+    assert "network_tools" in str(excinfo.value) and str(user) in str(excinfo.value)
+
+
+def test_a_coercible_user_network_ceiling_is_not_misattributed(tmp_path: Path):
+    """Round-2 minor: user `network_tools = 1` is True to pydantic (and alone it
+    turns NET on), but the raw read clamped it OFF while the note blamed the
+    user's own ceiling for a decision the user never made."""
+    user = tmp_path / "user.toml"
+    user.write_text("[safety]\nnetwork_tools = 1\n")
+    project = _project_with(tmp_path, "[safety]\nnetwork_tools = true\n")
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.safety.network_tools is True
+    assert notes == []
+
+
+def test_a_project_config_cannot_add_an_mcp_server(tmp_path: Path):
+    """Round-2 major (T8 x T10): every configured server is spawned at LAUNCH to
+    enumerate its tools, so a `[mcp.servers.*]` table arriving with a `git clone`
+    is boot-time code execution for anyone who legitimately turned NET on."""
+    user = tmp_path / "user.toml"
+    user.write_text("[safety]\nnetwork_tools = true\n")
+    project = _project_with(tmp_path, '[mcp.servers.evil]\ncommand = "calc"\n')
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.mcp.servers == {}
+    blob = "\n".join(notes)
+    assert "evil" in blob and str(user) in blob
+    assert all(note.isascii() for note in notes)
+
+
+def test_a_project_config_cannot_redefine_a_user_declared_server(tmp_path: Path):
+    user = tmp_path / "user.toml"
+    user.write_text('[mcp.servers.gh]\ncommand = "real"\nargs = ["--safe"]\n')
+    project = _project_with(
+        tmp_path, '[mcp.servers.gh]\ncommand = "evil"\nargs = ["--pwn"]\n'
+    )
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.mcp.servers["gh"].command == "real"
+    assert settings.mcp.servers["gh"].args == ["--safe"]
+    assert notes and "gh" in notes[0]
+
+
+def test_a_project_config_may_still_disable_a_server(tmp_path: Path):
+    """Lowering stays allowed -- the clamp is one-directional here too."""
+    user = tmp_path / "user.toml"
+    user.write_text('[mcp.servers.gh]\ncommand = "real"\n')
+    project = _project_with(tmp_path, "[mcp.servers.gh]\nenabled = false\n")
+
+    settings, notes = Settings.load_with_notes(project_dir=project, user_config=user, env={})
+    assert settings.mcp.servers["gh"].enabled is False
+    assert settings.mcp.servers["gh"].command == "real"
+    assert notes == []
+
+
+def test_the_mode_note_does_not_claim_a_clamp_the_env_overrode(tmp_path: Path):
+    """Round-2 minor: the clamp runs before `_apply_env`, so with IRONCORE_MODE
+    set doctor printed `mode auto` and then a note asserting it had been clamped
+    to manual -- on the one surface whose whole value is being trustworthy."""
+    user = tmp_path / "user.toml"
+    user.write_text('[safety]\nmode = "manual"\n')
+    project = _project_with(tmp_path, '[safety]\nmode = "auto"\n')
+
+    settings, notes = Settings.load_with_notes(
+        project_dir=project, user_config=user, env={"IRONCORE_MODE": "auto"}
+    )
+    assert settings.safety.mode == "auto"  # env is the human at the keyboard
+    blob = "\n".join(notes)
+    assert "IRONCORE_MODE" in blob
+    assert "clamped to your ceiling" not in blob  # it plainly was not
+
+
+def test_a_utf8_bom_config_still_parses(tmp_path: Path):
+    """Round-2 minor: a BOM is a routine Windows editor artifact; it decoded fine
+    and died as a bogus TOML syntax error at line 1, column 1."""
+    user = tmp_path / "bom.toml"
+    user.write_bytes(codecs.BOM_UTF8 + b'[safety]\nmode = "plan"\n')
+
+    assert Settings.load(project_dir=None, user_config=user, env={}).safety.mode == "plan"
 
 
 # --------------------------------------------------------------------------- #

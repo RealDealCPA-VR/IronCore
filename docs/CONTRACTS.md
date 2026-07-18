@@ -195,10 +195,19 @@ owns them, then freezes the *budget shares* here).
   `~/.ironcore/config.toml` is a floor, not an exemption. `plugins.enabled = true` from a
   project file is likewise forced back to `false` when the user layer disabled it (the
   kill switch of SAFETY.md §8/T9); the default is `true`, so a project file that merely
-  agrees with the default escalates nothing and earns no note. A user-layer `safety.mode`
-  that is not a rankable mode value raises `ConfigError` naming the user config file —
-  the clamp fails closed and loud rather than skipping (an unenforceable ceiling must not
-  leave the project layer's value standing). `safety.workspace_only` is NOT clamped: the
+  agrees with the default escalates nothing and earns no note. `[mcp.servers.<name>]`
+  tables introduced by the project layer are DROPPED, and its overrides of a server the
+  user layer declared are ignored except `enabled = false` (a lowering) — every configured
+  server is spawned at launch to enumerate its tools (SAFETY.md §10), so a project-added
+  entry is boot-time code execution. Ceiling values are compared pydantic-COERCED, not
+  raw, so the clamp cannot disagree with the value that ships (`enabled = "false"` is
+  `False`). A ceiling value IronCore cannot use raises `ConfigError` naming the user
+  config file — an unrankable `safety.mode`, a non-boolean `safety.network_tools` or
+  `plugins.enabled`, or a `[safety]`/`[plugins]`/`[mcp]` key that is not a table: the clamp
+  fails closed and loud rather than skipping (an unenforceable ceiling must not leave the
+  project layer's value standing, nor mask the user's own error). `IRONCORE_MODE` is
+  applied after the clamp and is never clamped, so when it is set the mode note says the
+  env var won rather than claiming a clamp that did not take effect. `safety.workspace_only` is NOT clamped: the
   write jail runs unconditionally, so the flag only controls a system-prompt line.
   `IRONCORE_MODE` and the Shift+Tab
   keystroke are NOT clamped (they are the human at the keyboard, not the cloned tree).
@@ -207,9 +216,11 @@ owns them, then freezes the *budget shares* here).
   with a note naming the file to raise it in — move the key to `~/.ironcore/config.toml`
   (or export `IRONCORE_MODE`) to keep the old effective value. A `~/.ironcore/config.toml`
   carrying a misspelled `safety.mode` that a project file happened to override now fails
-  the load instead of being silently ignored — fix the spelling. Configs that only lower
-  autonomy, and
-  all user-layer/env configs, behave byte-identically.
+  the load instead of being silently ignored — fix the spelling; the same is true of a
+  non-boolean `safety.network_tools`/`plugins.enabled` or a non-table `[safety]`/
+  `[plugins]`/`[mcp]` in the user layer. A project config that declared its own MCP servers
+  now needs them copied into `~/.ironcore/config.toml` to run. Configs that only lower
+  autonomy, and all user-layer/env configs, behave byte-identically.
   🔒 `tests/test_config.py`
 - *Additive:* `Settings.load_with_notes(...) -> (Settings, list[str])` returns the load's
   user-facing notes (autonomy clamps; MCP servers skipped for an unset `${VAR}`), and
@@ -222,6 +233,9 @@ owns them, then freezes the *budget shares* here).
   is unset or empty, that server is dropped from `settings.mcp.servers` with a note rather
   than spawned with a broken value. Disabled entries are left unexpanded. *Migration:*
   none for configs with no `${...}` in `env`, which are byte-identical.
+- *Additive:* a leading UTF-8 BOM is stripped before parsing (a routine Windows editor
+  artifact that decoded fine and died as a bogus "syntax error at line 1, column 1").
+  *Migration:* none — a BOM-less file parses identically.
 - *Additive:* every failure to READ a config file — malformed TOML, non-UTF-8 bytes, an
   unreadable path or a directory where a file was expected — surfaces as `ConfigError`
   with a message naming the file, matching the module's "callers never see a raw

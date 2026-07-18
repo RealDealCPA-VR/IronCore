@@ -12,13 +12,18 @@ Environment overrides (highest precedence):
 THE AUTONOMY CEILING (docs/SAFETY.md T8). The project file is the ONLY layer
 that arrives with a `git clone`, so it is the only untrusted one. It may LOWER
 autonomy freely; it may never RAISE `safety.mode`, turn `safety.network_tools`
-on, or turn `plugins.enabled` back on above the ceiling the user layer set
-(defaults included -- an absent user config means the built-in `manual` /
-network-off floor IS the ceiling). An unrankable user-layer `safety.mode` is a
-ConfigError, not a skipped clamp: fail closed and loud, never open. Env is
-NOT clamped: `IRONCORE_MODE` comes from the user's own shell, not from the repo.
+on, turn `plugins.enabled` back on, or ADD an `[mcp.servers.*]` entry above the
+ceiling the user layer set (defaults included -- an absent user config means the
+built-in `manual` / network-off floor IS the ceiling). Env is NOT clamped:
+`IRONCORE_MODE` comes from the user's own shell, not from the repo.
 Every clamp emits a note (load_with_notes) -- silent downgrades would leave both
 the user and an honest repo author guessing.
+
+A ceiling value IronCore cannot use is a ConfigError naming the user's file, not
+a skipped clamp: skipping leaves the untrusted layer's value standing (fails
+OPEN) and masks the user's own error behind the repo they cloned. For the same
+reason ceilings are compared COERCED, never raw: `enabled = "false"` is False to
+pydantic, so a raw comparison would disagree with the value that actually ships.
 
 Malformed files and invalid values raise ConfigError with a human message
 (file path + line for TOML errors) -- callers never see a raw traceback.
@@ -26,6 +31,7 @@ Malformed files and invalid values raise ConfigError with a human message
 
 from __future__ import annotations
 
+import codecs
 import copy
 import os
 import re
@@ -33,7 +39,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, model_validator
 
 from ironcore.safety.modes import Mode  # config may import safety; safety imports stdlib only
 
@@ -207,8 +213,11 @@ class Settings(BaseModel):
         for layer, path in (("user", user_config), ("project", project_config)):
             if path is not None and path.exists():
                 try:
-                    with path.open("rb") as f:
-                        layers[layer] = tomllib.load(f)
+                    raw = path.read_bytes()
+                    # A UTF-8 BOM is a routine Windows editor artifact and decodes
+                    # fine, so tomllib would blame it on TOML syntax at line 1.
+                    raw = raw.removeprefix(codecs.BOM_UTF8)
+                    layers[layer] = tomllib.loads(raw.decode("utf-8"))
                 except tomllib.TOMLDecodeError as exc:
                     # exc's message already carries "(at line N, column M)".
                     raise ConfigError(f"malformed config file {path}: {exc}") from exc
@@ -229,7 +238,9 @@ class Settings(BaseModel):
         # the ceiling is about to compare against.
         data: dict[str, Any] = copy.deepcopy(layers["user"])
         _deep_merge(data, copy.deepcopy(layers["project"]))
-        notes = _clamp_autonomy(data, layers["user"], layers["project"], user_config)
+        notes = _clamp_autonomy(
+            data, layers["user"], layers["project"], user_config, env.get("IRONCORE_MODE")
+        )
 
         _apply_env(data, env)
         try:
@@ -264,6 +275,7 @@ def _clamp_autonomy(
     user_layer: dict[str, Any],
     project_layer: dict[str, Any],
     user_config: Path,
+    env_mode: str | None = None,
 ) -> list[str]:
     """T8: the project file may lower autonomy, never raise it (module docstring).
 
@@ -274,8 +286,9 @@ def _clamp_autonomy(
     Mutates ``data`` in place; returns one note per clamp.
     """
     notes: list[str] = []
-    notes.extend(_clamp_safety(data, user_layer, project_layer, user_config))
+    notes.extend(_clamp_safety(data, user_layer, project_layer, user_config, env_mode))
     notes.extend(_clamp_plugins(data, user_layer, project_layer, user_config))
+    notes.extend(_clamp_mcp(data, user_layer, project_layer, user_config))
     return notes
 
 
@@ -284,10 +297,11 @@ def _clamp_safety(
     user_layer: dict[str, Any],
     project_layer: dict[str, Any],
     user_config: Path,
+    env_mode: str | None = None,
 ) -> list[str]:
     """The `[safety]` half of the ceiling: `mode` and `network_tools`."""
     notes: list[str] = []
-    user_safety = _section(user_layer, "safety")
+    user_safety = _user_section(user_layer, "safety", user_config)
     project_safety = _section(project_layer, "safety")
     merged = data.get("safety")
     if not isinstance(merged, dict):
@@ -313,18 +327,32 @@ def _clamp_safety(
         and _MODE_RANK[wanted_mode] > _MODE_RANK[ceiling_mode]
     ):
         merged["mode"] = ceiling_mode
-        notes.append(
-            f"[safety] project config requested mode {wanted_mode!r}; clamped to your "
-            f"ceiling {ceiling_mode!r} (docs/SAFETY.md T8). Grant it for this session "
-            f"with Shift+Tab, or raise the ceiling in {user_config}."
-        )
+        if env_mode:
+            # _apply_env runs AFTER the clamp and is deliberately not clamped, so
+            # this clamp will not survive the load. Reporting it as though it did
+            # would make the one surface whose entire value is trustworthiness lie.
+            notes.append(
+                f"[safety] project config requested mode {wanted_mode!r}, above your "
+                f"ceiling {ceiling_mode!r} (docs/SAFETY.md T8) -- but IRONCORE_MODE="
+                f"{env_mode} from your own shell wins; env is never clamped."
+            )
+        else:
+            notes.append(
+                f"[safety] project config requested mode {wanted_mode!r}; clamped to your "
+                f"ceiling {ceiling_mode!r} (docs/SAFETY.md T8). Grant it for this session "
+                f"with Shift+Tab, or raise the ceiling in {user_config}."
+            )
 
     # network_tools has no per-session keystroke, so an unset user layer means
     # the default (off) is the ceiling and a cloned repo cannot switch NET on.
-    ceiling_net = user_safety.get("network_tools")
-    if not isinstance(ceiling_net, bool):
-        ceiling_net = SafetySettings.model_fields["network_tools"].default
-    if project_safety.get("network_tools") is True and ceiling_net is not True:
+    ceiling_net = _user_bool(
+        user_safety,
+        "network_tools",
+        SafetySettings.model_fields["network_tools"].default,
+        "safety.network_tools",
+        user_config,
+    )
+    if _project_bool(project_safety, "network_tools") is True and ceiling_net is not True:
         merged["network_tools"] = False
         notes.append(
             "[safety] project config requested network_tools = true; kept OFF by your "
@@ -350,10 +378,14 @@ def _clamp_plugins(
     execution for the one user who explicitly disarmed it.
     """
     notes: list[str] = []
-    ceiling = _section(user_layer, "plugins").get("enabled")
-    if not isinstance(ceiling, bool):
-        ceiling = PluginSettings.model_fields["enabled"].default
-    if _section(project_layer, "plugins").get("enabled") is not True or ceiling is True:
+    ceiling = _user_bool(
+        _user_section(user_layer, "plugins", user_config),
+        "enabled",
+        PluginSettings.model_fields["enabled"].default,
+        "plugins.enabled",
+        user_config,
+    )
+    if _project_bool(_section(project_layer, "plugins"), "enabled") is not True or ceiling is True:
         return notes
     merged = data.get("plugins")
     if not isinstance(merged, dict):
@@ -365,6 +397,93 @@ def _clamp_plugins(
         f"[plugins] enabled = true in {user_config}."
     )
     return notes
+
+
+def _clamp_mcp(
+    data: dict[str, Any],
+    user_layer: dict[str, Any],
+    project_layer: dict[str, Any],
+    user_config: Path,
+) -> list[str]:
+    """T8 x T10: a cloned config may not put an executable on the launch path.
+
+    Every configured server is SPAWNED AT LAUNCH, not at the first tool call: the
+    TUI's mount worker runs ``MCPManager.register_into``, which calls
+    ``tools/list`` on each server to enumerate its tools -- before any prompt,
+    tool call or approval, with IronCore's environment inherited. So an
+    ``[mcp.servers.*]`` table that arrived with a `git clone` is boot-time code
+    execution for every user who legitimately turned NET on, and the NET switch
+    alone does not contain it. The project layer may DISABLE a server the user
+    declared (a lowering, always allowed); it may never introduce one, nor
+    redefine the command of one.
+    """
+    notes: list[str] = []
+    project_servers = _section(_section(project_layer, "mcp"), "servers")
+    if not project_servers:
+        return notes
+    user_servers = _section(_user_section(user_layer, "mcp", user_config), "servers")
+    merged = _section(data, "mcp").get("servers")
+    if not isinstance(merged, dict):
+        return notes  # garbage section — model_validate reports it loudly
+    for name, entry in project_servers.items():
+        declared = user_servers.get(name)
+        if not isinstance(declared, dict):
+            merged.pop(name, None)
+            notes.append(
+                f"[mcp] project config declares server {name!r}; ignored (docs/SAFETY.md "
+                "T8/T10) -- every configured server is spawned at launch to list its "
+                f"tools, so a cloned config cannot add one. Declare it in {user_config} "
+                "to run it."
+            )
+            continue
+        restored = copy.deepcopy(declared)
+        if _project_bool(entry if isinstance(entry, dict) else {}, "enabled") is False:
+            restored["enabled"] = False  # turning a server OFF is a lowering
+        if merged.get(name) != restored:
+            notes.append(
+                f"[mcp] project config overrides server {name!r}; ignored except "
+                f"'enabled = false' -- your definition in {user_config} stands."
+            )
+        merged[name] = restored
+    return notes
+
+
+#: pydantic's own bool rules, so a ceiling read agrees with the value that ships
+#: (`"false"`, `0` and `"no"` are all False to the model, and to a TOML author).
+_BOOL = TypeAdapter(bool)
+
+
+def _user_bool(
+    section: dict[str, Any], key: str, default: bool, where: str, user_config: Path
+) -> bool:
+    """The user's effective value for a boolean ceiling key, coerced.
+
+    A value pydantic would reject is a ConfigError naming the user's file. The
+    tempting fall back to the field default fails OPEN on every permissive
+    default (``plugins.enabled``): the untrusted project layer would both
+    escalate past a disarmed switch AND mask the user's own config error.
+    """
+    if key not in section:
+        return default
+    try:
+        return _BOOL.validate_python(section[key])
+    except ValidationError:
+        raise ConfigError(
+            f"invalid config value at {where} in {user_config}: "
+            f"{section[key]!r} is not a boolean (true or false)"
+        ) from None
+
+
+def _project_bool(section: dict[str, Any], key: str) -> bool | None:
+    """What the project layer asked for, coerced the same way -- ``None`` when it
+    did not ask, or asked with garbage (which ``model_validate`` reports loudly
+    on the merged data; the clamp must not pre-empt that with a wrong answer)."""
+    if key not in section:
+        return None
+    try:
+        return _BOOL.validate_python(section[key])
+    except ValidationError:
+        return None
 
 
 #: ``${VAR}`` in an MCP env value. Bare ``$VAR`` is left literal on purpose:
@@ -417,6 +536,25 @@ def _expand_mcp_env(settings: Settings, env: dict[str, str]) -> list[str]:
 def _section(layer: dict[str, Any], name: str) -> dict[str, Any]:
     value = layer.get(name)
     return value if isinstance(value, dict) else {}
+
+
+def _user_section(layer: dict[str, Any], name: str, user_config: Path) -> dict[str, Any]:
+    """The USER layer's ``[name]`` table -- loudly, if it is not a table.
+
+    Falling through to ``{}`` here would take the permissive built-in default as
+    the ceiling, so the untrusted project layer would escalate past the user's
+    own (broken) intent and hide the error that fires when no project file is
+    present. Fail closed and loud, never open.
+    """
+    value = layer.get(name)
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ConfigError(
+            f"invalid config value at {name} in {user_config}: expected a [{name}] "
+            f"table, got {type(value).__name__}"
+        )
+    return value
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> None:
