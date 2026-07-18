@@ -39,7 +39,7 @@ Model ids must match what the *server* calls them — copy one from doctor's lis
 A smaller model is not a failure case: IronCore measures whatever you point it at and
 degrades the protocol, not the outcome ([MODELS.md](MODELS.md)).
 
-## `[FAIL] provider.base_url is not a usable URL` / `got HTTP 404 ... is this an OpenAI-compatible endpoint?` / `answered, but not with an OpenAI model list`
+## `[FAIL] provider.base_url is not a usable URL` / `got HTTP 404 ... is this an OpenAI-compatible endpoint?` / `answered <code> but not with an OpenAI model list`
 
 The URL is wrong, or points at something that is not an OpenAI-compatible API.
 
@@ -90,7 +90,9 @@ Working as designed. MCP tools are NET-risk, and NET tools are not merely gated 
 your **user** config to enable them (a project config cannot turn it on — see CONFIG.md §6),
 and read [SAFETY.md](SAFETY.md) §10 first: configured servers are spawned at launch.
 
-`[FAIL] mcp <name>: command 'x' not found on PATH` means the launcher is missing — install
+`[FAIL] mcp <name>: command 'x' not found on PATH` (printed as `[!!]` while
+`safety.network_tools` is off, because an unregistered server cannot hurt you yet)
+means the launcher is missing — install
 it (`npm i -g <package>` for the `npx`-based servers). Write the **bare** command name
 (`npx`, not `npx.cmd`): it is resolved with `shutil.which`, which honors PATHEXT on Windows,
 so the bare name is both correct and portable.

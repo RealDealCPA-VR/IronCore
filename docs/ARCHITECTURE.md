@@ -144,10 +144,33 @@ Everything above the provider call is deterministic and unit-testable with `Mock
 | workflow definitions | workflows | `.ironcore/workflows/*.yaml` (committable; user-authored) — shadows the built-ins shipped in `ironcore/workflows/builtin/` |
 | contributor coordination | humans+agents | `TODO.md`, `HANDOFF.md` (committable) |
 
-Two rules hold for every row: nothing here is written outside `~/.ironcore/` or the
-workspace's `.ironcore/`, and every write that can be interrupted is **atomic** (stage to a
-unique sibling, `fsync`, `os.replace`) with a tolerant reader — a half-written file degrades
-to "unmeasured", never to a crash on next boot.
+Durability is **not** uniform across those rows, and the differences are deliberate. There are
+three classes, and every row is in exactly one:
+
+1. **Atomic replace.** `state.json`, the envelope profile and its outcomes sidecar, the
+   snapshot index, and every file the write tools produce are staged to a unique sibling in
+   the target's own directory, `fsync`ed, then published with `os.replace`
+   (`envelope/profile.py::_atomic_write_json`, `core/state.py`, `safety/snapshots.py`,
+   `tools/fs_write.py::_atomic_write`). Readers are tolerant, so an interrupted write degrades
+   to "unmeasured" — a corrupt envelope cache is renamed `.corrupt` and re-probed — never to a
+   crash on next boot.
+2. **Append with flush, under a lock.** The session transcript and the audit trail are JSONL
+   and are *not* atomic by design: each event is one `json.dumps` line plus newline written and
+   flushed in a single call, with nothing buffered across events, so a crash loses at most the
+   in-flight line and the tolerant readers skip unparseable lines. Because a Windows `"a"`-mode
+   append is seek-to-EOF-then-write rather than an atomic operation, both writers serialize —
+   a per-path thread lock, and for the audit trail an OS advisory lock as well, so concurrent
+   sessions cannot interleave and lose whole records. Rewriting these files atomically would
+   mean rewriting the whole log per event and is the wrong trade.
+3. **Plain write.** `IRONCORE.md` is written with a single truncating `write_text`
+   (`commands/initcmd.py`, `commands/memorycmd.py`). It is human-authored project memory, git
+   is the recovery path, and an interrupted `/init` or `/memory` can leave it short — the only
+   row here without a crash-safety story.
+
+Location is likewise not uniform: most rows live under `~/.ironcore/` or the workspace's
+`.ironcore/`, but `IRONCORE.md` is written at the **workspace root**, and `TODO.md` /
+`HANDOFF.md` at the **repo root** — those three are committable by design, which is the point
+of keeping them out of the state directory.
 
 The model owns **nothing**. Any state the model needs is re-presented at COMPOSE time.
 
