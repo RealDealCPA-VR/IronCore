@@ -37,7 +37,6 @@ imports core/tools/commands/tui.
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,6 +48,7 @@ from ironcore.envelope.profile import (
     TOOL_PROTOCOL_LADDER,
     TOOL_PROTOCOL_THRESHOLDS,
     CapabilityProfile,
+    _atomic_write_json,
 )
 
 #: Counters halve (attempts AND failures) once attempts exceed this, so the
@@ -194,13 +194,7 @@ class OutcomeLedger(BaseModel):
         # Atomic like every other persistence path in this codebase: stage on the
         # same volume, fsync, publish. A crash mid-write leaves the PREVIOUS
         # ledger intact instead of a truncated one.
-        tmp = path.with_name(path.name + ".tmp")
-        payload = json.dumps(self.model_dump(), indent=2)
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(payload)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
+        _atomic_write_json(path, self.model_dump())
         return path
 
     @classmethod

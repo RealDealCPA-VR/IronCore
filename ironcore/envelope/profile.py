@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -24,6 +25,30 @@ TOOL_PROTOCOL_THRESHOLDS: dict[str, float] = {"native": 0.95, "strict_json": 0.9
 
 EDIT_FORMAT_LADDER: tuple[str, ...] = ("unified_diff", "search_replace", "whole_file")
 EDIT_FORMAT_THRESHOLDS: dict[str, float] = {"unified_diff": 0.90, "search_replace": 0.85}
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Publish ``payload`` at ``path`` atomically: stage under a UNIQUE name in
+    the target's own directory (same volume, so ``os.replace`` is atomic), fsync,
+    then rename over the target.
+
+    The staging name is unique per writer, not ``<target>.tmp``: two IronCore
+    sessions probing the same model share the envelope dir with no lock, and a
+    shared staging name lets writer A publish writer B's half-written bytes. A
+    failed write takes its own droppings with it."""
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, indent=2))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 class CapabilityProfile(BaseModel):
@@ -101,13 +126,7 @@ class CapabilityProfile(BaseModel):
         brick every later boot AND ``ironcore doctor``."""
         envelope_dir.mkdir(parents=True, exist_ok=True)
         path = envelope_dir / f"{self.slug(self.model_id)}.json"
-        tmp = path.with_name(path.name + ".tmp")
-        payload = json.dumps(self.model_dump(), indent=2)
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(payload)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
+        _atomic_write_json(path, self.model_dump())
         return path
 
     @classmethod
@@ -128,12 +147,18 @@ class CapabilityProfile(BaseModel):
         happened. Additive surface — CONTRACTS.md §5."""
         path = Path(envelope_dir) / f"{cls.slug(model_id)}.json"
         try:
-            raw = path.read_text(encoding="utf-8")
+            raw = path.read_bytes()
         except OSError:  # missing file = the normal first boot; unreadable = same outcome
             return None, None
         try:
+            # Bytes, not text: ``json.loads`` does its own decoding, so a payload
+            # that isn't valid UTF-8 (power-loss free-list garbage, an AV-quarantine
+            # stub, a cloud-sync conflict copy) raises UnicodeDecodeError — a
+            # ValueError — and is quarantined below like any other corrupt cache.
+            # Decoding via ``read_text`` instead would raise OUTSIDE this guard and
+            # brick every boot, which is the exact failure this class exists to end.
             return cls.model_validate(json.loads(raw)), None
-        except ValueError:  # bad JSON (truncated/empty) or bad schema
+        except ValueError:  # bad bytes, bad JSON (truncated/empty), or bad schema
             pass
         # Quarantine rather than delete: the evidence stays inspectable, and the
         # live path is freed so the next probe can write a good cache.

@@ -135,12 +135,18 @@ owns them, then freezes the *budget shares* here).
   `source` should treat `"tuned"` as measured-and-adjusted, not unprobed.
 
 - *Additive (FIX-1):* **persistence is atomic and reads never raise.** `CapabilityProfile.save`
-  and `OutcomeLedger.save` stage to a sibling `.tmp`, `fsync`, then `os.replace` — an
-  interrupted write leaves the PREVIOUS cache intact instead of a truncated one (matching
-  `core/state.py`, `tools/fs_write.py`, `safety/snapshots.py`). `CapabilityProfile.load` no
+  and `OutcomeLedger.save` stage to a `mkstemp`-unique sibling in the target's own
+  directory, `fsync`, then `os.replace` — an interrupted write leaves the PREVIOUS cache
+  intact instead of a truncated one, and two concurrent sessions sharing the (unlocked)
+  envelope dir cannot publish each other's staged bytes (matching `tools/fs_write.py`;
+  `core/state.py` and `safety/snapshots.py` use the same write-then-rename shape).
+  `CapabilityProfile.load` no
   longer propagates `ValueError`/`OSError`: a missing **or corrupt** cache returns `None`,
   i.e. reads as unprobed and re-probes, so a half-written cache can never brick boot or
-  `ironcore doctor`. A corrupt file is renamed aside to `<slug>.json.corrupt` (never
+  `ironcore doctor`. **"Corrupt" includes bytes that are not valid UTF-8 at all** — the
+  load decodes *inside* the guard (`json.loads` on bytes), so a `UnicodeDecodeError`
+  (a `ValueError`) is tolerated rather than escaping the way a `read_text` would.
+  A corrupt file is renamed aside to `<slug>.json.corrupt` (never
   deleted) and `load_with_note(envelope_dir, model_id) -> (profile, note)` returns a
   user-facing note naming that path; `load` is exactly `load_with_note(...)[0]`.
   *Migration:* none for callers that only read the profile — `load` keeps its signature and

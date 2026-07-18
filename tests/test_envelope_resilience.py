@@ -63,6 +63,10 @@ def _truncate(path: Path) -> None:
     path.write_text(raw[: len(raw) // 2], encoding="utf-8")
 
 
+def _raise_oserror(*_args, **_kwargs):
+    raise OSError("disk full at publish")
+
+
 # --------------------------------------------------------------------------- #
 # (1) tolerant load — a corrupt cache reads as "unprobed", never raises
 # --------------------------------------------------------------------------- #
@@ -92,6 +96,42 @@ def test_corrupt_profile_payloads_all_load_as_none(tmp_path, payload):
     path.write_text(payload, encoding="utf-8")
 
     assert CapabilityProfile.load(tmp_path, "mock") is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"\xff\xfe\x00garbage",  # UTF-16 BOM then junk — cloud-sync conflict copy
+        b"\x00" * 64,  # free-list garbage: the normal shape of a power-loss tear
+        b"\x80\x81\x82",  # continuation bytes with no lead byte
+        b'{"model_id": "mock", "source": "\xff\xfe"}',  # valid JSON shape, bad bytes
+    ],
+)
+def test_non_utf8_profile_cache_loads_as_none_not_raises(tmp_path, raw):
+    """Round-1 validator blocker: the read was decoded OUTSIDE the tolerant
+    guard, and ``UnicodeDecodeError`` is a ``ValueError``, so bytes that aren't
+    valid UTF-8 escaped as an unhandled exception — the exact bricked-boot
+    failure this module exists to prevent, surviving for the input shape that
+    power loss, AV quarantine stubs and sync conflicts actually produce."""
+    path = tmp_path / f"{CapabilityProfile.slug('mock')}.json"
+    path.write_bytes(raw)
+
+    assert CapabilityProfile.load(tmp_path, "mock") is None
+
+    # ...and it is quarantined with a note, exactly like a truncated one. (The
+    # load above already moved it aside, hence the rewrite.)
+    path.write_bytes(raw)
+    profile, note = CapabilityProfile.load_with_note(tmp_path, "mock")
+    assert profile is None
+    assert note is not None and ".json.corrupt" in note
+
+
+def test_non_utf8_ledger_sidecar_loads_as_a_fresh_ledger(tmp_path):
+    """The sidecar's combined try already tolerated this; pin it so the two
+    loaders cannot drift apart again."""
+    OutcomeLedger.path_for(tmp_path, "mock").write_bytes(b"\xff\xfe\x00garbage")
+
+    assert OutcomeLedger.load(tmp_path, "mock").model_id == "mock"
 
 
 def test_corrupt_profile_is_quarantined_and_reprobes_cleanly(tmp_path):
@@ -197,6 +237,63 @@ def test_profile_save_leaves_no_temp_droppings(tmp_path):
     assert names == [f"{CapabilityProfile.slug('mock')}.json"]
 
 
+def test_failed_save_leaves_no_stale_staging_file(tmp_path, monkeypatch):
+    """A write that dies at publication cleans up after itself, like
+    tools/fs_write.py's _atomic_write does."""
+    monkeypatch.setattr(os, "replace", _raise_oserror)
+    with pytest.raises(OSError):
+        CapabilityProfile(model_id="mock").save(tmp_path)
+    with pytest.raises(OSError):
+        OutcomeLedger(model_id="mock").save(tmp_path)
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == []
+
+
+def test_saves_stage_under_unique_names_not_a_shared_tmp(tmp_path, monkeypatch):
+    """Two IronCore sessions share the envelope dir with NO lock. A single
+    fixed ``<target>.tmp`` staging name lets one writer publish another's
+    half-written bytes, so the staging name must be unique per writer."""
+    staged: list[str] = []
+    real_replace = os.replace
+
+    def _spy(src, dst, *args, **kwargs):
+        staged.append(str(src))
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", _spy)
+    CapabilityProfile(model_id="mock").save(tmp_path)
+    CapabilityProfile(model_id="mock").save(tmp_path)
+    OutcomeLedger(model_id="mock").save(tmp_path)
+
+    assert len(set(staged)) == len(staged), f"staging names collided: {staged}"
+    target = tmp_path / f"{CapabilityProfile.slug('mock')}.json"
+    assert str(target) + ".tmp" not in staged, "predictable staging name is the collision vector"
+
+
+def test_interleaved_writers_never_publish_each_others_bytes(tmp_path, monkeypatch):
+    """The concurrency hazard itself: writer B runs a full save while writer A
+    sits between its write and its publish. A must still publish A's OWN bytes.
+    With a shared staging name A would publish B's (possibly partial) file."""
+    real_replace = os.replace
+    calls: list[str] = []
+
+    def _spy(src, dst, *args, **kwargs):
+        depth = len(calls)
+        calls.append(str(src))
+        if depth == 0:  # writer B, interleaved into writer A's critical section
+            CapabilityProfile(model_id="mock", honest_context=2222).save(tmp_path)
+        payload = json.loads(Path(src).read_text(encoding="utf-8"))
+        if depth == 0:
+            assert payload["honest_context"] == 1111, "writer A published writer B's bytes"
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "replace", _spy)
+    CapabilityProfile(model_id="mock", honest_context=1111).save(tmp_path)
+
+    reloaded = CapabilityProfile.load(tmp_path, "mock")
+    assert reloaded is not None and reloaded.honest_context == 1111
+
+
 def test_outcome_ledger_save_is_atomic(tmp_path, monkeypatch):
     """OutcomeLedger.save was the second non-atomic outlier."""
     ledger = OutcomeLedger(model_id="mock")
@@ -244,6 +341,24 @@ def test_from_settings_boots_with_a_corrupt_cache(tmp_path, monkeypatch):
 
     assert app.engine.profile.model_id == "mock"
     assert app.engine.profile.probed_at is None, "a corrupt cache must read as unprobed"
+    assert any(".json.corrupt" in note for note in app._boot_notes), app._boot_notes
+
+
+def test_from_settings_boots_with_a_non_utf8_cache(tmp_path, monkeypatch):
+    """The round-1 blocker at the REAL boot call site, not just the loader:
+    `IronCoreApp.from_settings` tracebacked on bytes that aren't valid UTF-8."""
+    envelope_dir = tmp_path / "envelopes"
+    envelope_dir.mkdir(parents=True)
+    settings = Settings.model_validate(
+        {"provider": {"model": "mock"}, "envelope": {"auto_probe": False, "instant_seed": False}}
+    )
+    CapabilityProfile(model_id="mock", source="probed").save(envelope_dir)
+    (envelope_dir / f"{CapabilityProfile.slug('mock')}.json").write_bytes(b"\xff\xfe\x00garbage")
+
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: envelope_dir)
+    app = IronCoreApp.from_settings(settings=settings, workspace=tmp_path)
+
+    assert app.engine.profile.probed_at is None
     assert any(".json.corrupt" in note for note in app._boot_notes), app._boot_notes
 
 
@@ -384,6 +499,14 @@ def test_help_keys_stay_in_sync_with_the_app_bindings():
     tui/). This is the guard that keeps the duplication honest."""
     from ironcore.commands.builtins import _KEYS
 
+    #: documented affordances that are deliberately NOT App bindings — "/" is
+    #: handled by the input bar, so it has no Binding to match against.
+    non_bindings = {"/"}
+
     bound = {b.key for b in IronCoreApp.BINDINGS}
     documented = {key for key, _ in _KEYS}
     assert bound <= documented, f"undocumented keybindings: {bound - documented}"
+    # ...and the other direction, so a stale or misspelled literal in _KEYS
+    # (which duplicates the keys because commands/ must not import tui/) is
+    # caught too, instead of only a MISSING one.
+    assert documented - non_bindings == bound, f"_KEYS documents non-keys: {documented - bound}"
