@@ -1,19 +1,26 @@
-# Release — build, verify, and publish IronCore to PyPI on a version tag.
+# Release — build, verify, publish, and announce IronCore on a version tag.
 #
-# Fires only when a tag like `v0.1.0` is pushed (SPEC §13: "CI publishes to PyPI on
-# tag"). The pipeline is three gated jobs:
+# Fires only when a tag like `v0.2.0` is pushed (SPEC §13: "CI publishes to PyPI on
+# tag"). The pipeline is four jobs, and it is designed so that the FIRST tag push
+# produces a usable release even though PyPI Trusted Publishing is not configured yet:
 #
-#   build          -> `uv build` produces a pure-Python sdist + wheel; asserts the wheel
-#                     is `-py3-none-any` (the project has NO compiled deps and intends to
-#                     keep it that way), then uploads dist/ as an artifact.
-#   verify-install -> on ubuntu AND windows, installs the *built wheel* into a fresh venv
-#                     and runs `ironcore --version`. This is the real "does the package
-#                     install and its entry point run" gate — it uses the artifact, never
-#                     the checked-out source.
-#   publish        -> Trusted Publishing (OIDC) to PyPI. No API token is ever stored here.
+#   build          -> guards that the tag matches pyproject's version, then `uv build`
+#                     produces a pure-Python sdist + wheel and uploads dist/.
+#   verify-install -> on ubuntu, windows AND macos, installs the *built wheel* into a
+#                     fresh venv and proves it: exact `--version` string, every module
+#                     imports, the builtin workflow YAMLs are present, and a real
+#                     offline session runs (`ironcore demo --smoke`). It uses the
+#                     artifact and never checks out the source — see the note below.
+#   github-release -> creates/updates the GitHub Release for the tag with dist/*
+#                     attached and this version's CHANGELOG section as the notes.
+#                     This is what `pip install git+...@v0.2.0` users and anyone
+#                     wanting a pinned artifact point at.
+#   publish        -> Trusted Publishing (OIDC) to PyPI. OPT-IN: skipped entirely
+#                     until the maintainer completes the one-time setup below, so a
+#                     tag push is green and still ships a real GitHub Release.
 #
 # ─────────────────────────────────────────────────────────────────────────────────────
-# MAINTAINER SETUP REQUIRED — publishing is a NO-OP/FAILURE until this is done, BY DESIGN.
+# MAINTAINER SETUP — required for PyPI only. Everything else works without it.
 # We deliberately never embed a PyPI token. Publishing uses PyPI Trusted Publishing:
 #   1. On PyPI, create (or claim) the `ironcore` project, then add a Trusted Publisher:
 #        Owner:        RealDealCPA-VR
@@ -22,9 +29,12 @@
 #        Environment:  pypi
 #   2. In this repo's Settings → Environments, create an environment named `pypi`
 #      (optionally add required reviewers / a tag-name protection rule).
-# Until both exist, the `publish` job will fail its OIDC exchange. The `build` and
-# `verify-install` gates still run and prove the release is installable — publishing is
-# the only step that needs the one-time PyPI/GitHub configuration above.
+#   3. In Settings → Secrets and variables → Actions → Variables, set
+#        PYPI_TRUSTED_PUBLISHING = true
+#      That variable is the switch. Until it is `true` the `publish` job is SKIPPED,
+#      which keeps the release run green instead of failing an OIDC exchange that
+#      cannot possibly succeed. Once it is `true`, a failed publish is a loud, real
+#      failure — which is what you want after opting in.
 # ─────────────────────────────────────────────────────────────────────────────────────
 
 name: Release
@@ -34,7 +44,7 @@ on:
     tags:
       - "v*"
 
-# Least privilege by default; the publish job opts into `id-token: write` for OIDC.
+# Least privilege by default; individual jobs opt into what they need.
 permissions:
   contents: read
 
@@ -54,6 +64,26 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
+
+      # The tag is a THIRD source of truth for the version. pyproject <-> __init__ is
+      # already pinned by tests/test_smoke.py, but nothing checked the tag: pushing
+      # v0.2.1 against a pyproject that reads 0.2.0 used to sail through every gate and
+      # then upload a mislabelled artifact (or die on an opaque "400 File already
+      # exists"). Fail here, first, loudly, before anything is built or published.
+      - name: Guard — tag must match pyproject version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          V="${TAG#v}"
+          P="$(uv run --no-project python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          echo "tag=$TAG  tag implies version=$V  pyproject=$P"
+          if [ "$V" != "$P" ]; then
+            echo "ERROR: tag $TAG implies version $V, but pyproject.toml says $P."
+            echo "Bump pyproject (and ironcore/__init__.py) or retag. Nothing was built."
+            exit 1
+          fi
+          echo "OK: tag matches pyproject version $P"
 
       # Builds sdist + wheel into dist/. On a hatchling pure-Python project this yields
       # ironcore-<ver>.tar.gz and ironcore-<ver>-py3-none-any.whl.
@@ -77,6 +107,10 @@ jobs:
           fi
           echo "OK: pure-Python wheel confirmed"
 
+      # Catches broken metadata / an unrenderable README before PyPI rejects it.
+      - name: twine check
+        run: uvx twine check dist/*
+
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4
         with:
@@ -90,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Install uv + Python 3.12
@@ -104,33 +138,188 @@ jobs:
           name: dist
           path: dist
 
-      # Install ONLY the built wheel into a throwaway venv and run the console entry
-      # point from it. `shell: bash` is available on all runners, so the glob and the
-      # bin/Scripts fallback work identically on Linux and Windows.
-      - name: Install wheel into a fresh venv and run the entry point
+      # DELIBERATELY NO `actions/checkout` IN THIS JOB. If the source tree were present
+      # in the working directory, `import ironcore` would resolve to it and this whole
+      # job would prove nothing about the wheel. Everything below runs against the
+      # installed wheel only. `shell: bash` exists on all three runners, so the glob and
+      # the bin/Scripts fallback work identically.
+      - name: Install the built wheel into a fresh venv
         shell: bash
         run: |
           uv venv "$RUNNER_TEMP/relvenv"
           uv pip install --python "$RUNNER_TEMP/relvenv" dist/*-py3-none-any.whl
+
+      # Exact match, not a prefix. The old `ironcore *` prefix check passed for ANY
+      # version, so a tag/pyproject mismatch was invisible here too.
+      - name: Entry point reports exactly the tagged version
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
           BIN="$RUNNER_TEMP/relvenv/bin"
           [ -d "$BIN" ] || BIN="$RUNNER_TEMP/relvenv/Scripts"
           OUT="$("$BIN/ironcore" --version)"
+          EXPECTED="ironcore ${TAG#v}"
           echo "ironcore --version -> $OUT"
-          # Proves the packaged `ironcore = ironcore.cli:main` entry point runs from the
-          # wheel. Version is single-sourced from pyproject (SPEC §13), so we assert the
-          # prefix rather than pin a number that changes every release.
-          case "$OUT" in
-            "ironcore "*) echo "OK: entry point runs from the wheel" ;;
-            *) echo "ERROR: unexpected --version output: $OUT"; exit 1 ;;
-          esac
+          if [ "$OUT" != "$EXPECTED" ]; then
+            echo "ERROR: expected '$EXPECTED', got '$OUT'"
+            exit 1
+          fi
+          echo "OK: entry point runs from the wheel and reports $EXPECTED"
+
+      # `ironcore --version` is engineered to be import-light, so the gate above never
+      # touches the TUI, the tool registry, the plugin loader, or the builtin workflow
+      # YAMLs. This step does: it imports EVERY module and asserts the data files that
+      # `packages = ["ironcore"]` is supposed to carry actually shipped. A dropped
+      # workflow YAML used to reach PyPI with every job green.
+      - name: Deep wheel smoke — import every module, assert data files shipped
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/wheel_smoke.py" <<'PY'
+          import importlib
+          import pkgutil
+          import sys
+          from pathlib import Path
+
+          import ironcore
+          from ironcore.workflows.schema import discover_workflows
+
+          pkg_dir = Path(ironcore.__file__).resolve().parent
+          print(f"ironcore {ironcore.__version__} imported from {pkg_dir}")
+
+          failed: list[str] = []
+          names = [m.name for m in pkgutil.walk_packages(ironcore.__path__, "ironcore.", failed.append)]
+          for name in names:
+              try:
+                  importlib.import_module(name)
+              except Exception as exc:
+                  failed.append(f"{name}: {exc!r}")
+          if failed:
+              print("ERROR: modules failed to import from the installed wheel:")
+              for f in failed:
+                  print(f"  {f}")
+              sys.exit(1)
+
+          builtin = pkg_dir / "workflows" / "builtin"
+          found = discover_workflows(builtin)
+          missing = {"review", "migrate", "explain-repo"} - set(found)
+          if missing:
+              print(f"ERROR: builtin workflow YAMLs missing from the wheel: {sorted(missing)}")
+              print(f"  discovered {sorted(found)} in {builtin}")
+              sys.exit(1)
+
+          print(f"OK: {len(names)} modules imported; builtin workflows {sorted(found)}")
+          PY
+          BIN="$RUNNER_TEMP/relvenv/bin"
+          [ -d "$BIN" ] || BIN="$RUNNER_TEMP/relvenv/Scripts"
+          # cd out of the workspace so sys.path cannot pick up a stray source tree.
+          cd "$RUNNER_TEMP"
+          "$BIN/python" "$RUNNER_TEMP/wheel_smoke.py"
+
+      # The end-to-end proof: a real IronCore session (read -> edit -> verify -> done)
+      # against MockProvider. No model, no network. If the wheel is missing anything the
+      # engine needs at runtime, this is where it surfaces.
+      - name: Offline session smoke
+        shell: bash
+        run: |
+          BIN="$RUNNER_TEMP/relvenv/bin"
+          [ -d "$BIN" ] || BIN="$RUNNER_TEMP/relvenv/Scripts"
+          cd "$RUNNER_TEMP"
+          "$BIN/ironcore" demo --smoke
+
+  github-release:
+    name: GitHub Release
+    needs: [build, verify-install]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write # create the release and upload dist/* to it
+    steps:
+      # Only for CHANGELOG.md — nothing here imports ironcore.
+      - uses: actions/checkout@v4
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Extract this version's CHANGELOG section
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - "$TAG" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1].lstrip("v")
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Section runs from "## [<version>]" to the next top-level "## " heading.
+          pattern = rf"^## \[{re.escape(version)}\].*?$(.*?)(?=^## |\Z)"
+          match = re.search(pattern, text, re.DOTALL | re.MULTILINE)
+          body = match.group(1).strip() if match else ""
+          if not body:
+              body = f"Release {version}. See CHANGELOG.md for details."
+              print(f"WARNING: no CHANGELOG section found for {version}", file=sys.stderr)
+          Path("RELEASE_NOTES.md").write_text(body + "\n", encoding="utf-8")
+          print(f"notes for {version}: {len(body)} chars")
+          PY
+
+      # `gh` is preinstalled on GitHub runners — no third-party action in the release
+      # path. Idempotent on purpose: re-running a failed release must not hard-fail on
+      # "release already exists", and --clobber lets a rebuilt dist replace the old one.
+      - name: Create or update the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists — updating notes and re-uploading assets"
+            gh release edit "$TAG" --title "IronCore $TAG" --notes-file RELEASE_NOTES.md
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "IronCore $TAG" \
+              --notes-file RELEASE_NOTES.md \
+              --verify-tag
+          fi
+          echo "OK: https://github.com/${GITHUB_REPOSITORY}/releases/tag/$TAG"
+
+      # Tell the maintainer, in the run summary, whether PyPI publishing actually ran.
+      - name: Run summary
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          PYPI_ENABLED: ${{ vars.PYPI_TRUSTED_PUBLISHING }}
+        run: |
+          {
+            echo "## IronCore $TAG"
+            echo ""
+            echo "- GitHub Release created with sdist + wheel attached."
+            if [ "$PYPI_ENABLED" = "true" ]; then
+              echo "- PyPI publish: **enabled** (see the publish job)."
+            else
+              echo "- PyPI publish: **skipped** — repository variable"
+              echo "  \`PYPI_TRUSTED_PUBLISHING\` is not \`true\`."
+              echo "  Complete the Trusted Publishing setup in \`.github/workflows/release.yml\`,"
+              echo "  then set that variable and re-run this workflow to publish."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
     name: Publish to PyPI (Trusted Publishing)
     needs: [build, verify-install]
     runs-on: ubuntu-latest
-    # Redundant with the `v*` tag trigger, but makes the tag-only guard explicit so this
-    # job can never publish from a non-tag ref if the trigger is ever broadened.
-    if: startsWith(github.ref, 'refs/tags/')
+    # Two guards. The tag check is redundant with the `v*` trigger but makes it
+    # impossible to publish from a non-tag ref if the trigger is ever broadened. The
+    # variable check is the opt-in switch: until the maintainer finishes the one-time
+    # PyPI + environment setup, this job is SKIPPED (a skipped job is green), so a tag
+    # push still builds, verifies and ships a GitHub Release instead of going red on an
+    # OIDC exchange that cannot succeed. See the header for how to turn it on.
+    if: ${{ startsWith(github.ref, 'refs/tags/') && vars.PYPI_TRUSTED_PUBLISHING == 'true' }}
     environment: pypi
     permissions:
       id-token: write # OIDC token for PyPI Trusted Publishing — this is the ONLY secret path.
@@ -141,9 +330,7 @@ jobs:
           name: dist
           path: dist
 
-      # Trusted Publishing via OIDC — no username/password/API token anywhere. Requires
-      # the one-time PyPI + GitHub-environment setup described in the header comment;
-      # without it this step fails the OIDC exchange (by design, never a silent token).
+      # Trusted Publishing via OIDC — no username/password/API token anywhere.
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

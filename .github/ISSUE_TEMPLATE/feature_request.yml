@@ -1,0 +1,85 @@
+name: Feature request
+description: Propose something IronCore should be able to do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        IronCore's thesis is that the harness — not the weights — is where open-source
+        models get good. The best proposals say what a *user* can do afterwards that they
+        cannot do today.
+
+        Two things worth reading first:
+        [docs/SPEC.md](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SPEC.md)
+        (binding) and
+        [docs/SAFETY.md](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SAFETY.md)
+        §7, which lists what IronCore will deliberately never build.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: >-
+        What are you trying to do, and where does IronCore get in your way today? Describe
+        the situation, not the solution.
+      placeholder: "When I run a 7B model on llama.cpp, ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to do
+      description: If you have a shape in mind — a slash command, a config key, a tool — say so.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: >-
+        Existing config, a different mode, a workflow, another tool. If IronCore can
+        already nearly do this, knowing how close it gets is useful.
+    validations:
+      required: false
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: >-
+        Which model prompted this? Many requests are really "small models behave
+        differently", which the capability envelope may be the right place to fix.
+      placeholder: "qwen3-coder:30b"
+    validations:
+      required: false
+
+  - type: input
+    id: endpoint
+    attributes:
+      label: Endpoint / server
+      placeholder: "Ollama, http://localhost:11434/v1"
+    validations:
+      required: false
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`ironcore doctor` output (optional)"
+      description: >-
+        Helpful for anything about capabilities, context windows, tool protocols or edit
+        formats — it shows what IronCore actually measured for your model.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: >-
+            I have read docs/SAFETY.md §7 and this is not something IronCore has
+            deliberately decided not to build.
+          required: true

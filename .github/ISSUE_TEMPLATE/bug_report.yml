@@ -1,0 +1,99 @@
+name: Bug report
+description: Something in IronCore does not do what it says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing. Most IronCore bugs are model- or endpoint-specific, so the
+        `ironcore doctor` output below is genuinely the most useful thing you can give us.
+
+        **Security issue?** Stop — do not file it here. See
+        [SECURITY.md](https://github.com/RealDealCPA-VR/IronCore/blob/main/.github/SECURITY.md).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what did you get instead?
+      placeholder: |
+        I asked it to ... and expected ..., but it ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Exact commands, and the prompt you gave it if the model was involved. If you can
+        reproduce it with `ironcore demo`, say so — that pins it to the harness rather
+        than the model.
+      placeholder: |
+        1. ironcore
+        2. /mode auto
+        3. asked: "..."
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`ironcore doctor` output"
+      description: >-
+        Run `ironcore doctor` and paste the whole thing. It reports your version, config,
+        endpoint, model and capability profile. It redacts API keys — but do glance over
+        it before pasting.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: The exact model id, including the tag/quantization.
+      placeholder: "qwen3-coder:30b"
+    validations:
+      required: true
+
+  - type: input
+    id: endpoint
+    attributes:
+      label: Endpoint / server
+      description: >-
+        Which server is behind it and its base URL. Redact any host you would rather not
+        share — "vLLM on a private box" is fine.
+      placeholder: "Ollama, http://localhost:11434/v1"
+    validations:
+      required: true
+
+  - type: input
+    id: install
+    attributes:
+      label: How did you install IronCore?
+      placeholder: "uv tool install ironcore / pipx / pip / from a git clone"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: >-
+        Any traceback, the failing tool card, or the transcript around the failure.
+        Automatically formatted as code — no backticks needed.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I am on the latest release, or I have said which version I am on above.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true

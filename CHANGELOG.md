@@ -153,7 +153,13 @@ probes, and proof-tested end-to-end against real files, subprocesses, and git.
 - Pure-Python wheel (`pip` / `uv tool` / `pipx`), CI on Ubuntu + Windows across
   Python 3.11 and 3.13 with an 85% coverage gate on the core packages, and a
   tag-triggered PyPI release via trusted publishing.
-- `python -m demo` — a fully offline narrated walkthrough of a real session.
+- `ironcore demo` — a fully offline narrated walkthrough of a real session.
+
+<!--
+Release links are only added once the tag actually exists. 0.1.0 was never tagged and is
+not being tagged retroactively, so it has no link on purpose — a link that 404s is worse
+than no link. Pushing a `v*` tag runs .github/workflows/release.yml, which creates the
+GitHub Release (sdist + wheel attached) using the matching section above as its notes.
+-->
 
 [0.2.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.0
-[0.1.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.1.0

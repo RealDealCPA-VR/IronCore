@@ -12,11 +12,18 @@ concurrency:
 
 jobs:
   test:
+    name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.13"]
+        # docs/SPEC.md §2 claims macOS support, and this project's core surfaces are
+        # subprocess spawning, path jails and process-tree kills — all of which behave
+        # differently there. One leg on the newest Python keeps the claim honest.
+        include:
+          - os: macos-latest
+            python-version: "3.13"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,20 +44,105 @@ jobs:
         run: uv run --extra dev ruff check .
 
       # Coverage gate runs on EVERY matrix leg: the suite is fully offline and
-      # deterministic (MockProvider, no network/model), so measuring on all four legs
-      # gives cross-OS + cross-Python coverage confidence for negligible extra cost.
-      # Floor is 85% on core/safety/envelope per SPEC section 14 (measured ~92%, passes
-      # with margin). Do not raise the floor above the measured value.
+      # deterministic (MockProvider, no network/model), so measuring on all legs gives
+      # cross-OS + cross-Python coverage confidence for negligible extra cost.
+      #
+      # Measured on the WHOLE package, not just core/safety/envelope. The narrow gate
+      # excluded half the moonshots — plugins.py, the weakest non-trivial module, could
+      # have been refactored down to 20% with CI fully green. SPEC §14's floor is 85%;
+      # the whole package measures 93%, so the gate sits at 90% with real margin.
+      # Raise the floor only to a number you have actually measured.
       - name: Test (with coverage gate)
         run: >-
           uv run --extra dev pytest
-          --cov=ironcore/core
-          --cov=ironcore/safety
-          --cov=ironcore/envelope
+          --cov=ironcore
           --cov-report=term-missing
-          --cov-fail-under=85
+          --cov-fail-under=90
 
       - name: CLI smoke
         run: |
           uv run ironcore --version
           uv run ironcore doctor
+
+  package:
+    name: Package (build + wheel smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv + Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: uv build
+
+      # Metadata / README rendering — the checks PyPI itself runs on upload.
+      - name: twine check
+        run: uvx twine check dist/*
+
+      - name: Assert pure-Python wheel
+        shell: bash
+        run: |
+          ls -l dist/
+          if ! ls dist/*-py3-none-any.whl >/dev/null 2>&1; then
+            echo "ERROR: no pure-Python (-py3-none-any) wheel was produced"
+            exit 1
+          fi
+          if ls dist/*.whl | grep -v -- '-py3-none-any\.whl$'; then
+            echo "ERROR: a platform-specific wheel was produced (compiled dependency?)"
+            exit 1
+          fi
+          echo "OK: pure-Python wheel confirmed"
+
+      # The same deep gate release.yml runs, but on every PR — packaging regressions
+      # (a dropped data file, a module that only imports from a source checkout) now
+      # surface here instead of at tag time. Kept in sync with release.yml by
+      # tests/test_release_workflow.py.
+      - name: Deep wheel smoke — import every module, assert data files shipped
+        shell: bash
+        run: |
+          uv venv "$RUNNER_TEMP/pkgvenv"
+          uv pip install --python "$RUNNER_TEMP/pkgvenv" dist/*-py3-none-any.whl
+          cat > "$RUNNER_TEMP/wheel_smoke.py" <<'PY'
+          import importlib
+          import pkgutil
+          import sys
+          from pathlib import Path
+
+          import ironcore
+          from ironcore.workflows.schema import discover_workflows
+
+          pkg_dir = Path(ironcore.__file__).resolve().parent
+          print(f"ironcore {ironcore.__version__} imported from {pkg_dir}")
+
+          failed: list[str] = []
+          names = [m.name for m in pkgutil.walk_packages(ironcore.__path__, "ironcore.", failed.append)]
+          for name in names:
+              try:
+                  importlib.import_module(name)
+              except Exception as exc:
+                  failed.append(f"{name}: {exc!r}")
+          if failed:
+              print("ERROR: modules failed to import from the installed wheel:")
+              for f in failed:
+                  print(f"  {f}")
+              sys.exit(1)
+
+          builtin = pkg_dir / "workflows" / "builtin"
+          found = discover_workflows(builtin)
+          missing = {"review", "migrate", "explain-repo"} - set(found)
+          if missing:
+              print(f"ERROR: builtin workflow YAMLs missing from the wheel: {sorted(missing)}")
+              print(f"  discovered {sorted(found)} in {builtin}")
+              sys.exit(1)
+
+          print(f"OK: {len(names)} modules imported; builtin workflows {sorted(found)}")
+          PY
+          BIN="$RUNNER_TEMP/pkgvenv/bin"
+          [ -d "$BIN" ] || BIN="$RUNNER_TEMP/pkgvenv/Scripts"
+          # cd out of the workspace so `import ironcore` cannot resolve to the checkout.
+          cd "$RUNNER_TEMP"
+          "$BIN/python" "$RUNNER_TEMP/wheel_smoke.py"
+          "$BIN/ironcore" demo --smoke

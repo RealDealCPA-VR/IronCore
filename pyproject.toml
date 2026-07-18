@@ -82,8 +82,10 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.coverage.run]
-# CI gates 85% on these packages (SPEC §14); the flags live in .github/workflows/ci.yml
-# so a bare local `pytest` stays fast — this just sets the measured surface.
+# The default surface for a bare local `pytest --cov`: the packages SPEC §14 puts a
+# floor under. CI measures WIDER — `--cov=ironcore --cov-fail-under=90` over the whole
+# package (see .github/workflows/ci.yml), because a narrow gate let untested code land
+# in tools/, plugins/ and commands/ with everything green.
 source = ["ironcore/core", "ironcore/safety", "ironcore/envelope"]
 
 [tool.coverage.report]
