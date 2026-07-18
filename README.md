@@ -10,7 +10,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE)
 [![Status: v0.2](https://img.shields.io/badge/status-v0.2-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
-[![Tests: 1772](https://img.shields.io/badge/tests-1772%20offline-brightgreen.svg)](#built--proven)
+[![Tests: 1777](https://img.shields.io/badge/tests-1777%20offline-brightgreen.svg)](#built--proven)
 
 </div>
 
@@ -430,7 +430,7 @@ exactly this way.
 
 ```bash
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q   # 1772 tests, all offline — no model, no network
+uv run --extra dev pytest -q   # 1777 tests, all offline — no model, no network
 ```
 
 The suite sandboxes `HOME` itself, so running it cannot touch your own `~/.ironcore`. CI gates
