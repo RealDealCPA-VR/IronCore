@@ -23,6 +23,7 @@ from ironcore.commands.loopcmd import COMMANDS as _LOOP_COMMANDS
 from ironcore.commands.memorycmd import COMMANDS as _MEMORY_COMMANDS
 from ironcore.commands.modelcmd import COMMANDS as _MODEL_COMMANDS
 from ironcore.commands.reviewcmd import COMMANDS as _REVIEW_COMMANDS
+from ironcore.commands.skillcmd import COMMANDS as _SKILL_COMMANDS
 from ironcore.commands.workflowcmd import COMMANDS as _WORKFLOW_COMMANDS
 from ironcore.safety.modes import CYCLE, DESCRIPTIONS, Mode, next_mode
 
@@ -39,6 +40,7 @@ _REAL_COMMANDS: tuple[SlashCommand, ...] = (
     *_REVIEW_COMMANDS,
     *_MEMORY_COMMANDS,
     *_WORKFLOW_COMMANDS,
+    *_SKILL_COMMANDS,
     *_ENVELOPE_COMMANDS,
 )
 

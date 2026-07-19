@@ -199,3 +199,34 @@ An MCP server is an executable IronCore spawns as a child process. Stated as pla
   `~/.ironcore/config.toml` is spawned at every launch once NET is on, which is exactly the
   consent you gave and no clamp second-guesses it. Read your own `[mcp.servers.*]` block
   the way you would read a line in your shell profile.
+
+## 11. Skills (PKG-4)
+
+A skill is a `<dir>/SKILL.md` file — Markdown instructions the model can pull into context
+(`docs/SKILLS.md`, the open standard Claude Code / Codex / grok-build share). Two trust
+levels, and one hard boundary skills never cross:
+
+- **User skills are trusted; project skills are gated.** A skill under
+  `~/.ironcore/skills/` you authored on your own machine — trusted like
+  `~/.ironcore/IRONCORE.md`. A skill under the workspace's `.ironcore/skills/` (or, with
+  `[skills] compat_dirs`, `.claude`/`.codex`/`.grok`) **arrived with a `git clone`**, so its
+  FIRST use in a workspace requires a one-time confirmation (`/skill run <name>`), exactly
+  as a repo's first workflow does (T8). Until confirmed, an unconfirmed project skill is
+  **absent from the model-facing catalog** (so its description never lands in the trusted,
+  un-scanned system prompt) and `use_skill` refuses to load its body — fail closed.
+- **A skill cannot bypass the kernel.** A skill body is DISPLAY text. Any script it tells
+  the model to run is executed through the ordinary `run_command`/`shell` tool, so the EXEC
+  gate, deny-list and workspace jail apply unchanged — loading a skill is a READ (`use_skill`
+  is READ-risk), never an execution. IronCore does **not** parse a `verify:` directive or any
+  other control channel out of a skill body; the auto-run verify path stays sourced from the
+  project `IRONCORE.md` alone (§ *verify*, `core/verify.py`). A cloned skill therefore cannot
+  arm an unattended command any more than a cloned `AGENTS.md` can.
+- **Honest limit.** A confirmed project skill's instructions still enter the model's context
+  and can try to *steer* it (the T3 injection surface). That is why confirmation is explicit
+  and why the body rides the same untrusted-output detector when pulled via `use_skill`.
+  Confirming a project skill is the same trust decision as running the repo's code — the gate
+  still governs every mutation and command the model attempts as a result.
+- **Off switch.** `[skills] enabled = false` disables discovery entirely: no catalog, no
+  `use_skill` tool, `/skill` reports it is off. Because skills carry no autonomy, this switch
+  is *not* under the ceiling (§9) — a project config may set `[skills]` freely; the gating
+  above already contains a cloned skill.

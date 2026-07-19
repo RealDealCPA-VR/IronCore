@@ -336,6 +336,7 @@ itself never prints or prompts. Type `/` to open the palette:
 | `/probe` · `/envelope` | Measure the live model and adapt to it · show its capability report card |
 | `/goal <objective>` | Set a persistent objective — IronCore won't call itself done until a stop-condition check passes (auto-pinned from your first message if you don't) |
 | `/workflow <name>` | Deterministic multi-agent orchestration (fan-out → verify → reduce) — the *harness* drives the flow, never the model |
+| `/skill [<name>]` | List reusable `SKILL.md` skills, or inject one's instructions into the next turn — the open standard Claude Code/Codex/grok-build share ([docs/SKILLS.md](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SKILLS.md)) |
 | `/model` · `/init` | List models / live-swap the running session to another model (envelope-cache aware) · scan the repo into `IRONCORE.md` project memory |
 | `/loop [5m] <prompt>` | Run a prompt on an interval, or let the agent self-pace |
 | `/undo` · `/redo` · `/compact` · `/review` · `/memory` | Snapshot undo · history compaction · diff review · project memory |
@@ -499,6 +500,18 @@ and open up to plugins — and as of **v0.2**, every one of them has shipped:
   they earn a "run `/probe`" hint), so each model's real-world quirks reshape the ladders
   across sessions. The report card and `/envelope` say `tuned` honestly; off switch:
   `[envelope] auto_tune = false`.
+- **Skills — the `SKILL.md` open standard, envelope-aware.** Drop a `<dir>/SKILL.md`
+  (YAML `name`/`description` over a Markdown body) under `~/.ironcore/skills/` or a repo's
+  `.ironcore/skills/` and IronCore surfaces it — the *same* format Claude Code, Codex and
+  grok-build read, so ecosystem skills work unchanged (`[skills] compat_dirs = true` even
+  reads their `.claude`/`.codex`/`.grok` dirs). A compact catalog rides the system prompt
+  **budget-fitted to your model's measured context** — on a tiny window it degrades to the
+  top few skills or none, never silently eating the budget — and the full body is
+  lazy-loaded, by you via `/skill <name>` or by the model via the READ-risk `use_skill`
+  tool. Trust is harness-owned: your own skills are trusted, a **clone-borne project skill
+  is confirmed before first use** (T8) and never reaches the model's context until you
+  approve it, and a skill's scripts still run through the EXEC gate — a skill cannot smuggle
+  execution past the kernel. See [`docs/SKILLS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SKILLS.md).
 - **Vision — image inputs for screenshots/diagrams.** A new `read_image` tool lets the
   model actually look at a workspace PNG/JPEG/GIF/WEBP: the bytes ride the conversation
   as OpenAI image content-parts (base64 data URIs, so Ollama and vLLM vision models both

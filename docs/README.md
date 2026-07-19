@@ -10,6 +10,7 @@ One screen to find the right file. Start with the row that matches who you are r
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | `ironcore doctor` printed something you do not understand, or the first turn failed. Keyed line-by-line to doctor's output. |
 | [MODELS.md](MODELS.md) | You want to know what IronCore measured about your model and why it chose that wire protocol — and what to expect from a 7B vs a 70B. |
 | [SAFETY.md](SAFETY.md) | You want to know what the agent can and cannot do to your machine before you turn autonomy up. Threat model, control catalog, honest limits. |
+| [SKILLS.md](SKILLS.md) | You want to teach IronCore a reusable procedure with a `SKILL.md` file (the open standard), or use skills a repo ships. Authoring, install, the compat dirs, and the safety model. |
 
 ## If you are extending IronCore
 

@@ -163,6 +163,27 @@ class PluginSettings(BaseModel):
     enabled: bool = True
 
 
+class SkillSettings(BaseModel):
+    """Skills — the SKILL.md open standard (the additive ``[skills]`` section, PKG-4).
+
+    A skill is a ``<dir>/SKILL.md`` file (docs/SKILLS.md). Discovery reads the
+    user's ``~/.ironcore/skills`` and the workspace's ``.ironcore/skills``.
+    Skills are INERT Markdown until invoked and carry no autonomy: their scripts
+    run through the model's own ``run_command`` under the EXEC gate, so this
+    section is NOT under the T8 autonomy ceiling — a project layer may set it
+    (project skills are still first-use gated, and an unconfirmed one never
+    reaches the model catalog)."""
+
+    #: Discover skills at all. Off = no catalog, no ``use_skill`` tool, ``/skill``
+    #: reports it is disabled — the hardened-setup switch.
+    enabled: bool = True
+
+    #: Also read ``.claude`` / ``.codex`` / ``.grok`` ``/skills`` dirs (at both the
+    #: user-home and workspace level), so skills authored for those tools work
+    #: unchanged. Off by default; opt in for zero-setup ecosystem compatibility.
+    compat_dirs: bool = False
+
+
 class Settings(BaseModel):
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
     roles: RoleModels = Field(default_factory=RoleModels)
@@ -171,6 +192,7 @@ class Settings(BaseModel):
     engine: EngineSettings = Field(default_factory=EngineSettings)
     mcp: MCPSettings = Field(default_factory=MCPSettings)
     plugins: PluginSettings = Field(default_factory=PluginSettings)
+    skills: SkillSettings = Field(default_factory=SkillSettings)
 
     @classmethod
     def load(

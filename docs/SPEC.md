@@ -254,6 +254,7 @@ The registered lineup is exactly what `tools/default.py` assembles (pinned by
 |---|---|---|
 | `read_file`, `list_dir`, `glob`, `grep` | READ | output truncation with honest `[truncated]` markers |
 | `read_image` | READ | attach a workspace PNG/JPEG/GIF/WEBP; always registered — on a non-vision model it degrades to an honest error rather than letting the model guess |
+| `use_skill` | READ | load a named skill's instructions (the SKILL.md standard's lazy-body load — [SKILLS.md](SKILLS.md)); always registered when skills are enabled; gates clone-borne project skills behind first-use confirmation |
 | `write_file`, `edit_file` | WRITE | edit via envelope-selected format; path-jailed (§7.3) |
 | `shell` | EXEC | timeout, output caps, cwd=workspace, Windows+POSIX |
 | `fetch_url` | NET | registered only if `safety.network_tools=true` |

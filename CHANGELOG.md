@@ -6,6 +6,29 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Added
+- **Skills — the `SKILL.md` open standard (PKG-4).** IronCore now discovers, surfaces and
+  invokes skills: a `<dir>/SKILL.md` file (YAML `name`/`description` frontmatter over a
+  Markdown instruction body), the same on-disk shape Claude Code, Codex and grok-build read
+  — so a skill authored for any of them works here unchanged. Discovery
+  (`ironcore/skills.py`, modeled on `plugins.py`) scans `~/.ironcore/skills/` (trusted) and
+  the workspace's `.ironcore/skills/` (clone-borne, gated); `[skills] compat_dirs = true`
+  additionally reads `.claude`/`.codex`/`.grok` `/skills` dirs for zero-setup ecosystem
+  compatibility. A malformed `SKILL.md` is skipped with a reason, never a crash.
+  - **Surfacing:** a compact catalog (name + one-liner each) rides the SYSTEM share beside
+    project memory, charged via `estimate_tokens` against the *measured* `honest_context` —
+    the envelope-native twist: on a tiny-context model it degrades to top-N (or nothing)
+    rather than silently eating the window. The composer budget invariant is provably
+    unchanged (a new `skills_catalog=` param, default `()`).
+  - **Invocation (both lazy-body per the standard):** `/skill` lists skills and `/skill
+    <name>` injects one's body into the next turn; the model reads a skill via the new
+    READ-risk `use_skill(name=...)` tool, riding the existing tool loop / transcript / audit.
+  - **Safety:** user skills are trusted like `IRONCORE.md`; a **project skill is confirmed
+    once per workspace before first use** (T8, the pattern `/workflow` uses) and never
+    reaches the model-facing catalog until approved. A skill body is display text — any
+    script it references runs through the EXEC-gated command tool, and no `verify:` directive
+    is ever parsed out of a skill (that path stays sourced from the project `IRONCORE.md`
+    alone). Off switch: `[skills] enabled = false`. A copy-ready template ships at
+    `examples/skills/hello-skill/`; the authoring guide is `docs/SKILLS.md`.
 - **Instruction-file compat + user-global memory (PKG-3).** When a workspace has
   no `IRONCORE.md`, project memory now falls back to an existing `AGENTS.md`,
   then `CLAUDE.md` (first found wins) — so a repo cloned with a frontier

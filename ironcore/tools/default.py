@@ -29,6 +29,7 @@ from ironcore.tools.fs_read import GlobTool, GrepTool, ListDirTool, ReadFileTool
 from ironcore.tools.fs_write import EditFileTool, WriteFileTool
 from ironcore.tools.image import ReadImageTool
 from ironcore.tools.shell import ShellTool
+from ironcore.tools.skill import UseSkillTool
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,6 +57,12 @@ def build_default_registry(
         ReadImageTool(workspace),
     ):
         registry.register(tool)
+    # use_skill is registered whenever skills are enabled (the default): like
+    # read_image it is always present and degrades honestly ("no skill named…")
+    # when none exist, rather than appearing/vanishing with on-disk state. The
+    # catalog it reads from IS budget-fitted and honestly degrades (composer).
+    if getattr(settings, "skills", None) is None or settings.skills.enabled:
+        registry.register(UseSkillTool(settings=settings, workspace=workspace))
     if settings.safety.network_tools:
         registry.register(FetchUrlTool())
     if plugins is not None:

@@ -92,6 +92,7 @@ from ironcore.envelope.profile import CapabilityProfile
 from ironcore.envelope.suite import default_envelope_dir
 from ironcore.memory.sessions import SessionStore
 from ironcore.plugins import load_plugins
+from ironcore.providers.base import Message
 from ironcore.providers.registry import ProviderRegistry, select_provider_factory
 from ironcore.safety.modes import DESCRIPTIONS, Mode, next_mode
 from ironcore.tools.default import build_default_registry as build_tool_registry
@@ -589,6 +590,14 @@ class IronCoreApp(App):
                 )
 
         self.run_worker(_runner(), group="command")
+
+    def inject_context(self, text: str) -> None:
+        """Command hook (``/skill``): place trusted standing text into the running
+        conversation so the next turn composes it. Appends a system message to
+        ``engine._conversation`` — the same seam the compact/resume paths use
+        (IC-706). The command owns the user-facing note; this only injects."""
+        if text:
+            self.engine._conversation.append(Message(role="system", content=text))
 
     # -- workflow progress (IC-904 optional hooks) ----------------------------
 

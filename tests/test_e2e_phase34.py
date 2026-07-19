@@ -330,13 +330,14 @@ def test_default_registry_roster_and_network_gating(tmp_path):
         "edit_file",
         "shell",
         "read_image",  # MS-6: always registered; degrade is an honest tool error
+        "use_skill",  # PKG-4: always registered when [skills] enabled (the default)
     }
 
     net_settings = Settings()
     net_settings.safety.network_tools = True
     with_net = build_default_registry(net_settings, tmp_path)
     assert with_net.get("fetch_url") is not None
-    assert len(with_net.all()) == 9
+    assert len(with_net.all()) == len(names) + 1  # + fetch_url
 
     # every tool is model-ready: named, described, JSON-schema params
     for tool in with_net.all():

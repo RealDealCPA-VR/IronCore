@@ -95,6 +95,7 @@ from ironcore.safety.modes import Mode
 from ironcore.safety.policy import Decision, decide
 from ironcore.safety.risk import ToolRisk
 from ironcore.safety.snapshots import SnapshotError
+from ironcore.skills import load_skills_catalog
 from ironcore.tools.base import Tool, ToolRegistry
 
 if TYPE_CHECKING:  # annotations only — the router is injected, never constructed here
@@ -369,6 +370,10 @@ class TurnEngine:
                 # IRONCORE.md project memory rides the system share (IC-1003);
                 # re-read per turn so mid-session /init and /memory edits land.
                 memory = load_project_memory(self.workspace, profile=profile)
+                # Skills catalog (PKG-4) rides the SYSTEM share beside memory;
+                # re-read per turn so a newly added or just-confirmed skill lands.
+                # Only TRUSTED skills (user + confirmed project) are surfaced.
+                skills_catalog = load_skills_catalog(self.workspace, self.settings)
                 messages = compose(
                     state,
                     profile=profile,
@@ -378,6 +383,7 @@ class TurnEngine:
                     history=self._conversation,
                     user_input="",
                     memory=memory,
+                    skills_catalog=skills_catalog,
                 )
                 sampling = resolve_sampling(profile, kind="tool", attempt=repair_attempt)
                 sampling = replace(sampling, max_tokens=self._headroom_tokens(profile))

@@ -66,6 +66,15 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
 - Tools never print, never prompt, never self-gate; READ tools are side-effect-free.
 - `ToolRegistry.specs()` emits OpenAI function-call format. 🔒 `tests/test_tools.py`
 
+- *Additive (PKG-4):* `use_skill` is a **reserved built-in tool name** (READ risk,
+  `tools/skill.py`), registered by `build_default_registry` whenever `[skills] enabled`
+  (the default) — always present like `read_image`, degrading to an honest "no skill
+  named…" when none exist. It returns a named skill's body as `ToolResult.output` (the
+  SKILL.md standard's lazy-body load) and gates project (clone-borne) skills behind the
+  per-workspace first-use confirmation (`skills.is_confirmed`); loading a body grants no
+  execution — a skill's scripts still run through the EXEC-gated shell tool. Being a
+  built-in, a plugin can never shadow it (§11 clash rule). *Migration:* none — additive.
+
 **Not frozen:** the concrete tool lineup and their parameter schemas (owned by phase-3 tasks).
 
 ## 4. Engine & events — `ironcore/core/`
@@ -97,6 +106,16 @@ Each contract lists: where it lives, what is frozen, and what is explicitly *not
   `"parse"` or `"edit"`); front ends may ignore it. Raced winners still pass the §1 gate —
   `decide()` remains the only path to a tool. *Migration:* none — the event vocabulary is
   additive-only, and the default config (`[engine] best_of_n = 1`, §7) never emits it.
+
+- *Additive (PKG-4):* `composer.compose` accepts a keyword-only `skills_catalog:
+  Sequence[str] = ()` — one-line skill catalog entries the engine builds impurely with
+  `skills.load_skills_catalog` (like `memory`). They ride the SYSTEM share BELOW project
+  memory, filling only the budget memory leaves and degrading to top-N (or nothing) on a
+  tiny context; `_build_skills_block` recomputes `remaining` from the real text and
+  `estimate_tokens` is sub-additive, so the composer BUDGET INVARIANT
+  (`sum(estimate_tokens) <= honest_context - headroom`) is provably unchanged. The default
+  `()` keeps every existing call byte-identical. Only TRUSTED skills (user + confirmed
+  project) reach this model-facing catalog. *Migration:* none — additive with a default.
 
 **Not frozen:** internal state-machine implementation; context-composer heuristics (IC-501
 owns them, then freezes the *budget shares* here).
@@ -189,6 +208,12 @@ owns them, then freezes the *budget shares* here).
     `CommandResult` and call `plain()` where it needs a string — `in`, `==` and `.lower()`
     happen to work on `Text` too, but `.index`, slicing and `%`-formatting do not.
 
+*Additive (PKG-4):* `/skill` (`commands/skillcmd.py`) is a new built-in command in the
+(un-frozen) lineup — it lists skills and injects one's body into the next turn via the
+app hook `inject_context` (the app owns the `engine._conversation` seam; the command
+mutates only its context / calls app hooks, per this section). Project skills are gated by
+the same per-workspace first-use confirmation `/workflow` uses.
+
 **Not frozen:** the command lineup; handler bodies; which commands choose to style
 their output, and the styles they choose (the palette lives in `ironcore/term.py` /
 `ironcore/tui/theme.py`, pinned together by `tests/test_term.py`).
@@ -203,7 +228,7 @@ their output, and the styles they choose (the palette lives in `ironcore/term.py
   `roles.planner` / `.coder` / `.summarizer` / `.verifier`) join the frozen env surface.
   They have been read by `_apply_env` since MS-3 but were documented nowhere; freezing them
   records shipped behaviour rather than changing it. An empty value is ignored, as for every
-  other variable. *Migration:* none — no code change; `docs/CONFIG.md` §10 is the reference.
+  other variable. *Migration:* none — no code change; `docs/CONFIG.md` §11 is the reference.
 - Section/key names (additive allowed). **The reference is
   [CONFIG.md](CONFIG.md)** — every section, key, type and default, generated against these
   models and pinned by `tests/test_docs_reference.py`, which fails when a model field stops
@@ -222,6 +247,14 @@ their output, and the styles they choose (the palette lives in `ironcore/term.py
   are never registered unless `safety.network_tools` is true, and §1 gating applies
   unchanged (NET never auto-allowed, denied in PLAN). *Migration:* none — configs without
   `[mcp]` behave byte-identically, and no existing key changes meaning.
+- *Additive (PKG-4):* `[skills]` — `enabled` (bool, default `true`) and `compat_dirs`
+  (bool, default `false`) configure SKILL.md discovery (reference: [CONFIG.md](CONFIG.md)
+  §10). It is deliberately **NOT** under the autonomy ceiling below: skills are inert
+  Markdown carrying no autonomy (their scripts run through the model's own EXEC-gated
+  `run_command`), a project-layer skill is first-use gated and never reaches the model
+  catalog until confirmed, so a cloned config enabling skills escalates nothing — the same
+  reasoning that leaves `safety.workspace_only` unclamped. *Migration:* none — configs
+  without `[skills]` load `enabled = true`, `compat_dirs = false` via the defaults.
 - **Autonomy ceiling (SAFETY.md T8/§9), enforced in `Settings.load`:** the project config
   may *lower* autonomy freely and may never *raise* it. A project-set `safety.mode` is
   clamped to the user layer's rank (`plan` < `manual` < `accept-edits` < `auto`), and

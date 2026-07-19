@@ -125,7 +125,22 @@ configuring one is the consent moment.
 |---|---|---|---|
 | `enabled` | bool | `true` | Discover `ironcore.*` entry points at boot ([PLUGINS.md](PLUGINS.md)). Default on because `pip install` was already the consent moment. `false` is the hardened-setup switch: entry points are never consulted at all. |
 
-## 10. Environment variables
+## 10. `[skills]` — the SKILL.md open standard
+
+A *skill* is a `<dir>/SKILL.md` file — YAML frontmatter (`name` + `description`) over a
+Markdown body of instructions, the same shape Claude Code / Codex / grok-build read (authoring
+guide: [SKILLS.md](SKILLS.md)). Discovery reads your `~/.ironcore/skills/` (trusted) and the
+workspace's `.ironcore/skills/` (clone-borne, so first use is confirmed). A compact catalog
+rides the system prompt; the full body is lazy-loaded via `use_skill` or `/skill`. Skills are
+**inert Markdown** carrying no autonomy — any script they reference runs through the model's own
+`run_command` under the EXEC gate — so this section is **not** under the autonomy ceiling (§6).
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | bool | `true` | Discover skills at all. `false` = no catalog, no `use_skill` tool, and `/skill` reports it is off — the hardened-setup switch. |
+| `compat_dirs` | bool | `false` | Also read `.claude` / `.codex` / `.grok` `/skills` dirs (at both your home and the workspace), so a skill authored for one of those tools works here unchanged. Off by default; opt in for zero-setup ecosystem compatibility. |
+
+## 11. Environment variables
 
 All eight are read by `config/settings.py`; each overrides the same key in every file layer,
 and env is never clamped. An empty value is ignored (it does not blank the key).
@@ -153,7 +168,7 @@ only whether escape codes are written:
 Without either, colour follows the stream: on a terminal you get it, piped or redirected you
 do not, so `ironcore doctor > report.txt` is always plain text.
 
-## 11. A complete config.toml
+## 12. A complete config.toml
 
 Every key, every default, annotated. `ironcore init` writes a shorter commented version of
 this to `~/.ironcore/config.toml`.
@@ -189,6 +204,10 @@ best_of_n = 1                            # 1 = off; up to 5 candidates raced per
 [plugins]
 enabled = true                           # false = never consult entry points
 
+[skills]
+enabled     = true                       # false = no catalog, no use_skill, /skill off
+compat_dirs = false                      # true also reads .claude/.codex/.grok /skills dirs
+
 # [mcp.servers.filesystem]               # NET-risk: needs safety.network_tools = true,
 # command   = "npx"                      # and is SPAWNED AT LAUNCH (SAFETY.md §10)
 # args      = ["-y", "@modelcontextprotocol/server-filesystem", "."]
@@ -197,7 +216,7 @@ enabled = true                           # false = never consult entry points
 # enabled   = true
 ```
 
-## 12. Checking what actually loaded
+## 13. Checking what actually loaded
 
 ```
 ironcore doctor

@@ -22,6 +22,7 @@ LOCAL_TOOLS = {
     "edit_file",
     "shell",
     "read_image",  # MS-6: always registered — degrade is an honest tool error
+    "use_skill",  # PKG-4: always registered when [skills] enabled (the default)
 }
 
 
@@ -36,11 +37,19 @@ def network_on() -> Settings:
 # --- registry contents per settings matrix ------------------------------------
 
 
-def test_default_settings_register_exactly_the_eight_local_tools(tmp_path):
+def test_default_settings_register_exactly_the_local_tools(tmp_path):
     registry = build_default_registry(Settings(), tmp_path)
     names = {t.name for t in registry.all()}
     assert names == LOCAL_TOOLS
     assert registry.get("fetch_url") is None
+
+
+def test_use_skill_absent_when_skills_disabled(tmp_path):
+    """The [skills] kill switch also drops the use_skill tool from the roster."""
+    settings = Settings.model_validate({"skills": {"enabled": False}})
+    registry = build_default_registry(settings, tmp_path)
+    assert registry.get("use_skill") is None
+    assert {t.name for t in registry.all()} == LOCAL_TOOLS - {"use_skill"}
 
 
 def test_network_tools_true_adds_fetch_url(tmp_path):
@@ -55,7 +64,7 @@ def test_network_tools_true_adds_fetch_url(tmp_path):
 def test_assembled_registry_has_unique_names(tmp_path):
     registry = build_default_registry(network_on(), tmp_path)
     names = [t.name for t in registry.all()]
-    assert len(names) == len(set(names)) == 9
+    assert len(names) == len(set(names)) == len(LOCAL_TOOLS) + 1  # + fetch_url
 
 
 # --- every spec is a valid model-facing function spec --------------------------
