@@ -140,7 +140,19 @@ rides the system prompt; the full body is lazy-loaded via `use_skill` or `/skill
 | `enabled` | bool | `true` | Discover skills at all. `false` = no catalog, no `use_skill` tool, and `/skill` reports it is off — the hardened-setup switch. |
 | `compat_dirs` | bool | `false` | Also read `.claude` / `.codex` / `.grok` `/skills` dirs (at both your home and the workspace), so a skill authored for one of those tools works here unchanged. Off by default; opt in for zero-setup ecosystem compatibility. |
 
-## 11. Environment variables
+## 11. `[tools]` — tool configuration
+
+The one key here configures the NET-risk `web_search` tool. Like `fetch_url`, `web_search`
+is **never registered unless `safety.network_tools = true`** (§4), and every call ASKS even
+in AUTO — NET is never auto-allowed — with the resolved endpoint shown in the approval
+preview. So `search_url` is **not** under the autonomy ceiling (§6): a cloned project
+pointing it elsewhere escalates nothing, and you see the URL on every approval.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `search_url` | str | `"https://html.duckduckgo.com/html/"` | The HTML search endpoint `web_search` queries. The query is sent as `?q=…`; the response is parsed for `title`/`url`/`snippet` results, capped and secret-redacted. Point it at your own [SearXNG](https://searxng.org/) instance if you prefer. An **empty string** leaves `web_search` unregistered while `fetch_url` stays. |
+
+## 12. Environment variables
 
 All eight are read by `config/settings.py`; each overrides the same key in every file layer,
 and env is never clamped. An empty value is ignored (it does not blank the key).
@@ -168,7 +180,7 @@ only whether escape codes are written:
 Without either, colour follows the stream: on a terminal you get it, piped or redirected you
 do not, so `ironcore doctor > report.txt` is always plain text.
 
-## 12. A complete config.toml
+## 13. A complete config.toml
 
 Every key, every default, annotated. `ironcore init` writes a shorter commented version of
 this to `~/.ironcore/config.toml`.
@@ -208,6 +220,10 @@ enabled = true                           # false = never consult entry points
 enabled     = true                       # false = no catalog, no use_skill, /skill off
 compat_dirs = false                      # true also reads .claude/.codex/.grok /skills dirs
 
+[tools]
+search_url = "https://html.duckduckgo.com/html/"   # web_search endpoint; needs network_tools;
+                                         # "" = no web_search tool
+
 # [mcp.servers.filesystem]               # NET-risk: needs safety.network_tools = true,
 # command   = "npx"                      # and is SPAWNED AT LAUNCH (SAFETY.md §10)
 # args      = ["-y", "@modelcontextprotocol/server-filesystem", "."]
@@ -216,7 +232,7 @@ compat_dirs = false                      # true also reads .claude/.codex/.grok 
 # enabled   = true
 ```
 
-## 13. Checking what actually loaded
+## 14. Checking what actually loaded
 
 ```
 ironcore doctor

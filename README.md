@@ -363,6 +363,24 @@ Sessions are recorded and resumable: `ironcore --resume` opens a picker of past 
 *Sessions are listed by what you asked for, not by an opaque id — so you can find yesterday's
 thread without knowing its name.*
 
+## Scripting it — `ironcore exec`
+
+The same engine runs headless for pipelines and CI:
+
+```
+ironcore exec "summarize what this module does" > answer.txt   # prose on stdout
+ironcore exec "add a docstring to parse()" --mode accept-edits # apply edits, unattended
+ironcore exec "list the failing tests" --json | jq             # one event per line
+```
+
+One turn, no TUI. In the default human mode the model's streamed reply goes to **stdout** and
+every tool call, approval and status line to **stderr**, so redirecting stdout captures just
+the answer; `--json` emits one serialized event per line for a machine consumer instead. The
+default `--mode plan` is **read-only and CI-safe**; `--mode` raises it. There is no human to
+approve anything, so any prompt that would `ask` **auto-denies** (fail closed, with a hint) —
+`--mode auto`/`accept-edits` is how you grant writes ahead of time. Exit code is `0` on a
+completed turn, `1` on a turn error, `2` on a bad config — a usable gate in a script.
+
 ## Configuration
 
 Built for **Ollama** first. One OpenAI-compatible client also covers **vLLM, llama.cpp server,
@@ -408,6 +426,11 @@ config**; requested from a project file, they are clamped off with a note. For M
 placeholders rather than literals — `env = { GITHUB_TOKEN = "${GITHUB_TOKEN}" }` is expanded
 from your shell at load time (a bare `$VAR` is not), and an unset variable skips that server
 with a visible note instead of starting it. Never paste a live token into a committable file.
+
+With `safety.network_tools = true`, two built-in NET tools also register: `fetch_url` (GET a
+URL) and `web_search` (query the `[tools] search_url` HTML endpoint — a SearXNG instance or the
+DuckDuckGo default — returning title · url · snippet, capped and secret-redacted). Both are the
+strictest **NET** class: never auto-approved, denied outright in Plan mode.
 
 Full reference — every key, type and default:
 [`docs/CONFIG.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/CONFIG.md).

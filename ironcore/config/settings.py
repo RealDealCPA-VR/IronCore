@@ -163,6 +163,23 @@ class PluginSettings(BaseModel):
     enabled: bool = True
 
 
+class ToolsSettings(BaseModel):
+    """Optional tool configuration (the additive ``[tools]`` section, PKG-5).
+
+    ``search_url`` is the endpoint the NET-risk ``web_search`` tool queries — an
+    HTML search page that takes a ``?q=`` query and returns result anchors (a
+    SearXNG instance, or the DuckDuckGo HTML endpoint, the default). Like
+    ``fetch_url``, ``web_search`` is a NET tool: it is never registered unless
+    ``safety.network_tools`` is true, and every call ASKS (NET is never
+    auto-allowed, previewing the endpoint). So this is NOT an autonomy control
+    and is NOT under the T8 ceiling — a cloned project pointing it elsewhere
+    escalates nothing, and the user sees the URL on every approval. An empty
+    ``search_url`` leaves ``web_search`` unregistered while ``fetch_url`` stays."""
+
+    #: HTML search endpoint for web_search. Empty string = no web_search tool.
+    search_url: str = "https://html.duckduckgo.com/html/"
+
+
 class SkillSettings(BaseModel):
     """Skills — the SKILL.md open standard (the additive ``[skills]`` section, PKG-4).
 
@@ -193,6 +210,7 @@ class Settings(BaseModel):
     mcp: MCPSettings = Field(default_factory=MCPSettings)
     plugins: PluginSettings = Field(default_factory=PluginSettings)
     skills: SkillSettings = Field(default_factory=SkillSettings)
+    tools: ToolsSettings = Field(default_factory=ToolsSettings)
 
     @classmethod
     def load(

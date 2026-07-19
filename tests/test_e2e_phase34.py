@@ -337,7 +337,8 @@ def test_default_registry_roster_and_network_gating(tmp_path):
     net_settings.safety.network_tools = True
     with_net = build_default_registry(net_settings, tmp_path)
     assert with_net.get("fetch_url") is not None
-    assert len(with_net.all()) == len(names) + 1  # + fetch_url
+    assert with_net.get("web_search") is not None  # PKG-5: second NET tool
+    assert len(with_net.all()) == len(names) + 2  # + fetch_url + web_search
 
     # every tool is model-ready: named, described, JSON-schema params
     for tool in with_net.all():

@@ -6,6 +6,30 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Added
+- **Headless exec — `ironcore exec "<prompt>"` (PKG-5).** IronCore is now
+  scriptable: `exec` runs one turn against the real engine and renders its event
+  stream (`ironcore/headless.py`) with no TUI. In the default human mode the
+  model's streamed text goes to **stdout** and every other event (tool calls,
+  approvals, verify/repair status, the completion line) to **stderr**, so
+  `ironcore exec "…" > answer.txt` captures only the answer; `--json` emits one
+  serialized event per line to stdout for a machine consumer (the `core/events`
+  dataclasses are an additive contract). Default `--mode plan` is read-only and
+  CI-safe; `--mode` raises it. Approvals fail closed and invent **no new
+  decision path**: the engine's own `ApprovalBroker` is built with `timeout=0`,
+  so any `ask` gate (there is no human to prompt) resolves through the broker's
+  existing timeout-DENY, with a one-line hint on stderr. Exit codes: **0** on
+  `TurnCompleted`, **1** on `TurnError`, **2** on a `ConfigError` during setup.
+  Stays import-light like `doctor`/`demo`/`init` (the engine is lazy-imported in
+  the handler).
+- **`web_search` tool (PKG-5).** A second NET tool beside `fetch_url`
+  (`ironcore/tools/search.py`): it queries a configurable HTML search endpoint
+  (`[tools] search_url` — a SearXNG instance or the DuckDuckGo HTML endpoint, the
+  default) and returns the top results as text (title · url · snippet). Results
+  are parsed with the stdlib HTML parser (linear, no regex backtracking on
+  adversarial markup), capped, and **secret-redacted** before they reach the
+  model or the transcript. It inherits the NET policy untouched — registered
+  **only** when `safety.network_tools` is true (and a non-empty `search_url` is
+  set), and every call ASKS even in AUTO (NET is never auto-allowed).
 - **Skills — the `SKILL.md` open standard (PKG-4).** IronCore now discovers, surfaces and
   invokes skills: a `<dir>/SKILL.md` file (YAML `name`/`description` frontmatter over a
   Markdown instruction body), the same on-disk shape Claude Code, Codex and grok-build read

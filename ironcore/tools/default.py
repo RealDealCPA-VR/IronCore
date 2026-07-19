@@ -4,10 +4,12 @@
 defined; the engine (IC-502) calls it at boot and the TUI lists whatever
 it produced. Rules:
 
-- fs + shell tools are ALWAYS registered; ``fetch_url`` is registered
-  only when ``settings.safety.network_tools`` is true. An off NET tool
-  is not merely gated — it is never registered, so the model never
-  sees it in the tool specs.
+- fs + shell tools are ALWAYS registered; the NET tools ``fetch_url``
+  and ``web_search`` are registered only when
+  ``settings.safety.network_tools`` is true (``web_search`` additionally
+  needs a non-empty ``[tools] search_url``). An off NET tool is not
+  merely gated — it is never registered, so the model never sees it in
+  the tool specs.
 - Tools receive the workspace their constructors require; nothing here
   gates or prints (CONTRACTS §3) — the safety policy runs in the engine.
 - Plugin tools (MS-5) register AFTER the builtins with duplicate-skip:
@@ -28,6 +30,7 @@ from ironcore.tools.fetch import FetchUrlTool
 from ironcore.tools.fs_read import GlobTool, GrepTool, ListDirTool, ReadFileTool
 from ironcore.tools.fs_write import EditFileTool, WriteFileTool
 from ironcore.tools.image import ReadImageTool
+from ironcore.tools.search import WebSearchTool
 from ironcore.tools.shell import ShellTool
 from ironcore.tools.skill import UseSkillTool
 
@@ -65,6 +68,13 @@ def build_default_registry(
         registry.register(UseSkillTool(settings=settings, workspace=workspace))
     if settings.safety.network_tools:
         registry.register(FetchUrlTool())
+        # web_search is the second NET tool, gated identically. It also needs a
+        # configured endpoint: an empty [tools] search_url leaves it out (rather
+        # than registering a tool that can only ever error) while fetch_url stays.
+        tools_cfg = getattr(settings, "tools", None)
+        search_url = tools_cfg.search_url if tools_cfg is not None else ""
+        if search_url:
+            registry.register(WebSearchTool(search_url))
     if plugins is not None:
         # Builtins win: a duplicate plugin name is skipped and recorded, so
         # doctor/boot notes can say why a plugin tool never appeared. The

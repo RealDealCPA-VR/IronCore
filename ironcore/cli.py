@@ -101,6 +101,12 @@ def _print_banner() -> None:
 #: import-light — the TUI is imported lazily inside ``main``).
 RESUME_PICK = "__pick__"
 
+#: ``ironcore exec --mode`` choices, in autonomy order. Literal (not
+#: ``[m.value for m in Mode]``) so ``build_parser`` stays import-light — the
+#: real ``Mode`` is resolved lazily inside ``cmd_exec``. Mirrors
+#: ``ironcore.safety.modes.Mode``; PLAN is the headless default (read-only, CI-safe).
+_EXEC_MODES = ("plan", "manual", "accept-edits", "auto")
+
 
 #: Role names doctor reports, in the order they appear in RoleModels.
 _ROLE_NAMES = ("planner", "coder", "summarizer", "verifier")
@@ -156,6 +162,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init.set_defaults(scope="user")
     init.add_argument("--force", action="store_true", help="overwrite an existing config file")
+    ex = sub.add_parser(
+        "exec",
+        help="run one turn headlessly from a prompt; stream the reply to stdout "
+        "(read-only by default)",
+    )
+    ex.add_argument("prompt", help="the instruction to run this turn")
+    ex.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="emit one serialized event per line to stdout instead of prose",
+    )
+    ex.add_argument(
+        "--mode",
+        choices=_EXEC_MODES,
+        default="plan",
+        help="autonomy mode (default: plan -- read-only, CI-safe). Higher modes "
+        "still auto-DENY any approval prompt (no human to ask).",
+    )
     return parser
 
 
@@ -684,6 +709,10 @@ mode = "manual"
 # [plugins]
 # enabled = true               # false = never consult entry points at all
 
+# [tools]
+# search_url = "https://html.duckduckgo.com/html/"  # web_search endpoint (needs network_tools);
+#                              # "" leaves web_search unregistered, fetch_url stays
+
 # [mcp.servers.example]        # EXAMPLE server -- none configured by default.
 #                              # Uncommenting registers one. stdio transport only in v0.x.
 # command = "npx.cmd"          # on Windows use the real launcher name
@@ -837,6 +866,44 @@ def cmd_demo(smoke: bool = False) -> int:
 
 
 # --------------------------------------------------------------------------
+# exec (headless)
+# --------------------------------------------------------------------------
+
+
+def cmd_exec(
+    prompt: str,
+    *,
+    mode: str = "plan",
+    json_output: bool = False,
+    project_dir: Path | None = None,
+) -> int:
+    """Run one headless turn (``ironcore exec``); return its exit code.
+
+    Import-light like doctor/demo/init: the engine is imported lazily inside
+    ``ironcore.headless``, invoked only here. Exit codes: 0 on ``TurnCompleted``,
+    1 on ``TurnError``, **2 on ``ConfigError``** — a broken config is caught here
+    (before the generic ``main`` backstop, which would return 1) so a scripted
+    caller can tell "my setup is wrong" (2) apart from "the turn failed" (1).
+    """
+    from ironcore import headless
+    from ironcore.config.settings import ConfigError, Settings
+    from ironcore.safety.modes import Mode
+
+    ws = project_dir if project_dir is not None else Path.cwd()
+    try:
+        settings, notes = Settings.load_with_notes(project_dir=ws)
+    except ConfigError as exc:
+        print(f"ironcore: {exc}", file=sys.stderr)
+        print(_CONFIG_HINT, file=sys.stderr)
+        return 2
+    for note in notes:  # T8 clamps / skipped MCP servers ride stderr, never stdout
+        print(note, file=sys.stderr)
+
+    engine, registry = headless.build_engine(settings, ws, Mode(mode))
+    return headless.run_exec(engine, prompt, json_output=json_output, registry=registry)
+
+
+# --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
 
@@ -867,6 +934,8 @@ def _dispatch(argv: list[str] | None) -> int:
         return cmd_demo(smoke=args.smoke)
     if args.command == "init":
         return cmd_init(scope=args.scope, force=args.force)
+    if args.command == "exec":
+        return cmd_exec(args.prompt, mode=args.mode, json_output=args.json_output)
     # No subcommand: launch the interactive TUI only when we own a real
     # terminal. Non-TTY (pipes, CI, captured tests) gets the banner and a
     # non-zero exit — driving a full-screen app into a pipe would hang, and

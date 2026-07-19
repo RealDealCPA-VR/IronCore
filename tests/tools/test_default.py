@@ -55,16 +55,43 @@ def test_use_skill_absent_when_skills_disabled(tmp_path):
 def test_network_tools_true_adds_fetch_url(tmp_path):
     registry = build_default_registry(network_on(), tmp_path)
     names = {t.name for t in registry.all()}
-    assert names == LOCAL_TOOLS | {"fetch_url"}
+    # PKG-5: web_search joins fetch_url as the second NET tool (default search_url).
+    assert names == LOCAL_TOOLS | {"fetch_url", "web_search"}
     fetch = registry.get("fetch_url")
     assert isinstance(fetch, FetchUrlTool)
     assert fetch.risk is ToolRisk.NET
 
 
+def test_web_search_registered_when_network_on_and_search_url_set(tmp_path):
+    from ironcore.tools.search import WebSearchTool
+
+    search = build_default_registry(network_on(), tmp_path).get("web_search")
+    assert isinstance(search, WebSearchTool)
+    assert search.risk is ToolRisk.NET
+
+
+def test_web_search_absent_when_search_url_empty(tmp_path):
+    """An empty [tools] search_url leaves web_search out but keeps fetch_url."""
+    settings = Settings.model_validate(
+        {"safety": {"network_tools": True}, "tools": {"search_url": ""}}
+    )
+    registry = build_default_registry(settings, tmp_path)
+    assert registry.get("web_search") is None
+    assert registry.get("fetch_url") is not None
+
+
+def test_web_search_absent_when_network_off(tmp_path):
+    """NET-gated exactly like fetch_url: nothing registered with network off."""
+    registry = build_default_registry(Settings(), tmp_path)
+    assert registry.get("web_search") is None
+    assert "web_search" not in {t.name for t in registry.all()}
+
+
 def test_assembled_registry_has_unique_names(tmp_path):
     registry = build_default_registry(network_on(), tmp_path)
     names = [t.name for t in registry.all()]
-    assert len(names) == len(set(names)) == len(LOCAL_TOOLS) + 1  # + fetch_url
+    # + fetch_url + web_search
+    assert len(names) == len(set(names)) == len(LOCAL_TOOLS) + 2
 
 
 # --- every spec is a valid model-facing function spec --------------------------

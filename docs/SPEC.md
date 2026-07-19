@@ -46,8 +46,7 @@ watch it happen without fearing for their machine (§7).
 
 **It is:** an interactive TUI agent for software work in a workspace directory: reads, edits,
 runs, tests, commits — under a graduated safety regime; extensible through MCP servers and
-pip-installable plugins; plus a headless mode for scripting (`ironcore run "<prompt>"` —
-planned, §9).
+pip-installable plugins; plus a headless mode for scripting (`ironcore exec "<prompt>"`, §9).
 
 **Non-goals (v0.x):** an IDE plugin; a hosted service; multi-user anything; training or
 fine-tuning models; supporting closed models is *allowed* (any OpenAI-compatible endpoint
@@ -258,6 +257,7 @@ The registered lineup is exactly what `tools/default.py` assembles (pinned by
 | `write_file`, `edit_file` | WRITE | edit via envelope-selected format; path-jailed (§7.3) |
 | `shell` | EXEC | timeout, output caps, cwd=workspace, Windows+POSIX |
 | `fetch_url` | NET | registered only if `safety.network_tools=true` |
+| `web_search` | NET | query an HTML search endpoint (set in the [tools] section, [CONFIG.md](CONFIG.md) §11); registered only if `safety.network_tools=true` and an endpoint is set; returns title + url + snippet, capped and secret-redacted |
 | `mcp__<server>__<tool>` | NET | one per tool exported by each configured MCP server (§12, [CONFIG.md](CONFIG.md) §8); same NET rule — never registered unless `safety.network_tools=true` |
 
 `tools/patch.py` is **not** a registered tool: it is the harness-internal deterministic
@@ -355,10 +355,18 @@ envelope); keep-alive management so interactive sessions don't reload weights.
 Endpoint feature-detect: native `tools` support, `format=json` / grammar / guided-decoding
 availability, logprobs. Detection results feed the envelope's protocol scores as priors.
 
-## 9. Headless & scripting (planned, v0.3)
+## 9. Headless & scripting
 
-`ironcore run "<prompt>" --mode auto --max-turns N --json` → events as JSONL on stdout, exit
-code from stop_reason. The event contract (core/events.py) already anticipates this consumer.
+`ironcore exec "<prompt>" [--mode MODE] [--json]` runs ONE turn against the real engine with
+no TUI (`ironcore/headless.py`). Default `--mode plan` is read-only and CI-safe; `--mode`
+raises it. In human mode the model's streamed text goes to **stdout** and every other event
+to **stderr** (so `> answer.txt` captures only the answer); `--json` emits one serialized
+`core/events` event per line to stdout instead. Approvals fail closed — there is no human to
+prompt, so any `ask` gate auto-DENIES via the broker's existing timeout path (no new decision
+path), with a hint on stderr. Exit code: **0** on `TurnCompleted`, **1** on `TurnError`, **2**
+on a `ConfigError` during setup. The event contract (`core/events.py`) always anticipated this
+consumer. *(Shipped name is `exec`, matching `codex exec`; SPEC previously sketched it as
+`run`. `--max-turns` is not yet implemented — one turn per invocation.)*
 
 ## 10. Workflows (phase 9)
 
@@ -471,7 +479,7 @@ deps. CI publishes to PyPI on tag (IC-1102). Version single-sourced from `pyproj
 |---|---|---|
 | v0.1 | shipped | phases 1–11: the whole usable agent — providers, tools, safety kernel, turn engine, capability envelope, TUI, slash commands, workflows, sessions/resume + `/compact`, project memory (`IRONCORE.md`), packaging |
 | v0.2 | shipped | the eight **moonshots**: model-aware tokenization (`TOKEN-RATIO`), live `/model` swaps, a model per role each measured, best-of-N escape hatches, the self-improvement loop (outcome ledger + downgrade-only tuning), vision (`read_image`), MCP tool servers, entry-point plugins — plus instant-on profiling and real server-side guided decoding |
-| v0.3 | next | headless `ironcore run` (§9), coverage/perf hardening, packaging polish |
+| v0.3 | next | headless `ironcore exec` (§9), `web_search`, coverage/perf hardening, packaging polish |
 | v1.0 | later | envelope v2 (auto-reprobe on model updates), workflow library, docs site |
 
 Per-release detail, including what landed when, is in [CHANGELOG.md](../CHANGELOG.md).
