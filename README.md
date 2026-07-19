@@ -14,7 +14,7 @@
 
 </div>
 
-![A two-turn IronCore session in MANUAL mode, opening with a three-line IRONCORE masthead. The agent runs list_dir, read_file and grep — each a tool card on a faint panel with a blue rule down its left edge, the tool name in bold, a blue READ chip, a done state, dim arguments and a green ✓ ok result line — then explains in plain English that fib() is an unfinished stub returning 0. The user's own two questions read in amber above each turn. The status bar reads MANUAL, qwen3-coder:30b, turn 2, 4.2k tok.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/01-session-tool-cards.png)
+![A two-turn IronCore session in MANUAL mode under a forged-iron masthead — the two-tone IRONCORE wordmark over the tagline "a terminal coding agent that molds to your open & local models" and a row of keycaps (/ commands · shift+tab safety · esc interrupt · ctrl+c quit). The agent runs list_dir, read_file and grep — each a tool card on a faint panel with a blue rule down its left edge, the tool name in bold, a blue READ chip, a done state, dim arguments and a green ✓ ok result line — then explains in plain English that fib() is an unfinished stub returning 0. The user's own two questions read in amber, each led by a › marker, above the turn they drove. The status bar reads MANUAL, qwen3-coder:30b, turn 2, 4.2k tok, with esc stop · ctrl+c quit on the right.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/01-session-tool-cards.png)
 
 *Every tool call is named, risk-classified and gated on screen — nothing happens invisibly.*
 
@@ -68,7 +68,7 @@ The middle rung is real: a model routed to **strict JSON** is driven with server
 its output is *constrained* to a well-formed `{"tool", "args"}` object — guaranteed-parseable
 tool calls, not best-effort — with a `done` action so a constrained model can still finish.
 
-![The /envelope report card for qwen3-coder:30b, colour-coded by outcome. Source reads 'measured' in green; honest context 49,152 against an advertised 262,144, with the resulting 19% flagged in red; 3.6 chars per token. A tool-protocol ladder picks native at 0.98, marked SELECTED in green, with strict_json below it greyed as 'ok, fallback' and text_protocol greyed as 'floor (always works)'. An edit-format ladder shows unified_diff at 0.71 in red, 'REJECTED (0.19 short)', and search_replace at 0.93 SELECTED in green. Below: JSON adherence, retention, coherence, vision, and a green verdict of 'usable — native tool calls, search_replace edits'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/03-envelope-report-card.png)
+![The /envelope report card for qwen3-coder:30b, colour-coded by outcome. Source reads 'measured' in green; honest context 49,152 against an advertised 262,144, with the resulting 19% flagged in red; 3.6 chars per token. Each ladder names its recommended rung and shows every rung's score against the acceptance bar it must clear: the tool-protocol ladder picks native at 0.98 (needs 0.95), marked SELECTED in green, with strict_json 0.94 below it greyed as 'ok, fallback' and text_protocol greyed as 'floor (always works)'. The edit-format ladder shows unified_diff at 0.71 against a needed 0.90 in red, 'REJECTED (0.19 short)', and search_replace at 0.93 (needs 0.85) SELECTED in green. Below: JSON adherence 0.96, retention 0.88, coherence 9 turns, vision no, and a green verdict of 'usable — native tool calls, search_replace edits'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/03-envelope-report-card.png)
 
 *`/envelope` — the measurement, not a guess. This model advertises 262k of context; it honestly
 retrieves at 49k, and it cannot be trusted with unified diffs, so IronCore stopped using them.
@@ -156,7 +156,7 @@ model's replies are scripted. You watch it read a file, propose an edit as a rea
 through a gate decision, apply the patch and then *verify* the result before calling itself
 done. It is the fastest way to see whether this tool is for you.
 
-![Real ironcore demo output: a header naming the temp workspace, the mode as an amber accept-edits chip and 'model: mock (scripted; no network, no real model)'; the user's request, to make greet() end with an exclamation mark, in amber; the assistant reads greeter.py through a tool card led by a blue rule and a READ chip, allowed at the gate, returning a green tick; then an edit_file card led by an amber rule and a filled WRITE chip showing the one-line search_replace diff in red and green, applied to greeter.py; a verify block runs check_feature.py and reports 'verify passed: 1 command (configured)' in green; the turn completes with stop_reason done in green, the final greeter.py is echoed, and the run ends with a green 'demo complete: feature edited, verified green, and the turn stopped on evidence (done)'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/09-demo.png)
+![Real ironcore demo output opening with the two-tone IRONCORE wordmark over 'offline end-to-end demo', then a header naming the temp workspace, the mode as an amber accept-edits chip and 'model: mock (scripted; no network, no real model)'; the user's request, to make greet() end with an exclamation mark, in amber; the assistant reads greeter.py through a tool card led by a blue rule and a READ chip, allowed at the gate, returning a green tick; then an edit_file card led by an amber rule and a filled WRITE chip showing the one-line search_replace diff in red and green, applied to greeter.py; a verify block runs check_feature.py and reports 'verify passed: 1 command (configured)' in green; the turn completes with stop_reason done in green, the final greeter.py is echoed, and the run ends with a green 'demo complete: feature edited, verified green, and the turn stopped on evidence (done)'.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/09-demo.png)
 
 *The whole run, start to finish. The banner names the mock model up front, every tool call
 prints its own risk and gate decision, the edit lands as a real diff — and the turn only stops
@@ -253,7 +253,7 @@ to a tool — if it happened, there is a card for it, and the gate decided about
 **Approving a change.** In the default MANUAL mode, anything that writes stops at the gate and
 shows you the exact edit before it lands:
 
-![The approval modal, an amber-bordered panel titled 'Approval required', over a dimmed transcript. Inside: a filled amber WRITE chip beside the plain-language line 'this changes files in your workspace', then edit_file fib.py [search_replace] and the search/replace diff with the removed lines in red and the added lines in green, then three flat text actions — Deny (n), Approve (y) which has focus and reads bold green, and Approve all writes (a). The amber-ruled edit_file tool card that raised the ask is still visible behind the modal.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/02-approval-diff.png)
+![The approval modal, an amber-bordered panel titled 'Approval required', floating over the dimmed masthead and transcript. Inside: a filled amber WRITE chip beside the plain-language line 'this changes files in your workspace', then edit_file fib.py [search_replace] and the search/replace diff — the removed '# TODO: this stub was never finished' and 'return 0' in red, the two-variable fibonacci loop that replaces them in green — then three actions: Deny (n) in red, a focused Approve (y) rendered as a filled green button, and Approve all writes (a) in amber, with a 'y approve · n deny · a all' hint along the panel's bottom edge.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/02-approval-diff.png)
 
 *The keys are on the buttons: `y` approves this one, `n` denies it, `a` approves writes for the
 rest of the session. You are approving a specific diff, not a vague intention.*
@@ -290,6 +290,79 @@ Run `ironcore doctor` first — it also prints any setting that was clamped, so 
 take effect" has a visible cause. Then see
 [`docs/TROUBLESHOOTING.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/TROUBLESHOOTING.md),
 which is organized by the exact line doctor printed.
+
+---
+
+# Skills — teach it once, in the open standard
+
+A **skill** is a folder with a `SKILL.md` file: a little YAML naming the skill
+(`name` + `description`) over a Markdown body of standing instructions — a release
+checklist, a migration procedure, your house code-review rubric. It is the *same*
+on-disk shape Claude Code, Codex and grok-build already read, so a skill you (or a
+repo) wrote for one of those runs in IronCore unchanged, and vice-versa. Skills are the
+**v0.3 headline**: reusable know-how the model reaches for instead of you re-explaining
+the same procedure every session.
+
+```markdown
+---
+name: release-checklist
+description: Cut a release — bump the version, run the suite, tag, and push.
+---
+
+# Release checklist
+1. Bump the version in `pyproject.toml` and `CHANGELOG.md`.
+2. Run the full suite and confirm it is green.
+3. Commit as `chore(release): vX.Y.Z`, tag it, push the tag.
+
+If a step fails, stop and report — never push a red build.
+```
+
+Only the one-line `description` rides every prompt; the body is loaded lazily, on demand.
+
+**Where they live** — user locations are scanned first, so a cloned project skill can
+never shadow one of your own by name:
+
+| Location | Trust |
+|---|---|
+| `~/.ironcore/skills/<name>/SKILL.md` | **trusted** — you authored it on your own machine |
+| `<workspace>/.ironcore/skills/<name>/SKILL.md` | **confirmed once** — it arrived with `git clone` |
+
+Set `[skills] compat_dirs = true` and IronCore *also* reads `.claude`, `.codex` and
+`.grok` `skills/` dirs at both levels — so ecosystem skills already on disk need no copying.
+
+**How to invoke** — two paths, both lazy-body:
+
+- **You:** `/skill` lists what is discoverable; `/skill <name>` injects that skill's
+  instructions into the next turn.
+- **The model:** the skills catalog (name + one-liner each) rides the system prompt, and
+  the model calls the READ-risk `use_skill(name=…)` tool to pull a skill's full body
+  before a task it covers.
+
+The catalog is **envelope-aware** — budget-fitted to your model's *measured* honest
+context, so on a tiny window it degrades to the top few skills (or none) rather than
+silently eating the budget.
+
+**Safety is harness-owned, and stricter than the frontier default.** Your own skills are
+trusted like your `IRONCORE.md`. A **clone-borne project skill is confirmed once per
+workspace** (`/skill run <name>`) before its body ever reaches the model — where the
+frontier tools surface a cloned repo's skills by default, IronCore holds an unconfirmed
+one behind that gate and keeps it out of the model-facing catalog until you approve it. A
+skill body is display text: any script it references still runs through the **EXEC gate,
+deny-list and workspace jail**, and no `verify:` directive is ever parsed out of a skill.
+Full guide:
+[`docs/SKILLS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SKILLS.md).
+
+### The rest of the v0.3 frontier
+
+- **Headless `ironcore exec "<prompt>"`** runs one turn against the real engine with no
+  TUI — scriptable, pipe-friendly and CI-safe, defaulting to read-only Plan mode. See
+  [Scripting it](#scripting-it--ironcore-exec).
+- **`AGENTS.md` / `CLAUDE.md` compatibility** — with no `IRONCORE.md`, project memory
+  falls back to an `AGENTS.md`, then a `CLAUDE.md`, that the repo already ships, so a
+  cloned frontier project has first-run value (see [Configuration](#configuration)).
+- **`web_search`** — a NET tool beside `fetch_url` that queries a configurable HTML
+  search endpoint (SearXNG or the DuckDuckGo default), off unless
+  `safety.network_tools = true` in your user config.
 
 ---
 
@@ -523,18 +596,6 @@ and open up to plugins — and as of **v0.2**, every one of them has shipped:
   they earn a "run `/probe`" hint), so each model's real-world quirks reshape the ladders
   across sessions. The report card and `/envelope` say `tuned` honestly; off switch:
   `[envelope] auto_tune = false`.
-- **Skills — the `SKILL.md` open standard, envelope-aware.** Drop a `<dir>/SKILL.md`
-  (YAML `name`/`description` over a Markdown body) under `~/.ironcore/skills/` or a repo's
-  `.ironcore/skills/` and IronCore surfaces it — the *same* format Claude Code, Codex and
-  grok-build read, so ecosystem skills work unchanged (`[skills] compat_dirs = true` even
-  reads their `.claude`/`.codex`/`.grok` dirs). A compact catalog rides the system prompt
-  **budget-fitted to your model's measured context** — on a tiny window it degrades to the
-  top few skills or none, never silently eating the budget — and the full body is
-  lazy-loaded, by you via `/skill <name>` or by the model via the READ-risk `use_skill`
-  tool. Trust is harness-owned: your own skills are trusted, a **clone-borne project skill
-  is confirmed before first use** (T8) and never reaches the model's context until you
-  approve it, and a skill's scripts still run through the EXEC gate — a skill cannot smuggle
-  execution past the kernel. See [`docs/SKILLS.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/SKILLS.md).
 - **Vision — image inputs for screenshots/diagrams.** A new `read_image` tool lets the
   model actually look at a workspace PNG/JPEG/GIF/WEBP: the bytes ride the conversation
   as OpenAI image content-parts (base64 data URIs, so Ollama and vLLM vision models both
