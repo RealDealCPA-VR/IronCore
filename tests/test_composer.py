@@ -442,6 +442,143 @@ def test_summarizer_not_called_when_content_fits(tmp_path):
     assert calls == []  # in-budget content is returned verbatim, never summarized
 
 
+# -- instruction-file compat + user-global memory (PKG-3) ----------------------
+#
+# A tmp `user_home` is injected everywhere so the loader never reads the real
+# ~/.ironcore/IRONCORE.md (deterministic + hermetic on any machine).
+
+
+def _empty_home(tmp_path: Path) -> Path:
+    return tmp_path / "no-such-home"  # has no .ironcore/IRONCORE.md
+
+
+def _write_user_global(home: Path, text: str) -> Path:
+    d = home / ".ironcore"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "IRONCORE.md"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_agents_md_used_when_ironcore_absent(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("# Agent notes\nBuild with uv.\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=_empty_home(tmp_path))
+    assert out == "# Agent notes\nBuild with uv.\n"  # lone source -> verbatim, no label
+
+
+def test_agents_md_fallback_without_home_injection(tmp_path):
+    # No user_home injected: proves the DEFAULT path (Path.home()) reads AGENTS.md
+    # when IRONCORE.md is absent. This one fails cleanly on pre-PKG-3 source
+    # (which returned "" because it only ever read IRONCORE.md).
+    (tmp_path / "AGENTS.md").write_text("agents fallback body\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile())
+    assert "agents fallback body" in out
+
+
+def test_claude_md_used_when_ironcore_and_agents_absent(tmp_path):
+    (tmp_path / "CLAUDE.md").write_text("claude notes\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=_empty_home(tmp_path))
+    assert out == "claude notes\n"
+
+
+def test_ironcore_md_wins_over_agents_and_claude(tmp_path):
+    _write_memory(tmp_path, "native memory\n")
+    (tmp_path / "AGENTS.md").write_text("agents\n", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("claude\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=_empty_home(tmp_path))
+    assert out == "native memory\n"
+    assert "agents" not in out and "claude" not in out
+
+
+def test_agents_md_wins_over_claude_md(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("agents body\n", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("claude body\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=_empty_home(tmp_path))
+    assert out == "agents body\n"
+    assert "claude" not in out
+
+
+def test_empty_agents_md_falls_through_to_claude_md(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("", encoding="utf-8")  # empty -> not a source
+    (tmp_path / "CLAUDE.md").write_text("claude body\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=_empty_home(tmp_path))
+    assert out == "claude body\n"
+
+
+def test_user_global_alone_is_returned_verbatim(tmp_path):
+    home = tmp_path / "home"
+    _write_user_global(home, "GLOBAL: prefer ruff\n")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=home)
+    assert out == "GLOBAL: prefer ruff\n"  # single source -> verbatim, no label
+
+
+def test_user_global_merged_before_project_memory(tmp_path):
+    home = tmp_path / "home"
+    _write_user_global(home, "GLOBAL: prefer ruff\n")
+    _write_memory(tmp_path, "PROJECT: run pytest\n")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=home)
+    assert "GLOBAL: prefer ruff" in out
+    assert "PROJECT: run pytest" in out
+    # user-global precedes project in the composed body, and each is labelled
+    assert out.index("GLOBAL: prefer ruff") < out.index("PROJECT: run pytest")
+    assert "User-global memory" in out
+    assert "Project memory (IRONCORE.md)" in out
+
+
+def test_user_global_merges_with_agents_md_fallback(tmp_path):
+    home = tmp_path / "home"
+    _write_user_global(home, "GLOBAL body\n")
+    (tmp_path / "AGENTS.md").write_text("AGENTS body\n", encoding="utf-8")
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=home)
+    assert out.index("GLOBAL body") < out.index("AGENTS body")
+    assert "Project memory (AGENTS.md)" in out  # provenance label names the real source
+
+
+def test_combined_memory_truncates_within_budget(tmp_path):
+    home = tmp_path / "home"
+    _write_user_global(home, "U" * 8000)
+    _write_memory(tmp_path, "P" * 8000)
+    profile = _profile(honest_context=1000)  # SYSTEM share = 100 tokens
+    out = load_project_memory(tmp_path, profile=profile, user_home=home)
+    budget = int(1000 * SYSTEM_SHARE)
+    assert estimate_tokens(out) <= budget  # the hard budget invariant holds
+    assert MEMORY_MARKER in out  # honest marker shows a cap fired
+    # both sources still represented (budget SPLIT, not tail-dropped): each
+    # label survives AND at least some of each body's bytes made it in.
+    assert "User-global memory" in out
+    assert "Project memory (IRONCORE.md)" in out
+    assert "U" in out and "P" in out
+
+
+def test_combined_memory_tiny_window_never_exceeds_budget(tmp_path):
+    # Even at a window too small for the provenance labels, the invariant holds
+    # and nothing raises (honest degrade to a sliver, not a crash).
+    home = tmp_path / "home"
+    _write_user_global(home, "U" * 8000)
+    _write_memory(tmp_path, "P" * 8000)
+    for hc in (40, 120, 300, 400):
+        profile = _profile(honest_context=hc)
+        out = load_project_memory(tmp_path, profile=profile, user_home=home)
+        assert estimate_tokens(out) <= int(hc * SYSTEM_SHARE)
+
+
+def test_combined_memory_flows_through_compose_within_ceiling(tmp_path):
+    home = tmp_path / "home"
+    _write_user_global(home, "GLOBAL: prefer ruff\n")
+    _write_memory(tmp_path, "PROJECT: run pytest\n")
+    profile = _profile()
+    memory = load_project_memory(tmp_path, profile=profile, user_home=home)
+    msgs = _compose(SessionState(turn_count=0), profile, memory=memory)
+    assert "GLOBAL: prefer ruff" in msgs[0].content
+    assert "PROJECT: run pytest" in msgs[0].content
+    assert _content_tokens(msgs) <= _budget_ceiling(profile)
+
+
+def test_no_memory_sources_returns_empty(tmp_path):
+    out = load_project_memory(tmp_path, profile=_profile(), user_home=_empty_home(tmp_path))
+    assert out == ""
+
+
 # -- compose() budgets a large memory into the SYSTEM share --------------------
 
 

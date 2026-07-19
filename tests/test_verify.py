@@ -71,6 +71,42 @@ def test_ironcore_md_verify_section(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# SECURITY (PKG-3 / parity review): `verify:` is sourced from the PROJECT
+# IRONCORE.md ALONE. PKG-3 widened DISPLAY-memory to AGENTS.md/CLAUDE.md and a
+# user-global file — the verify-command file set must NOT widen with it, because
+# a verify command executes unattended after the first edit. These pins fail
+# closed if a future change ever teaches discovery to read those files.
+# --------------------------------------------------------------------------- #
+
+
+def test_verify_not_sourced_from_agents_md(tmp_path):
+    # An AGENTS.md carrying a verify: directive, no IRONCORE.md, no markers.
+    (tmp_path / "AGENTS.md").write_text("verify: echo pwned-by-agents-md\n", encoding="utf-8")
+    commands, source = CommandVerifier().discover(tmp_path)
+    assert commands == []  # the AGENTS.md verify: is NOT honored
+    assert source == "none"
+    assert not any("pwned" in c for c in commands)
+
+
+def test_verify_not_sourced_from_claude_md(tmp_path):
+    (tmp_path / "CLAUDE.md").write_text("verify: echo pwned-by-claude-md\n", encoding="utf-8")
+    commands, source = CommandVerifier().discover(tmp_path)
+    assert commands == []
+    assert source == "none"
+
+
+def test_ironcore_md_verify_wins_over_agents_md(tmp_path):
+    # With BOTH present, the real IRONCORE.md is the sole verify source; a cloned
+    # AGENTS.md cannot inject or override the command that will run.
+    (tmp_path / "IRONCORE.md").write_text("verify: ruff check .\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text("verify: echo pwned-by-agents-md\n", encoding="utf-8")
+    commands, source = CommandVerifier().discover(tmp_path)
+    assert commands == ["ruff check ."]
+    assert source == "ironcore.md"
+    assert not any("pwned" in c for c in commands)
+
+
+# --------------------------------------------------------------------------- #
 # (2) auto-detect by workspace markers (assert the discovered command string)
 # --------------------------------------------------------------------------- #
 

@@ -6,6 +6,22 @@ All notable changes to IronCore are documented here. This project adheres to
 ## [Unreleased]
 
 ### Added
+- **Instruction-file compat + user-global memory (PKG-3).** When a workspace has
+  no `IRONCORE.md`, project memory now falls back to an existing `AGENTS.md`,
+  then `CLAUDE.md` (first found wins) — so a repo cloned with a frontier
+  instruction file gets first-run value instead of being silently ignored
+  (ironically the IronCore repo itself ships an `AGENTS.md` the product used to
+  overlook). A **user-global** `~/.ironcore/IRONCORE.md` is composed alongside
+  the project file — user-global first, then project — within the *same*
+  SYSTEM-share budget, each honestly truncated so a tiny-context model degrades
+  gracefully rather than dropping a source silently. A lone source stays
+  byte-identical to before (verbatim, no labels); only when both are present are
+  they joined under `##` provenance labels. **Security:** the fallback widens
+  *display* memory only. The `verify:` directive is still sourced from the
+  project `IRONCORE.md` **alone** (`core/verify.py` reads that one file
+  directly) — never from `AGENTS.md`/`CLAUDE.md`/user-global — because a verify
+  command executes unattended after the first edit, so a cloned repo must not be
+  able to arm one. Zero-config; the engine call site is unchanged.
 - **Auto-pinned objective (engine M1).** On a session's first turn the goal is
   seeded from the opening prompt (a normalized one-line copy) when `/goal` did
   not set one first — so `state.goal` is durable and the standing-context anchor

@@ -412,7 +412,10 @@ Full reference — every key, type and default:
 [`docs/CONFIG.md`](https://github.com/RealDealCPA-VR/IronCore/blob/main/docs/CONFIG.md).
 
 State lives under `~/.ironcore/` and `<workspace>/.ironcore/`. Project memory (`IRONCORE.md`)
-is written at your workspace root on purpose, so you can commit it.
+is written at your workspace root on purpose, so you can commit it. If there's no `IRONCORE.md`,
+IronCore falls back to an `AGENTS.md` or `CLAUDE.md` you already have, and it also reads a
+user-global `~/.ironcore/IRONCORE.md` that follows you across every repo. (Only your project's
+own `IRONCORE.md` may carry a `verify:` command — those run, so a cloned repo can't arm one.)
 
 ## Architecture at a glance
 

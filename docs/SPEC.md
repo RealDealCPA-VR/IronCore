@@ -374,6 +374,15 @@ data validated against declared output schemas, with mechanical retry on validat
 `IRONCORE.md` at workspace root (created by `/init`, edited by `/memory`): build/test commands,
 conventions, architecture notes. Injected into the system prompt, token-budgeted.
 
+**Instruction-file compat (PKG-3).** When `IRONCORE.md` is absent, project memory falls back
+to `AGENTS.md`, then `CLAUDE.md` (first found wins), so a repo cloned with a frontier
+instruction file still gets first-run value. A **user-global** `~/.ironcore/IRONCORE.md` is
+composed too — user-global first, then the project file — within the same SYSTEM-share budget,
+each honestly truncated on a tiny context. **Security:** this fallback widens *display* memory
+only. The `verify:` directive (§5.5) is sourced from the project `IRONCORE.md` **alone** —
+never from `AGENTS.md`/`CLAUDE.md`/user-global — because a verify command executes unattended
+after the first edit; a cloned repo must not be able to arm one.
+
 ### 11.2 Sessions & compaction
 
 Transcript JSONL under `.ironcore/sessions/`; resume via session picker (IC-706). `/compact`
