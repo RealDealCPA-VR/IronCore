@@ -117,7 +117,16 @@ models you actually have, so it tells you exactly what to put there.)
 
 ## Install
 
-PyPI publishing is not live yet, so install from the repository:
+```bash
+pip install ironcore-cli        # or:  uv tool install ironcore-cli  /  pipx install ironcore-cli
+```
+
+**The PyPI package is `ironcore-cli`; everything else is still `ironcore`** — the command you
+run is `ironcore`, and the import is `import ironcore`. The bare name `ironcore` was refused by
+PyPI as too similar to the unrelated `iron-core` package, so the distribution carries the `-cli`
+suffix and nothing else changed.
+
+To install the current `main` instead of the last release:
 
 ```bash
 pip install git+https://github.com/RealDealCPA-VR/IronCore.git
@@ -131,13 +140,9 @@ at all:
 pip install https://github.com/RealDealCPA-VR/IronCore/archive/refs/heads/main.zip
 ```
 
-Both commands install the current `main`. Prebuilt wheels are attached to
-[releases](https://github.com/RealDealCPA-VR/IronCore/releases) as they are published; if that
-page lists one you want, copy its `.whl` asset URL and hand it straight to your installer
-(`uv tool install <wheel-url>` or `pip install <wheel-url>`).
-
-`pip install ironcore` from PyPI is **not** available yet — treat any instruction that says
-otherwise as premature.
+Prebuilt wheels are also attached to every
+[release](https://github.com/RealDealCPA-VR/IronCore/releases); copy a `.whl` asset URL and hand
+it straight to your installer (`uv tool install <wheel-url>` or `pip install <wheel-url>`).
 
 ## Try it with no model at all
 

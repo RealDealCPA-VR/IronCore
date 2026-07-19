@@ -429,7 +429,9 @@ enabled = true
 
 ## 13. Distribution
 
-`pip install ironcore` / `uv tool install ironcore` / `pipx install ironcore`. No compiled
+`pip install ironcore-cli` / `uv tool install ironcore-cli` / `pipx install ironcore-cli`. The
+**distribution** is `ironcore-cli`; the **import package** and the **console script** are both
+`ironcore` (PyPI refused the bare name as too similar to the unrelated `iron-core`). No compiled
 deps. CI publishes to PyPI on tag (IC-1102). Version single-sourced from `pyproject.toml`
 (test-pinned to `ironcore.__version__`).
 

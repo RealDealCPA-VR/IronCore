@@ -3,6 +3,18 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.2] — 2026-07-18
+
+### Changed
+- **The PyPI distribution is named `ironcore-cli`.** PyPI refused the bare name
+  `ironcore` as "too similar to an existing project" — its similarity guard
+  collapses separators, so the unrelated `iron-core` (Iron.io API wrappers)
+  occupies the same slot. Only the distribution name moved: the console script
+  is still `ironcore`, the import package is still `ironcore`, the repository is
+  still `IronCore`, and no code changed. `pip install ironcore-cli` then
+  `ironcore doctor`. This is the first version published to PyPI; 0.2.1 and
+  earlier are installable from the GitHub releases and from source.
+
 ## [0.2.1] — 2026-07-18
 
 The fit-for-strangers release. 0.2.0 shipped the features; a six-lens release audit
