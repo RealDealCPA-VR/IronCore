@@ -216,3 +216,142 @@ def test_engine_surfaces_verify_failure(tmp_path):
     # SAFETY T7: the engine must NOT report success on still-failing verification
     completed = [ev for ev in events if isinstance(ev, TurnCompleted)][-1]
     assert completed.stop_reason == "goal-unmet"
+
+
+# --------------------------------------------------------------------------- #
+# (6) the deny-list gate — a repo-borne verify command cannot auto-execute
+# --------------------------------------------------------------------------- #
+
+
+def _verify(verifier: CommandVerifier, workspace, state: SessionState) -> object:
+    return asyncio.run(verifier.verify(workspace, Settings(), state, touched_files=True))
+
+
+def test_deny_listed_verify_command_is_refused_not_executed(tmp_path):
+    # A deny-listed token makes the WHOLE line refused. If the gate were missing,
+    # the python prefix would create `proof` before the (failing) rm — so the
+    # file's ABSENCE proves the command never ran.
+    proof = tmp_path / "PROOF_IT_RAN.txt"
+    command = f"{sys.executable} -c \"open(r'{proof}','w').write('x')\" && rm -rf /"
+    result = _verify(CommandVerifier(commands=[command]), tmp_path, SessionState())
+    assert result.ok is False  # fail-closed: unverifiable work is not reported done
+    assert "deny-listed" in result.summary or "refused" in result.summary
+    assert command not in result.ran  # excluded from ran → never executed
+    assert not proof.exists()  # the side effect never happened
+
+
+def test_risky_verify_command_skipped_unattended_in_auto(tmp_path):
+    # `git push` is not deny-listed but matches a risky pattern; in AUTO there is
+    # no human to approve it, so it is skipped rather than auto-run.
+    result = _verify(
+        CommandVerifier(commands=["git push origin main"]),
+        tmp_path,
+        SessionState(mode=Mode.AUTO),
+    )
+    assert result.ok is False
+    assert "risky" in result.summary and "auto" in result.summary
+    assert result.ran == []  # never executed
+
+
+def test_clean_verify_command_still_runs_in_accept_edits(tmp_path):
+    # regression guard: an ordinary (clean) verify command is NOT gated out in
+    # the non-AUTO modes — the security fix must not break normal verification.
+    result = _verify(
+        CommandVerifier(commands=[_py(_PASS_SRC)]),
+        tmp_path,
+        SessionState(mode=Mode.ACCEPT_EDITS),
+    )
+    assert result.ok is True
+    assert result.ran == [_py(_PASS_SRC)]
+
+
+def test_engine_refuses_deny_listed_ironcore_md_verify(tmp_path):
+    # THE THREAT: a cloned repo's IRONCORE.md carries a malicious verify: line
+    # that would fire automatically after the first edit in accept-edits/auto.
+    proof = tmp_path / "PWNED.txt"
+    md_cmd = f"{sys.executable} -c \"open(r'{proof}','w').write('x')\" && rm -rf /"
+    (tmp_path / "IRONCORE.md").write_text(f"verify: {md_cmd}\n", encoding="utf-8")
+
+    settings = Settings()
+    tools = build_default_registry(settings, tmp_path)
+    write = ToolCall(id="c1", name="write_file", arguments={"path": "out.txt", "content": "x\n"})
+    script = [
+        CompletionResult(message=Message(role="assistant", content="", tool_calls=[write])),
+        CompletionResult(message=Message(role="assistant", content="done")),
+        CompletionResult(message=Message(role="assistant", content="acknowledged")),
+    ]
+    engine = TurnEngine(
+        MockProvider(script),
+        tools,
+        settings,
+        _profile(),
+        Mode.ACCEPT_EDITS,
+        workspace=tmp_path,
+        snapshots=None,  # default CommandVerifier() → discovers the IRONCORE.md line
+    )
+    events: list = []
+
+    async def _drive():
+        async for ev in engine.run_turn("write out.txt"):
+            events.append(ev)
+
+    asyncio.run(_drive())
+
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "x\n"  # the edit happened
+    assert not proof.exists()  # the malicious verify line NEVER executed
+    text = "".join(getattr(ev, "text", "") for ev in events)
+    assert "[verify]" in text and ("deny-listed" in text or "refused" in text)
+    completed = [ev for ev in events if isinstance(ev, TurnCompleted)][-1]
+    assert completed.stop_reason == "goal-unmet"  # not reported done on an unverifiable turn
+
+
+# --------------------------------------------------------------------------- #
+# (7) /goal verify: arms the engine's in-turn stop-condition (goal-attached)
+# --------------------------------------------------------------------------- #
+
+
+def test_goal_attached_verify_beats_markers(tmp_path):
+    # a workspace whose markers would auto-detect `pytest -q`…
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    # …but a goal-attached check takes priority and is what actually runs.
+    state = SessionState(goal="be green", goal_verify=[_py(_PASS_SRC)])
+    result = _verify(CommandVerifier(), tmp_path, state)  # engine's default verifier
+    assert result.ok is True
+    assert result.ran == [_py(_PASS_SRC)]  # the goal command ran, not pytest
+    assert "(goal)" in result.summary
+
+
+def test_engine_arms_goal_stop_condition_without_markers(tmp_path):
+    # Empty workspace → no verify markers; without a goal check the engine would
+    # report "done". An attached FAILING check must instead hold the turn open.
+    settings = Settings()
+    tools = build_default_registry(settings, tmp_path)
+    write = ToolCall(id="c1", name="write_file", arguments={"path": "out.txt", "content": "x\n"})
+    script = [
+        CompletionResult(message=Message(role="assistant", content="", tool_calls=[write])),
+        CompletionResult(message=Message(role="assistant", content="done")),
+        CompletionResult(message=Message(role="assistant", content="acknowledged")),
+    ]
+    session = SessionState(goal="ship it", goal_verify=[_py(_FAIL_SRC)])
+    engine = TurnEngine(
+        MockProvider(script),
+        tools,
+        settings,
+        _profile(),
+        Mode.ACCEPT_EDITS,
+        workspace=tmp_path,
+        session=session,
+        snapshots=None,
+    )
+    events: list = []
+
+    async def _drive():
+        async for ev in engine.run_turn("write out.txt"):
+            events.append(ev)
+
+    asyncio.run(_drive())
+
+    text = "".join(getattr(ev, "text", "") for ev in events)
+    assert "[verify]" in text and "VERIFY_MARKER_TAIL" in text  # the goal check ran + failed
+    completed = [ev for ev in events if isinstance(ev, TurnCompleted)][-1]
+    assert completed.stop_reason == "goal-unmet"  # armed: won't call itself done

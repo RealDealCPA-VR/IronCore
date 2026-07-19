@@ -34,6 +34,16 @@ ANCHOR CADENCE (documented rule, `should_anchor`): the anchor is injected
   (SPEC §5.3). `should_anchor(turn, cadence)` covers the first two; `compose`
   ORs in the plan-active override.
 
+GOAL RE-PRESENTATION (engine M1): on the OFF-cadence turns where the full anchor
+is not injected, a single compact system line still re-states `state.goal` when
+one is set (auto-pinned from the opening prompt, or `/goal`). This delivers
+"re-present, don't rely on recall" for the one fact that must never drift — the
+objective — on EVERY turn, not only every `cadence` turns, so a compaction that
+lands on an off-cadence turn can't leave the model guessing. The goal line and
+the full anchor are MUTUALLY EXCLUSIVE (the anchor already carries the goal) and
+BOTH draw from the same ANCHOR_SHARE budget, so the budget invariant is exactly
+as before — one slot, either the full anchor or the one-line goal.
+
 BUDGET (SPEC §4.3 shares, against `profile.honest_context`):
     system   10%   anchors  10%   working set 40%   history 25%   headroom 15%
 The current user_input shares the 25% "history" region (it is the tail of the
@@ -276,6 +286,15 @@ def compose(
         )
         if anchor:
             messages.append(Message(role="system", content=anchor))
+    elif state.goal:
+        # Off-cadence, no plan: re-present the objective as a compact one-liner
+        # (engine M1). Mutually exclusive with the full anchor above and bounded
+        # by the SAME anchor_budget, so the budget invariant is unchanged.
+        goal_line = _truncate_to_tokens(
+            _render_goal_line(state), anchor_budget, ANCHOR_MARKER, cpt
+        )
+        if goal_line:
+            messages.append(Message(role="system", content=goal_line))
 
     ws_msg = _build_working_set(working_set, ws_budget, cpt)
     if ws_msg is not None:
@@ -315,6 +334,13 @@ def _build_system(system_prompt: str, memory: str, budget: int, cpt: float = 4.0
         if block:
             text = f"{text}{block}" if text else block.lstrip("\n")
     return text
+
+
+def _render_goal_line(state: SessionState) -> str:
+    """The compact off-cadence goal restatement (engine M1). Harness-authored,
+    trusted system content — the objective, re-presented so the model never has
+    to recall it from summarized-away history."""
+    return f"Goal (re-presented each turn — do not rely on memory): {state.goal}"
 
 
 def _render_anchor(state: SessionState, settings: Settings) -> str:

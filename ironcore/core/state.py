@@ -27,6 +27,24 @@ STATE_VERSION = 1
 
 STATE_FILENAME = "state.json"
 
+#: Cap on an auto-pinned goal (a normalized copy of the opening prompt). The
+#: goal is re-presented every turn (composer anchor / goal line), so it stays a
+#: one-line objective, not the whole prompt; the tail is elided honestly.
+GOAL_MAX_CHARS = 200
+
+
+def normalize_goal(prompt: str) -> str:
+    """Collapse a raw prompt into a one-line goal string (auto-pin, engine M1).
+
+    Whitespace runs (including newlines) fold to single spaces and the result is
+    capped to ``GOAL_MAX_CHARS`` with an elision marker. An all-whitespace/empty
+    prompt yields ``""`` (the caller then seeds nothing).
+    """
+    collapsed = " ".join(prompt.split())
+    if len(collapsed) > GOAL_MAX_CHARS:
+        collapsed = collapsed[:GOAL_MAX_CHARS].rstrip() + "…"
+    return collapsed
+
 
 def state_path(workspace: Path) -> Path:
     """Canonical location of the session state file for a workspace."""
@@ -40,6 +58,11 @@ class SessionState:
 
     mode: Mode = Mode.MANUAL
     goal: str | None = None
+    #: Verify commands attached to the goal via ``/goal verify: <cmd>``. Durable
+    #: on state (they survive a restart) and read by the engine's in-turn
+    #: verifier so an attached check actually arms the "won't call itself done
+    #: until it passes" stop-condition (CommandVerifier prioritizes these).
+    goal_verify: list[str] = field(default_factory=list)
     #: Workspace-relative path strings, most-recently-used first.
     working_set: list[str] = field(default_factory=list)
     plan_steps: list[str] = field(default_factory=list)
@@ -57,6 +80,23 @@ class SessionState:
             self.working_set.remove(rel_path)
         self.working_set.insert(0, rel_path)
 
+    def seed_goal(self, prompt: str) -> None:
+        """Auto-pin the objective from the first user prompt (engine M1).
+
+        ``state.goal`` used to be set only by ``/goal``, so a normal session
+        rendered "Goal: (none set)" in the anchor and the real objective lived
+        only in conversation history — which compaction can summarize away. On
+        the session's first turn the engine calls this to pin a normalized copy
+        of the opening prompt, so the anchor always carries a real objective.
+        A no-op when a goal is already set (``/goal`` ran first) or the prompt
+        normalizes to nothing.
+        """
+        if self.goal:
+            return
+        normalized = normalize_goal(prompt)
+        if normalized:
+            self.goal = normalized
+
     # -- serialization -------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
@@ -64,6 +104,7 @@ class SessionState:
             "version": STATE_VERSION,
             "mode": self.mode.value,
             "goal": self.goal,
+            "goal_verify": list(self.goal_verify),
             "working_set": list(self.working_set),
             "plan_steps": list(self.plan_steps),
             "plan_cursor": self.plan_cursor,
@@ -83,6 +124,9 @@ class SessionState:
         state = cls()
         state.mode = Mode(data.get("mode", Mode.MANUAL.value))  # ValueError on unknown
         state.goal = _checked(data.get("goal"), str, "goal", nullable=True)
+        state.goal_verify = [
+            _checked(c, str, "goal_verify item") for c in data.get("goal_verify", [])
+        ]
         state.working_set = [
             _checked(p, str, "working_set item") for p in data.get("working_set", [])
         ]

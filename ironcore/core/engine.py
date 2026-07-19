@@ -294,6 +294,15 @@ class TurnEngine:
 
         self._conversation.append(Message(role="user", content=user_input))
 
+        # AUTO-PIN THE TASK (engine M1): on the session's first turn seed the
+        # goal from the opening prompt when none was set via /goal. state.goal
+        # is durable and re-presented every turn (composer anchor / goal line),
+        # so the objective can't vanish into summarized-away history after a
+        # compaction. Deterministic string normalization only — no model call in
+        # the hot path. A goal already set (/goal ran first) is never clobbered.
+        if turn == 0:
+            state.seed_goal(user_input)
+
         # Per-role routing (MS-3): the main-loop call is the PLANNER when the
         # session is in PLAN mode (the engine's read-only think/propose step)
         # and the CODER otherwise; compaction routes to the SUMMARIZER at its

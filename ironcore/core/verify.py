@@ -4,14 +4,29 @@ Verify-command discovery, FIRST match wins (highest priority first):
 
   1. ``configured``   — commands passed to the constructor (``commands=``); this
      is also the seam for a future settings-driven list.
-  2. ``ironcore.md``  — a ``verify:`` directive in ``IRONCORE.md`` at the
+  2. ``goal``         — commands attached to the goal via ``/goal verify: <cmd>``
+     (durable on ``state.goal_verify``). Ranking these above IRONCORE.md /
+     auto-detect is what ARMS the goal stop-condition: the engine's default
+     verifier carries no configured list, so an attached check runs even in a
+     workspace with no verify markers ("won't call itself done until it passes").
+  3. ``ironcore.md``  — a ``verify:`` directive in ``IRONCORE.md`` at the
      workspace root: either a single ``verify: <cmd>`` line anywhere, or the
      command lines beneath a ``## Verify`` section (list items / plain lines /
      a fenced block; the section ends at the next heading).
-  3. auto-detect by workspace markers:
+  4. auto-detect by workspace markers:
        * ``pyproject.toml`` / ``pytest.ini`` / a ``tests/`` dir → ``pytest -q``
        * ``package.json`` declaring a ``scripts.test`` entry     → ``npm test``
        * ``Cargo.toml``                                          → ``cargo test``
+
+SECURITY — the deny-list gate (parity review). A verify command is repo-borne
+unsandboxed execution that fires AUTOMATICALLY after the first edit in
+accept-edits/auto. Before ANY command runs it is routed through
+``classify_command`` (``ironcore.safety.commands``): a deny-listed command
+(``rm -rf /``, ``curl | sh``, ...) is REFUSED and never executed, in every mode;
+a risky-pattern command (``git push``, ``sudo``, ...) is SKIPPED with a note
+rather than run unattended in the autonomous modes (accept-edits, auto). Either
+way the turn fails closed — an unverifiable turn is never reported as done
+(SAFETY T7). See :func:`_gate_verify_command`.
 
 If nothing is discovered and files were touched, that is reported HONESTLY as
 ``VerifyResult(ok=True, summary="no verify command configured", ran=[])`` — the
@@ -26,7 +41,8 @@ command exits 0; a killed (timed-out) command never counts as success. On
 failure the summary names the failing command and appends a capped TAIL of its
 output, so unverified work is never reported as verified (SAFETY T7). Process
 handling mirrors :mod:`ironcore.tools.shell` (cross-OS process-group kill on
-timeout). Stdlib + asyncio only; no engine import, no new deps.
+timeout). Stdlib + asyncio + the safety command classifier; no engine import,
+no new deps.
 """
 
 from __future__ import annotations
@@ -41,6 +57,9 @@ import sys
 from typing import TYPE_CHECKING
 
 from ironcore.core.protocols import Verifier, VerifyResult
+from ironcore.safety.commands import classify_command
+from ironcore.safety.modes import Mode
+from ironcore.safety.policy import Decision
 
 if TYPE_CHECKING:  # annotations only — no runtime coupling to config/state
     from pathlib import Path
@@ -85,12 +104,20 @@ class CommandVerifier(Verifier):
         if not touched_files:  # verification only runs after file mutations
             return VerifyResult(ok=True, summary="", ran=[])
 
-        commands, source = self.discover(workspace)
+        commands, source = self._resolve(workspace, state)
         if not commands:
             return VerifyResult(ok=True, summary=_NO_COMMAND, ran=[])
 
+        mode = getattr(state, "mode", Mode.MANUAL)
         ran: list[str] = []
         for command in commands:
+            # SECURITY: gate before running — a deny-listed command is refused
+            # and never executed; a risky one is skipped unattended in an
+            # autonomous mode. `ran` excludes a gated command precisely so the
+            # result proves it did not run.
+            allowed, reason = _gate_verify_command(command, mode)
+            if not allowed:
+                return VerifyResult(ok=False, summary=f"verify {reason}", ran=ran)
             ran.append(command)
             exit_code, output, timed_out = await self._run(command, workspace)
             if timed_out or exit_code != 0:
@@ -106,6 +133,25 @@ class CommandVerifier(Verifier):
         return VerifyResult(ok=True, summary=f"verify passed: {count} {noun} ({source})", ran=ran)
 
     # -- discovery ------------------------------------------------------------
+
+    def _resolve(self, workspace: Path, state: SessionState) -> tuple[list[str], str]:
+        """The commands (+ source label) to run: configured > goal > discovery.
+
+        Goal-attached checks (``/goal verify:`` → ``state.goal_verify``) sit just
+        under an explicit constructor list and ABOVE IRONCORE.md / auto-detect,
+        so attaching a check via /goal actually arms the stop-condition — the
+        engine's default verifier has no configured commands, so a goal check
+        wins even in a workspace with no verify markers. ``discover`` still owns
+        the configured > ironcore.md > auto-detect ordering for everything else.
+        """
+        if self._commands:
+            return list(self._commands), "configured"
+        goal_checks = [
+            c for c in (getattr(state, "goal_verify", None) or []) if c and c.strip()
+        ]
+        if goal_checks:
+            return goal_checks, "goal"
+        return self.discover(workspace)
 
     def discover(self, workspace: Path) -> tuple[list[str], str]:
         """The commands (and their source label) :meth:`verify` would run.
@@ -215,6 +261,39 @@ class CommandVerifier(Verifier):
                 pass
         exit_code = proc.returncode if proc.returncode is not None else -1
         return exit_code, raw.decode("utf-8", errors="replace"), timed_out
+
+
+def _gate_verify_command(command: str, mode: Mode) -> tuple[bool, str]:
+    """Policy gate for one verify command (parity-review security fix).
+
+    A verify command runs UNATTENDED in every mode (no approval broker sits in
+    this path), so the deny-list must apply regardless of the session mode. The
+    command is classified with ``classify_command(command, Mode.AUTO)`` to read
+    its INTRINSIC risk (deny-listed / risky / clean) independent of the mode:
+
+    * ``DENY``  — deny-listed (``rm -rf /``, ``curl | sh``, ...): REFUSED in
+      every mode, never executed. The turn fails closed (never reported done).
+    * ``ASK``   — matches a risky-command pattern (``git push``, ``sudo``,
+      pipe-to-shell, ...): in the autonomous modes (accept-edits, auto) where no
+      human approves each step it is SKIPPED with a note rather than silently
+      run; in manual mode (a human is approving every edit) it runs as before.
+    * ``ALLOW`` — clean: runs.
+
+    Returns ``(allowed, reason)``; ``reason`` is the clause the caller appends
+    after ``"verify "`` to form the refusal/skip summary (empty when allowed).
+    """
+    intrinsic = classify_command(command, Mode.AUTO)
+    if intrinsic is Decision.DENY:
+        return False, (
+            f"command refused: `{command}` is deny-listed and was not executed "
+            "(repo-borne command blocked by policy)"
+        )
+    if intrinsic is Decision.ASK and mode in (Mode.ACCEPT_EDITS, Mode.AUTO):
+        return False, (
+            f"command skipped: `{command}` matches a risky-command pattern and "
+            f"was not run unattended in {mode.value} mode"
+        )
+    return True, ""
 
 
 def _has_npm_test(package_json: Path) -> bool:

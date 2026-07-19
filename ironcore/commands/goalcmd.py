@@ -15,6 +15,13 @@ The extra sub-commands make "done" a *verified* state, not a *claim*:
 ack immediately and posts the result via ``schedule``. Attached verify commands
 are held in a module-level map keyed by workspace, because the TUI rebuilds a
 fresh ``CommandContext`` per dispatch (``ctx`` cannot carry them across calls).
+
+Attaching a check ALSO mirrors it onto the live engine's ``state.goal_verify``
+(when an engine is in ``ctx.extra``), which is what actually ARMS the engine's
+in-turn stop-condition: the engine's ``CommandVerifier`` prioritizes those
+commands over IRONCORE.md / auto-detect, so the goal genuinely "won't call
+itself done until the attached check passes" even in a workspace with no verify
+markers. Clearing the goal disarms both stores.
 """
 
 from __future__ import annotations
@@ -42,6 +49,19 @@ def _engine_state(ctx: CommandContext) -> object | None:
     return getattr(engine, "state", None) if engine is not None else None
 
 
+def _engine_goal_verify(ctx: CommandContext) -> list[str] | None:
+    """The live engine state's durable ``goal_verify`` list, or ``None``.
+
+    Mirroring attached checks here is what ARMS the engine's in-turn verifier:
+    ``_VERIFY_CHECKS`` (below) serves the command layer (``show`` / ``check`` work
+    without an engine), while the engine reads ``state.goal_verify`` (core must
+    not import this command module). Defensive: absent when there is no engine or
+    the state predates the field (older resumed session / a test double)."""
+    state = _engine_state(ctx)
+    gv = getattr(state, "goal_verify", None) if state is not None else None
+    return gv if isinstance(gv, list) else None
+
+
 def _current_goal(ctx: CommandContext) -> str | None:
     if ctx.goal:
         return ctx.goal
@@ -59,6 +79,9 @@ def _cmd_goal(ctx: CommandContext, args: str) -> str:
         if state is not None:
             state.goal = None
         _VERIFY_CHECKS.pop(_key(ctx), None)
+        engine_checks = _engine_goal_verify(ctx)
+        if engine_checks is not None:
+            engine_checks.clear()  # disarm the engine's stop-condition too
         return "Goal cleared."
     if args == "check":
         return _check(ctx)
@@ -67,6 +90,9 @@ def _cmd_goal(ctx: CommandContext, args: str) -> str:
         if not command:
             return "Usage: /goal verify: <command>"
         _VERIFY_CHECKS.setdefault(_key(ctx), []).append(command)
+        engine_checks = _engine_goal_verify(ctx)
+        if engine_checks is not None:
+            engine_checks.append(command)  # arm the engine's in-turn stop-condition
         count = len(_VERIFY_CHECKS[_key(ctx)])
         return f"Attached verify command ({count} total): {command}"
 

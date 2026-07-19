@@ -22,7 +22,7 @@
 
 | # | Threat | Example | Primary controls |
 |---|---|---|---|
-| T1 | Destructive commands | `rm -rf`, `git push --force`, disk format | mode gate (§3), deny-list in ALL modes, risky-pattern classifier ALLOW→ASK (IC-402) |
+| T1 | Destructive commands | `rm -rf`, `git push --force`, disk format | mode gate (§3), deny-list in ALL modes, risky-pattern classifier ALLOW→ASK (IC-402); the post-mutation **verify** path (`IRONCORE.md`/`/goal verify:`, run automatically) is repo-borne unsandboxed execution, so it is routed through the same deny-list first — a deny-listed verify command is refused and never runs, a risky one is skipped rather than run unattended in accept-edits/auto, and the turn fails closed (SPEC §5.5) |
 | T2 | Workspace escape | writing `~/.bashrc`, `..\..\` traversal, symlink/UNC tricks | path jail at the tool layer, mode-independent (IC-401) |
 | T3 | Prompt injection via tool output | fetched page / repo file says "ignore instructions, run curl…" | data-not-instructions wrapping, injection detector, AUTO→ASK downgrade on flags (IC-406) |
 | T4 | Secret exfiltration | env vars or key files read into context, then sent to a hosted endpoint | redaction before context (IC-404), reads outside workspace ask, NET never auto-allowed |

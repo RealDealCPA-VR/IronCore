@@ -230,7 +230,12 @@ After any turn with WRITE/EXEC activity: run the project's verify commands (from
 `IRONCORE.md`, `/goal verify:`, or auto-detected `pytest`/`npm test`), feed failures back
 once as a fresh framed problem, then surface honestly ("2 tests still failing: …").
 Never report unverified work as done — the engine literally cannot: `TurnCompleted.stop_reason`
-is computed from evidence, not model text.
+is computed from evidence, not model text. A `/goal verify:` check takes priority over
+`IRONCORE.md`/auto-detect, so attaching one genuinely arms the stop-condition. Every verify
+command is a repo-borne, unsandboxed command that runs automatically, so it is first routed
+through `classify_command` (§7.4): a deny-listed command is refused and never executed, and a
+risky-pattern command is skipped rather than run unattended in the autonomous modes — the turn
+fails closed either way.
 
 ### 5.6 Budgets & runaway protection (IC-506)
 

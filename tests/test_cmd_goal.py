@@ -89,3 +89,20 @@ def test_check_without_attached_commands(tmp_path):
 
 def test_show_without_goal(tmp_path):
     assert "No goal set" in _cmd_goal(_ctx(tmp_path), "")
+
+
+def test_verify_mirrors_onto_engine_state_to_arm_the_stop_condition(tmp_path):
+    from ironcore.core.state import SessionState
+
+    class _Eng:
+        def __init__(self):
+            self.state = SessionState()
+
+    eng = _Eng()
+    ctx = _ctx(tmp_path, engine=eng)
+    _cmd_goal(ctx, "ship it")
+    _cmd_goal(ctx, "verify: pytest -q")
+    # the engine's durable list is what its in-turn verifier reads
+    assert eng.state.goal_verify == ["pytest -q"]
+    _cmd_goal(ctx, "clear")
+    assert eng.state.goal_verify == []  # clearing the goal disarms the engine too

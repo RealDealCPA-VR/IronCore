@@ -15,6 +15,7 @@ import re
 
 from ironcore.config.settings import Settings
 from ironcore.core.engine import TurnEngine
+from ironcore.core.state import SessionState
 from ironcore.envelope.profile import CapabilityProfile
 from ironcore.providers.base import CompletionResult, Message, Provider, StreamEvent
 from ironcore.providers.mock import MockProvider, RaiseError
@@ -56,6 +57,14 @@ def _engine_over(tmp_path, provider: Provider) -> TurnEngine:
         Mode.MANUAL,
         workspace=tmp_path,
         snapshots=None,
+        # Each subagent gets an ISOLATED, fresh session (this module's contract —
+        # "concurrent isolated items"). Sharing the workspace's on-disk state
+        # across these ephemeral engines let one item's turn_count / goal bleed
+        # into the next through save/load; a fresh SessionState per engine keeps
+        # every item's context its own (and mirrors a real subagent's clean
+        # context — workflowcmd._factory_from_engine never reuses a conversation).
+        session=SessionState(),
+        handoff_path=None,
     )
 
 

@@ -146,3 +146,45 @@ def test_missing_keys_fall_back_to_defaults(tmp_path: Path):
     assert state.mode is Mode.PLAN
     assert state.goal == "explore"
     assert state.working_set == [] and state.turn_count == 0
+    assert state.goal_verify == []  # additive field defaults empty on old files
+
+
+# -- goal auto-pin + attached verify checks (PKG-1) ---------------------------
+
+
+def test_goal_verify_round_trips(tmp_path: Path):
+    state = _full_state()
+    state.goal_verify = ["pytest -q", "ruff check ."]
+    path = tmp_path / STATE_FILENAME
+    state.save(path)
+    loaded, warning = SessionState.load(path)
+    assert warning is None
+    assert loaded.goal_verify == ["pytest -q", "ruff check ."]
+
+
+def test_seed_goal_pins_a_normalized_prompt():
+    state = SessionState()
+    state.seed_goal("  Fix the   login bug\n in auth.py  ")
+    assert state.goal == "Fix the login bug in auth.py"  # whitespace collapsed + trimmed
+
+
+def test_seed_goal_never_overwrites_an_existing_goal():
+    state = SessionState(goal="ship v0.1")
+    state.seed_goal("some unrelated first prompt")
+    assert state.goal == "ship v0.1"  # /goal (or a resume) wins over auto-pin
+
+
+def test_seed_goal_ignores_an_empty_prompt():
+    state = SessionState()
+    state.seed_goal("   \n\t ")
+    assert state.goal is None  # nothing to pin
+
+
+def test_seed_goal_caps_a_very_long_prompt():
+    from ironcore.core.state import GOAL_MAX_CHARS
+
+    state = SessionState()
+    state.seed_goal("x " * 400)  # ~800 chars
+    assert state.goal is not None
+    assert len(state.goal) <= GOAL_MAX_CHARS + 1  # + the single elision char
+    assert state.goal.endswith("…")

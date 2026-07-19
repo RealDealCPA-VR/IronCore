@@ -463,3 +463,34 @@ def test_repoint_swaps_provider_profile_and_author(tmp_path):
     events = drive(engine, "hi")
     assert _text_of(events) == "from B"
     assert isinstance(events[-1], TurnCompleted)
+
+
+# --------------------------------------------------------------------------- #
+# (13) auto-pin the task: the first user prompt seeds state.goal (engine M1)
+# --------------------------------------------------------------------------- #
+
+
+def test_first_turn_auto_pins_goal_from_prompt(tmp_path):
+    engine = _engine(tmp_path, [_text("nothing to do")], protocol="text_protocol")
+    assert engine.state.goal is None  # not set until the first turn
+    drive(engine, "  Refactor the   parser\n in core  ")
+    # a trimmed/normalized copy of the opening prompt is now the anchored goal
+    assert engine.state.goal == "Refactor the parser in core"
+
+
+def test_auto_pin_does_not_overwrite_a_goal_set_first(tmp_path):
+    session = SessionState(goal="ship the release")
+    engine = _engine(
+        tmp_path, [_text("ok")], protocol="text_protocol", session=session
+    )
+    drive(engine, "a totally different opening prompt")
+    assert engine.state.goal == "ship the release"  # /goal wins over auto-pin
+
+
+def test_auto_pin_only_seeds_on_the_first_turn(tmp_path):
+    session = SessionState(turn_count=4)  # a resumed session with no goal recorded
+    engine = _engine(
+        tmp_path, [_text("ok")], protocol="text_protocol", session=session
+    )
+    drive(engine, "a later prompt")
+    assert engine.state.goal is None  # only the session's FIRST turn auto-pins

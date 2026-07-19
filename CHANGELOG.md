@@ -3,6 +3,36 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Auto-pinned objective (engine M1).** On a session's first turn the goal is
+  seeded from the opening prompt (a normalized one-line copy) when `/goal` did
+  not set one first — so `state.goal` is durable and the standing-context anchor
+  always carries a real objective instead of "Goal: (none set)". The goal is
+  also re-presented as a compact one-line system message on the off-cadence
+  turns where the full anchor is not injected, so a compaction can never leave
+  the model without its objective ("re-present, don't rely on recall"). No model
+  call is added to the hot path; the goal line and the full anchor are mutually
+  exclusive and share the anchor budget, so the context budget invariant is
+  unchanged.
+- **`/goal verify:` now arms the engine's in-turn stop-condition.** Attached
+  checks are mirrored onto the durable `state.goal_verify`, and the engine's
+  verifier prioritizes them above IRONCORE.md / auto-detect — so a check attached
+  via `/goal` genuinely holds the turn open ("won't call itself done until it
+  passes") even in a workspace with no `pytest`/`npm`/`cargo` markers. Matches
+  what SPEC §5.5 already promised.
+
+### Security
+- **Verify commands are gated through the deny-list before they run.** A
+  `verify:` line in a cloned repo's IRONCORE.md is repo-borne, unsandboxed
+  execution that fires automatically after the first edit in accept-edits/auto.
+  Every verify command now passes `classify_command` first: a deny-listed
+  command (`rm -rf /`, `curl | sh`, …) is refused and never executed, in every
+  mode; a risky-pattern command (`git push`, `sudo`, …) is skipped with a note
+  rather than run unattended in the autonomous modes. Either way the turn fails
+  closed — an unverifiable turn is never reported as done (SAFETY T7).
+
 ## [0.2.3] — 2026-07-19
 
 ### Changed

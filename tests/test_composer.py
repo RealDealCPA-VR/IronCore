@@ -197,6 +197,61 @@ def test_plan_active_forces_anchor_off_cadence():
     assert _has_anchor(_compose(state, profile))
 
 
+# -- off-cadence goal re-presentation (engine M1) ------------------------------
+
+
+def _goal_line(msgs: list[Message]) -> str | None:
+    return next(
+        (
+            m.content
+            for m in msgs
+            if m.role == "system" and m.content.startswith("Goal (re-presented")
+        ),
+        None,
+    )
+
+
+def test_off_cadence_goal_is_re_presented_without_the_full_anchor():
+    profile = _profile(coherence_horizon=6)  # cadence 6
+    state = SessionState(turn_count=3, goal="make fib() correct")  # off-cadence, no plan
+    msgs = _compose(state, profile)
+    assert not _has_anchor(msgs)  # the full standing-context block is NOT injected
+    line = _goal_line(msgs)
+    assert line is not None and "make fib() correct" in line  # but the goal still is
+
+
+def test_off_cadence_no_goal_line_when_no_goal():
+    profile = _profile(coherence_horizon=6)
+    msgs = _compose(SessionState(turn_count=3), profile)  # no goal set
+    assert _goal_line(msgs) is None
+    assert not _has_anchor(msgs)
+
+
+def test_goal_line_and_full_anchor_are_mutually_exclusive():
+    profile = _profile(coherence_horizon=6)
+    # turn 0 → full anchor present, so the compact goal line must NOT also appear
+    msgs = _compose(SessionState(turn_count=0, goal="ship it"), profile)
+    assert _has_anchor(msgs)
+    assert _goal_line(msgs) is None
+    # exactly one system message carries the goal (the anchor), not two
+    goal_bearing = [m for m in msgs if m.role == "system" and "ship it" in m.content]
+    assert len(goal_bearing) == 1
+
+
+def test_budget_invariant_holds_with_off_cadence_goal_line():
+    for profile in (_profile(256), _profile(1024), _profile(4096, 12)):
+        msgs = _compose(
+            SessionState(turn_count=3, goal="g" * 4000),  # oversize goal, off-cadence
+            profile,
+            working_set={"f.py": "x\n" * 500},
+            history=[Message(role="user", content="h" * 400)],
+            user_input="u" * 400,
+            memory="M" * 3000,
+        )
+        assert _goal_line(msgs) is not None  # the goal line is present…
+        assert _content_tokens(msgs) <= _budget_ceiling(profile)  # …and still in budget
+
+
 # -- micro-step surfacing (IC-505) ---------------------------------------------
 
 

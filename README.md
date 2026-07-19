@@ -333,7 +333,7 @@ itself never prints or prompts. Type `/` to open the palette:
 | Command | What it does |
 |---|---|
 | `/probe` · `/envelope` | Measure the live model and adapt to it · show its capability report card |
-| `/goal <objective>` | Set a persistent objective — IronCore won't call itself done until a stop-condition check passes |
+| `/goal <objective>` | Set a persistent objective — IronCore won't call itself done until a stop-condition check passes (auto-pinned from your first message if you don't) |
 | `/workflow <name>` | Deterministic multi-agent orchestration (fan-out → verify → reduce) — the *harness* drives the flow, never the model |
 | `/model` · `/init` | List models / live-swap the running session to another model (envelope-cache aware) · scan the repo into `IRONCORE.md` project memory |
 | `/loop [5m] <prompt>` | Run a prompt on an interval, or let the agent self-pace |
@@ -342,7 +342,12 @@ itself never prints or prompts. Type `/` to open the palette:
 
 `/goal` is the one worth trying first, because it is where "the intelligence is in the loop"
 stops being a slogan: the objective is re-anchored into every turn, and *the harness* — not the
-model's opinion of itself — runs the attached command to decide whether the work is done.
+model's opinion of itself — runs the attached command to decide whether the work is done. Even
+without `/goal`, the objective is auto-pinned from your first message, so it survives history
+compaction instead of quietly getting summarized away. Verify commands — whether attached with
+`/goal verify:`, written into `IRONCORE.md`, or auto-detected — are routed through the command
+deny-list before they run, so a `verify:` line in a cloned repo can never auto-execute something
+destructive.
 
 ![A session that opens with an ordinary question — 'what's in this project?', answered via a list_dir tool card led by a blue rule, a blue READ chip and a green ✓ ok — and then formalises the work with /goal set to 'make fib() correct for every n up to 30'. Each typed command is echoed back in amber above the reply it produced, so the three /goal exchanges read as three groups. IronCore replies that the goal is anchored into every turn, lists the attached verify command python -c "import fib; assert fib.fib(30) == 832040", then prints 'Checking the goal against 1 verify command(s)…' followed by the payoff line 'Goal stop-condition MET' in green — all 1 verify command passed.](https://raw.githubusercontent.com/RealDealCPA-VR/IronCore/main/docs/img/06-goal-verified.png)
 
