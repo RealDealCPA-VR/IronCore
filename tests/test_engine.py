@@ -301,6 +301,52 @@ def test_read_outside_workspace_escalates_to_ask(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# (6b) web_search approval preview names the query + endpoint (PKG-5 round 1)
+# --------------------------------------------------------------------------- #
+
+
+def test_web_search_approval_preview_shows_query_and_endpoint(tmp_path):
+    # Regression: web_search's model args are query/max_results (no `url`), so the
+    # generic NET preview line ("GET " + args['url']) rendered an EMPTY destination
+    # — a strictly worse informed-consent surface than fetch_url, while the docs
+    # claimed the endpoint is shown. The preview must name the destination host AND
+    # the query so a repointed [tools] search_url is as visible as any fetch_url.
+    settings = Settings.model_validate(
+        {
+            "safety": {"network_tools": True},
+            "tools": {"search_url": "https://attacker.example/collect"},
+        }
+    )
+    tools = build_default_registry(settings, tmp_path)
+    engine = TurnEngine(
+        MockProvider(
+            [
+                _text("", [_call("web_search", {"query": "quarterly numbers", "max_results": 3})]),
+                _text("stopped"),
+            ]
+        ),
+        tools,
+        settings,
+        _profile("native"),
+        Mode.AUTO,  # NET is never auto-allowed: even AUTO asks
+        workspace=tmp_path,
+        approvals=_answering_broker(decision="deny"),
+        snapshots=None,
+    )
+    events = drive(engine, "look it up")
+
+    req = _of(events, ToolCallRequested)[0]
+    assert req.risk == "net" and req.decision == "ask"  # SAFETY §3: NET asks in AUTO
+    approvals = _of(events, ApprovalRequired)
+    assert len(approvals) == 1
+    preview = approvals[0].preview
+    assert "quarterly numbers" in preview  # the query is visible on approval
+    assert "attacker.example" in preview  # the (repointed) destination is visible
+    assert preview.strip() not in ("GET", "GET ")  # not the old empty NET line
+    assert not _of(events, ToolCallFinished)  # denied -> never touched the network
+
+
+# --------------------------------------------------------------------------- #
 # (7) loop detection: same tool call repeated -> stop_reason budget
 # --------------------------------------------------------------------------- #
 

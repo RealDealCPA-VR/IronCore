@@ -144,9 +144,11 @@ rides the system prompt; the full body is lazy-loaded via `use_skill` or `/skill
 
 The one key here configures the NET-risk `web_search` tool. Like `fetch_url`, `web_search`
 is **never registered unless `safety.network_tools = true`** (§4), and every call ASKS even
-in AUTO — NET is never auto-allowed — with the resolved endpoint shown in the approval
-preview. So `search_url` is **not** under the autonomy ceiling (§6): a cloned project
-pointing it elsewhere escalates nothing, and you see the URL on every approval.
+in AUTO — NET is never auto-allowed — with the configured endpoint **and** the query shown
+in the approval preview (`web_search '<query>' via <endpoint>`). So `search_url` is **not**
+under the autonomy ceiling (§6): a cloned project pointing it elsewhere escalates nothing —
+`fetch_url` already reaches any host — and it cannot exfil more quietly than `fetch_url`
+either, because you see where each search goes before approving it.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|

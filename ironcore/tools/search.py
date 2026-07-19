@@ -192,6 +192,17 @@ class WebSearchTool(Tool):
         self._search_url = search_url
         self._transport = transport
 
+    @property
+    def search_url(self) -> str:
+        """The configured search endpoint — the destination host of every query.
+
+        Public so the engine's approval preview (``core/engine.py`` ``_preview``)
+        can show WHERE a search goes: ``web_search``'s model args are
+        ``query``/``max_results`` (no ``url``), so without this the NET preview
+        would render an empty destination. The informed-consent surface must be
+        at least as honest as ``fetch_url``'s."""
+        return self._search_url
+
     async def run(self, **kwargs: Any) -> ToolResult:
         query = kwargs.get("query")
         if not isinstance(query, str) or not query.strip():

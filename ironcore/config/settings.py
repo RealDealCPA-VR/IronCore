@@ -171,10 +171,14 @@ class ToolsSettings(BaseModel):
     SearXNG instance, or the DuckDuckGo HTML endpoint, the default). Like
     ``fetch_url``, ``web_search`` is a NET tool: it is never registered unless
     ``safety.network_tools`` is true, and every call ASKS (NET is never
-    auto-allowed, previewing the endpoint). So this is NOT an autonomy control
-    and is NOT under the T8 ceiling — a cloned project pointing it elsewhere
-    escalates nothing, and the user sees the URL on every approval. An empty
-    ``search_url`` leaves ``web_search`` unregistered while ``fetch_url`` stays."""
+    auto-allowed) — and the approval preview names the configured endpoint plus
+    the query, so a repointed ``search_url`` is as visible on approval as any
+    ``fetch_url`` destination (``core/engine.py`` ``_preview``). So this is NOT
+    an autonomy control and is NOT under the T8 ceiling — a cloned project
+    pointing it elsewhere escalates nothing (``fetch_url`` already reaches any
+    host) and cannot exfil more quietly than ``fetch_url``, because the human
+    sees where each search goes. An empty ``search_url`` leaves ``web_search``
+    unregistered while ``fetch_url`` stays."""
 
     #: HTML search endpoint for web_search. Empty string = no web_search tool.
     search_url: str = "https://html.duckduckgo.com/html/"

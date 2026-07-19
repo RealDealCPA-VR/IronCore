@@ -1047,6 +1047,14 @@ class TurnEngine:
         if tool.risk is ToolRisk.EXEC:
             return f"$ {args.get('command', '')}"
         if tool.risk is ToolRisk.NET:
+            # web_search's model args are query/max_results (no `url`), so the
+            # generic NET line below would render an empty destination. Show the
+            # query AND the configured endpoint so approving a search is at least
+            # as honest as approving a fetch_url (SAFETY §4 informed consent).
+            if tool.name == "web_search":
+                query = args.get("query", "")
+                endpoint = getattr(tool, "search_url", "")
+                return f"web_search {query!r} via {endpoint}"
             return f"{args.get('method', 'GET')} {args.get('url', '')}"
         if tool.name == "write_file":
             content = args.get("content", "")

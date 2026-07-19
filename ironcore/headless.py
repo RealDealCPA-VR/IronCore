@@ -172,6 +172,7 @@ async def _drive(
     for a stream that somehow ends with neither.
     """
     code = 1
+    streamed_prose = False
     try:
         async for event in engine.run_turn(prompt):
             if json_output:
@@ -179,12 +180,17 @@ async def _drive(
                 out.flush()
             else:
                 _render_human(event, out, err)
+                if isinstance(event, TextDelta) and event.text:
+                    streamed_prose = True
             if isinstance(event, TurnCompleted):
                 code = 0
             elif isinstance(event, TurnError):
                 code = 1
-        # a human run that streamed prose ends without a trailing newline
-        if not json_output:
+        # A human run that streamed prose ends without a trailing newline — cap
+        # it so the shell prompt lands on its own line. A tool-only turn or a
+        # TurnError writes NO prose to stdout, so we must not emit a lone blank
+        # line into `ironcore exec "…" > answer.txt`.
+        if not json_output and streamed_prose:
             out.write("\n")
             out.flush()
     finally:

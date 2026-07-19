@@ -140,6 +140,27 @@ def test_manual_mode_ask_auto_denies_with_a_hint(tmp_path):
     assert "[approval]" in err and "auto-denies" in err
 
 
+# --- trailing newline is prose-conditional (PKG-5 round 1) ---------------------
+
+
+def test_no_trailing_blank_line_when_turn_streams_no_prose(tmp_path):
+    # A tool-only / denied / error turn writes NO prose to stdout, so
+    # `ironcore exec "…" > answer.txt` must not be left with a lone blank line.
+    # The terminating newline is emitted only when prose was actually streamed.
+    script = [
+        _assistant(calls=[ToolCall(id="c1", name="write_file",
+                                   arguments={"path": "z.txt", "content": "x"})]),
+        _assistant(""),  # write denied in PLAN, model yields no prose
+    ]
+    code, out, _ = _run(script, tmp_path, Mode.PLAN)
+    assert code == 0
+    assert out == ""  # not "\n": no prose means no stdout at all
+    # and a prose turn still ends with exactly one trailing newline
+    code2, out2, _ = _run([_assistant("The answer.")], tmp_path, Mode.PLAN)
+    assert code2 == 0
+    assert out2 == "The answer.\n"
+
+
 # --- CLI wiring ----------------------------------------------------------------
 
 
