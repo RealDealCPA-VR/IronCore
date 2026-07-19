@@ -221,7 +221,9 @@ class _Narrator:
     # -- sections -----------------------------------------------------------
 
     def header(self, mode: Mode, workspace: Path) -> None:
-        self.line(term.heading("IRONCORE", "offline end-to-end demo"))
+        # The two-tone wordmark, so the demo opens as the same product the TUI
+        # masthead brands — IRON molten, CORE steel (term.wordmark).
+        self.line(term.wordmark("offline end-to-end demo"))
         self.line(term.rule())
         self.line(term.field("workspace", str(workspace)))
         chip = Text()
