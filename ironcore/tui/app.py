@@ -51,11 +51,13 @@ carries exactly these keys — future handlers (IC-801..807) consume them:
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import Coroutine, Sequence
 from datetime import datetime
 from difflib import get_close_matches
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -100,8 +102,16 @@ from ironcore.tui.screens.sessions import SessionPicker
 from ironcore.tui.theme import IRONCORE_THEME, RISK_VARIABLES
 from ironcore.tui.widgets import InputBar, StatusBar, Transcript
 
+if TYPE_CHECKING:
+    from ironcore.commands.loopcmd import LoopSpec
+
 #: ``--resume`` with no id: open the picker at launch instead of resuming one.
 RESUME_PICK = "__pick__"
+
+#: How often the /loop driver polls turn-idle / its own liveness (IC-804). Small
+#: enough that a tick fires promptly once the engine frees up, large enough not
+#: to peg the event loop between ticks of a self-paced loop.
+LOOP_POLL_S = 0.05
 
 #: Provider calls the default probe battery issues at full depth (measured:
 #: 16+12+30+10+3+1+3 = 75; probes that short-circuit on failure issue fewer).
@@ -326,6 +336,11 @@ class IronCoreApp(App):
         self.workspace: Path = Path(engine.workspace)
         self._goal: str | None = engine.state.goal
         self._turn_worker: Worker | None = None
+        #: the one active /loop for this session (IC-804), or None. Identity is
+        #: the driver's liveness token: replacing or stopping the loop swaps/clears
+        #: it, and ``_run_loop`` exits the moment ``self._loop_spec is not`` its own.
+        self._loop_spec: LoopSpec | None = None
+        self._loop_worker: Worker | None = None
         self._matches: list[SlashCommand] = []
         #: call id of the request currently awaiting an approval verdict.
         self._awaiting_call_id: str | None = None
@@ -598,6 +613,70 @@ class IronCoreApp(App):
         except Exception:  # no running group / older Textual — report inaction
             return False
         return True
+
+    # -- loop driver (IC-804) -------------------------------------------------
+
+    def register_loop(self, spec: LoopSpec) -> None:
+        """/loop hook: actually START driving a registered loop.
+
+        ``loopcmd`` parses the interval and stores one :class:`LoopSpec` per
+        workspace, then hands it here (via ``ctx.extra['app']``) so the RECURRING
+        EXECUTION happens app-side — the handler is synchronous and must not
+        block. The driver runs as a background worker in its own ``loop`` group
+        so ``/loop stop`` (and app shutdown) can cancel it. Registering a new
+        loop replaces the previous one: ``loopcmd`` keeps a single loop per
+        workspace, and ``_loop_spec`` identity retires the old driver.
+        """
+        self._loop_spec = spec
+        self.workers.cancel_group(self, "loop")  # retire any prior driver
+        self._loop_worker = self.run_worker(self._run_loop(spec), group="loop")
+
+    def stop_loop(self) -> None:
+        """/loop stop hook: stop driving the loop.
+
+        ``loopcmd`` has already popped the spec from its own map; this cancels
+        the live driver so no further ticks fire. Idempotent — clearing an
+        absent loop and cancelling an empty group are both no-ops.
+        """
+        self._loop_spec = None
+        try:
+            self.workers.cancel_group(self, "loop")
+        except Exception:  # no running group / older Textual — nothing to cancel
+            pass
+
+    async def _run_loop(self, spec: LoopSpec) -> None:
+        """The recurring executor: re-submit ``spec.prompt`` until retired.
+
+        Fixed-interval loops wait the interval, then wait for the engine to be
+        idle before firing — a tick NEVER runs while a turn (a human submit or a
+        previous tick) is in flight. Self-paced loops carry no interval and
+        re-submit as soon as the prior tick completes (a small poll gap keeps a
+        run of instant turns from pegging the event loop). Cancellation (stop /
+        replacement / shutdown) unwinds this cleanly via the worker group.
+        """
+        interval = spec.interval_s
+        while self._loop_spec is spec:
+            await asyncio.sleep(interval if interval is not None else LOOP_POLL_S)
+            # hold the tick until the engine is free, re-checking liveness so a
+            # stop during a long-running turn still retires the loop promptly.
+            while self._turn_running() and self._loop_spec is spec:
+                await asyncio.sleep(LOOP_POLL_S)
+            if self._loop_spec is not spec:
+                return
+            await self._loop_tick(spec.prompt)
+
+    async def _loop_tick(self, prompt: str) -> None:
+        """Submit one loop iteration as a real turn and wait for it to finish.
+
+        Reuses the ordinary turn machinery (``_start_turn``), so a tick is gated,
+        rendered, and session-recorded exactly like a keyboard submit — the loop
+        adds scheduling, not a second code path. Waiting for completion is what
+        keeps ticks from overlapping.
+        """
+        await self.transcript.add_note(f"[loop] {prompt}")
+        self._start_turn(prompt)
+        while self._turn_running():
+            await asyncio.sleep(LOOP_POLL_S)
 
     # -- modes (IC-703) -------------------------------------------------------
 

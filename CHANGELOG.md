@@ -22,6 +22,37 @@ All notable changes to IronCore are documented here. This project adheres to
   via `/goal` genuinely holds the turn open ("won't call itself done until it
   passes") even in a workspace with no `pytest`/`npm`/`cargo` markers. Matches
   what SPEC §5.5 already promised.
+- **`/help <command>` prints that command's usage.** The per-command syntax
+  strings (`/goal verify:`, `/workflow run`, `/loop 5m`, `/model <name>`) were
+  registered but unreachable from inside the product — `/help` only ever showed
+  the one-line summaries. `/help <name>` now prints the named command's usage +
+  summary (with a nearest-match hint on a miss); a bare `/help` still lists the
+  whole index and key reference.
+
+### Fixed
+- **`/loop` actually runs now.** The command parsed intervals and registered a
+  loop, but the app implemented neither `register_loop` nor `stop_loop`, so
+  every registration fell through to "stored; runs when the session drives it"
+  and *nothing ever executed*. The TUI now drives a real loop: a registered
+  loop re-submits its prompt as a genuine turn on its interval (self-paced loops
+  re-submit when the prior tick completes), a tick never fires while a turn is
+  running, and `/loop stop` cancels the driver. Ticks ride the ordinary turn
+  path, so they are gated, rendered, and session-recorded like any other turn.
+- **Gitignoring `.ironcore/` no longer silently kills undo/redo.** The natural
+  way to quiet the `?? .ironcore/` line in `git status` is to add `.ironcore/`
+  to `.gitignore` — which, on git ≥2.50, made every `snapshot()` exit 1 ("paths
+  ignored by .gitignore … Use -f") because the shadow-index add named an ignored
+  path explicitly, so `/undo` and `/redo` quietly degraded to "[snapshot
+  skipped]". The snapshot store now detects an already-ignored `.ironcore` and
+  drops the redundant exclude pathspec (letting `.gitignore` do the excluding),
+  so undo/redo keep working byte-exactly. It does **not** use `--force`, which
+  would have started capturing the user's other ignored files.
+- **`read_image` failure reasons are visible to the model.** Only the no-vision
+  refusal was mirrored into `ToolResult.output`; unsupported-format, missing-
+  file, too-big and missing-`path` reasons lived only in `.error` (UI-facing),
+  so the model received an *empty* failed result and blind-retried the same
+  doomed call. Every failure branch now carries its actionable reason in
+  `output` as well, so the model can self-correct.
 
 ### Security
 - **Verify commands are gated through the deny-list before they run.** A

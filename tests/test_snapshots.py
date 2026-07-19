@@ -213,6 +213,38 @@ def test_redo_refuses_after_new_changes(tmp_path):
     assert (ws / "keep.txt").read_bytes() == b"C"
 
 
+def _assert_gitignored_ironcore_roundtrips(ws: Path, expected_backend: str) -> None:
+    """snapshot() + undo() must still round-trip byte-exactly when the workspace
+    gitignores ``.ironcore/`` — the undo trap this fix closes."""
+    # the natural, undo-killing "fix" for the `?? .ironcore/` git-status noise:
+    # add IronCore's own state dir to .gitignore.
+    (ws / ".gitignore").write_bytes(b"ignored.log\n.ironcore/\n")
+    store = SnapshotStore(ws)
+    assert store.backend == expected_backend
+    before = tree_bytes(ws)
+    sid = store.snapshot("before")  # git >=2.50 used to raise here → undo silently died
+    int(sid, 16)  # a real commit id, not a "[snapshot skipped]"
+    mutate(ws)
+    assert tree_bytes(ws) != before
+    assert store.undo() == sid
+    # byte-exact restore; the mutated ignored.log is left alone as always
+    assert tree_bytes(ws) == {**before, "ignored.log": b"ignored v2\n"}
+    # .ironcore/ itself is still never captured, whichever path excludes it
+    listed = store._run(["ls-tree", "-r", "--name-only", sid])
+    names = listed.stdout.decode("utf-8").splitlines()
+    assert names and all(not n.startswith(".ironcore") for n in names)
+
+
+@pytest.mark.requires_git
+def test_snapshot_survives_gitignored_ironcore_user_git(tmp_path):
+    _assert_gitignored_ironcore_roundtrips(make_user_ws(tmp_path), "user-git")
+
+
+@pytest.mark.requires_git
+def test_snapshot_survives_gitignored_ironcore_private(tmp_path):
+    _assert_gitignored_ironcore_roundtrips(make_plain_ws(tmp_path), "private")
+
+
 def test_git_missing_raises_snapshot_error(tmp_path, monkeypatch):
     ws = tmp_path / "ws"
     ws.mkdir()

@@ -31,6 +31,33 @@ def test_help_lists_every_command_all_implemented(ctx):
     assert "[planned]" not in out  # every declared command is now live
 
 
+def test_help_for_a_named_command_prints_its_usage(ctx):
+    registry, context = ctx
+    out = registry.dispatch("/help goal", context)
+    goal = registry.get("goal")
+    # the per-command usage string (where 'verify:' / 'check' / 'clear' syntax
+    # lives) is reachable from inside the product, not just the one-line summary.
+    assert goal.usage in out
+    assert goal.summary in out
+    assert "verify:" in out  # the exact syntax the index could never surface
+    # a named lookup is NOT the whole index
+    assert "Commands:" not in out
+
+
+def test_help_for_a_leading_slash_argument(ctx):
+    registry, context = ctx
+    # /help /loop is the same as /help loop
+    assert registry.get("loop").usage in registry.dispatch("/help /loop", context)
+
+
+def test_help_for_unknown_command_hints(ctx):
+    registry, context = ctx
+    out = registry.dispatch("/help zzzzzzzz", context)  # nothing close
+    assert "Unknown command" in out and "Type /help for the list." in out
+    out2 = registry.dispatch("/help versoin", context)  # near a real one
+    assert "Did you mean /version?" in out2
+
+
 def test_version_command(ctx):
     registry, context = ctx
     assert __version__ in registry.dispatch("/version", context)

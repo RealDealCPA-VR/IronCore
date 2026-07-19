@@ -100,6 +100,18 @@ async def _wait_for(pilot, predicate, tries: int = 120) -> bool:
     return False
 
 
+async def _wait_real(pilot, predicate, *, seconds: float = 3.0) -> bool:
+    """Like ``_wait_for`` but lets real wall-time pass between checks, so a
+    timer-driven condition (a /loop interval tick) actually gets a chance to
+    fire — ``pilot.pause()`` alone can spin faster than the interval."""
+    for _ in range(int(seconds / 0.02)):
+        if predicate():
+            return True
+        await asyncio.sleep(0.02)
+        await pilot.pause()
+    return predicate()
+
+
 # --------------------------------------------------------------------------- #
 # (1) boot
 # --------------------------------------------------------------------------- #
@@ -370,6 +382,47 @@ def test_esc_interrupts_running_turn(tmp_path):
             # partial output preserved, app still alive & responsive
             assert "Thinking about it" in app.transcript_text()
             assert not app._turn_running()
+
+    asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------- #
+# (7b) /loop actually runs: a registered loop re-submits its prompt on its
+#      interval, and /loop stop cancels the driver (IC-804)
+# --------------------------------------------------------------------------- #
+
+
+def test_loop_drives_a_real_tick_and_stop_cancels(tmp_path):
+    # a generous run of identical tick responses so a few ticks can't exhaust
+    # the script before we stop the loop (each tick is one turn = one call).
+    app = _app(_engine(tmp_path, [_text("tick done") for _ in range(30)]))
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            # register through the REAL command path: parses the tiny interval
+            # and hands the spec to app.register_loop.
+            await _submit(app, pilot, "/loop 0.05 ping the build")
+            assert app._loop_spec is not None  # the driver is armed
+
+            # the driver genuinely RE-SUBMITS the prompt as a turn: both the
+            # tick note and the model's streamed reply land in the transcript.
+            ticked = await _wait_real(
+                pilot, lambda: "[loop] ping the build" in app.transcript_text()
+            )
+            assert ticked, "the loop never fired a tick"
+            assert await _wait_real(pilot, lambda: "tick done" in app.transcript_text())
+            assert len(app.engine.provider.calls) >= 1  # a real provider call happened
+
+            # /loop stop cancels the driver through the real command path.
+            await _submit(app, pilot, "/loop stop")
+            assert app._loop_spec is None
+            # let any in-flight tick's turn settle, then prove no MORE ticks fire.
+            await _wait_real(pilot, lambda: not app._turn_running())
+            frozen = len(app.engine.provider.calls)
+            for _ in range(6):
+                await asyncio.sleep(0.05)
+                await pilot.pause()
+            assert len(app.engine.provider.calls) == frozen  # driver truly stopped
 
     asyncio.run(scenario())
 

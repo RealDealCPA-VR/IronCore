@@ -175,10 +175,34 @@ class SnapshotStore:
         """Sync the private index to the workspace and return its tree id."""
         self._ensure_ready()
         # -A against the persistent private index records adds/edits/deletes in
-        # one pass (and keeps git's stat cache warm); the pathspec keeps
-        # .ironcore/ out of every snapshot; .gitignore applies as usual
-        self._run(["add", "-A", "--", ".", ":(exclude).ironcore"])
+        # one pass (and keeps git's stat cache warm); .gitignore applies as usual.
+        add = ["add", "-A", "--", "."]
+        if not self._ironcore_ignored():
+            # The ``:(exclude).ironcore`` pathspec keeps IronCore's own state dir
+            # out of the snapshot — BUT only when the workspace has not already
+            # gitignored it. If a user "fixes" the ``?? .ironcore/`` git-status
+            # noise by adding ``.ironcore/`` to .gitignore, this pathspec becomes
+            # both redundant AND fatal: git >=2.50 exits 1 ("paths ignored by
+            # .gitignore ... Use -f") the instant an explicit pathspec names an
+            # ignored path, which used to make every snapshot()/undo() silently
+            # die. When .ironcore is already ignored we drop the pathspec and let
+            # .gitignore do the excluding (same resulting tree, no error). We do
+            # NOT pass --force: that would also start capturing the user's other
+            # ignored files, breaking the "ignored files are never captured"
+            # invariant this module promises.
+            add.append(":(exclude).ironcore")
+        self._run(add)
         return self._run(["write-tree"]).stdout.decode("ascii").strip()
+
+    def _ironcore_ignored(self) -> bool:
+        """True when the workspace's ignore rules already exclude ``.ironcore``.
+
+        ``git check-ignore -q`` exits 0 when the path is ignored, 1 when it is
+        not, and >1 on an internal error; anything but a clean "ignored" answer
+        falls back to False so the exclude pathspec still guards the snapshot.
+        """
+        proc = self._run(["check-ignore", "-q", ".ironcore"], check=False)
+        return proc.returncode == 0
 
     def _commit_snapshot(self, tree: str, label: str) -> str:
         parent = self._ref_tip()

@@ -129,6 +129,6 @@ def test_git_dependent_tests_skip_when_git_is_absent(tmp_path):
     )
     out = f"{proc.stdout}\n{proc.stderr}"
     assert proc.returncode == 0, out  # no errors, no failures
-    assert "7 skipped" in out, out  # genuinely skipped, not silently deselected
+    assert "9 skipped" in out, out  # genuinely skipped, not silently deselected
     # the two that do NOT need the binary must still really run
     assert "2 passed" in out, out

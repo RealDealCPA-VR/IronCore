@@ -10,6 +10,7 @@ remaining stubs.
 
 from __future__ import annotations
 
+from difflib import get_close_matches
 from typing import TYPE_CHECKING
 
 from ironcore import __version__
@@ -54,10 +55,27 @@ _KEYS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _help_for(registry: CommandRegistry, name: str) -> str:
+    """One command's usage + summary, or a nearest-match hint on a miss."""
+    cmd = registry.get(name)
+    if cmd is None:
+        near = get_close_matches(name, [c.name for c in registry.all()], n=1)
+        hint = f" Did you mean /{near[0]}?" if near else " Type /help for the list."
+        return f"Unknown command /{name}.{hint}"
+    planned = "  [planned]" if not cmd.implemented else ""
+    return f"/{cmd.name} — {cmd.summary}{planned}\n  usage: {cmd.usage}"
+
+
 def _cmd_help(ctx: CommandContext, args: str) -> str:
     # every ctx.extra key is optional (headless / alternate front ends may not
     # populate it); fall back to a freshly built registry rather than crash.
     registry: CommandRegistry = ctx.extra.get("registry") or build_default_registry()
+    # /help <name>: the per-command usage strings (where the '/goal verify:',
+    # '/workflow run', '/loop 5m', '/model <name>' syntax lives) are otherwise
+    # unreachable from inside the product. A bare /help keeps the index below.
+    name = args.strip().lstrip("/").split(" ", 1)[0]
+    if name:
+        return _help_for(registry, name)
     lines = ["Commands:"]
     for cmd in registry.all():
         marker = "" if cmd.implemented else "  [planned]"

@@ -267,7 +267,8 @@ rest of the session. You are approving a specific diff, not a vague intention.*
 | **Ctrl+C** | quit |
 | **/** | open the slash-command palette |
 
-`/help` lists every command and ends with the same key reference.
+`/help` lists every command and ends with the same key reference; `/help <command>`
+prints just that command's usage and summary (the exact `verify:` / `run` / interval syntax).
 
 ### What to expect on the very first run
 
@@ -338,7 +339,7 @@ itself never prints or prompts. Type `/` to open the palette:
 | `/model` · `/init` | List models / live-swap the running session to another model (envelope-cache aware) · scan the repo into `IRONCORE.md` project memory |
 | `/loop [5m] <prompt>` | Run a prompt on an interval, or let the agent self-pace |
 | `/undo` · `/redo` · `/compact` · `/review` · `/memory` | Snapshot undo · history compaction · diff review · project memory |
-| `/mode` · `/help` · `/version` | Set or cycle the operating mode · list commands and keys · print the version |
+| `/mode` · `/help [cmd]` · `/version` | Set or cycle the operating mode · list commands and keys, or one command's usage · print the version |
 
 `/goal` is the one worth trying first, because it is where "the intelligence is in the loop"
 stops being a slogan: the objective is re-anchored into every turn, and *the harness* — not the

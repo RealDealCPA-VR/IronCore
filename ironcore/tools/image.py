@@ -43,6 +43,16 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
 )
 
 
+def _fail(reason: str) -> ToolResult:
+    """A failed image read whose reason is visible to BOTH the model and the UI.
+
+    ``output`` is the only channel the engine feeds back to the model; ``error``
+    is user/UI-facing. Every read_image failure carries the same actionable text
+    on both so the model never gets an empty result to blind-retry against.
+    """
+    return ToolResult(ok=False, output=reason, error=reason)
+
+
 def _sniff_media_type(head: bytes) -> str | None:
     """PNG/JPEG/GIF/WEBP magic-byte sniff; None for anything else."""
     for signature, media_type in _SIGNATURES:
@@ -82,47 +92,39 @@ class ReadImageTool(_FsReadTool):
         self.vision_check = vision_check
 
     async def run(self, **kwargs: Any) -> ToolResult:
+        # Every failure reason rides OUTPUT as well as ERROR. The engine feeds
+        # only OUTPUT back to the model (error is user/UI-facing), so a failed
+        # read that left output empty handed the model a blank result and it
+        # blind-retried the same doomed call; mirroring the actionable reason
+        # lets it self-correct (pick another path, fix the format, give up).
         path = kwargs.get("path")
         if not isinstance(path, str) or not path:
-            return ToolResult(ok=False, output="", error="'path' (string) is required")
+            return _fail("'path' (string) is required")
         if self.vision_check is None or not self.vision_check():
-            # the message rides OUTPUT too: the engine feeds only output back to
-            # the model (error is user/UI-facing), and the whole point of this
-            # branch is that the MODEL learns the truth instead of hallucinating
-            # what the file "shows" (shell's stderr-in-output precedent).
-            message = (
+            # the whole point of this branch is that the MODEL learns the truth
+            # instead of hallucinating what the file "shows".
+            return _fail(
                 "this model has no vision capability - read_image cannot attach "
                 "images (probe/seed detected none; set [envelope] vision = true "
                 "in config to override)"
             )
-            return ToolResult(ok=False, output=message, error=message)
         target = self._resolve(path)
         try:
             raw = target.read_bytes()
         except FileNotFoundError:
-            return ToolResult(ok=False, output="", error=f"file not found: {self._rel(target)}")
+            return _fail(f"file not found: {self._rel(target)}")
         except OSError as exc:
-            return ToolResult(
-                ok=False, output="", error=f"cannot read {self._rel(target)}: {exc}"
-            )
+            return _fail(f"cannot read {self._rel(target)}: {exc}")
         if len(raw) > MAX_IMAGE_BYTES:
-            return ToolResult(
-                ok=False,
-                output="",
-                error=(
-                    f"{self._rel(target)} is {len(raw):,} bytes; read_image caps images "
-                    f"at {MAX_IMAGE_BYTES:,} bytes"
-                ),
+            return _fail(
+                f"{self._rel(target)} is {len(raw):,} bytes; read_image caps images "
+                f"at {MAX_IMAGE_BYTES:,} bytes"
             )
         media_type = _sniff_media_type(raw[:16])
         if media_type is None:
-            return ToolResult(
-                ok=False,
-                output="",
-                error=(
-                    f"{self._rel(target)} is not a supported image "
-                    "(PNG, JPEG, GIF, or WEBP magic bytes expected)"
-                ),
+            return _fail(
+                f"{self._rel(target)} is not a supported image "
+                "(PNG, JPEG, GIF, or WEBP magic bytes expected)"
             )
         rel = self._rel(target)
         return ToolResult(

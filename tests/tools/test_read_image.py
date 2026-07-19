@@ -128,3 +128,42 @@ def test_missing_path_argument(tmp_path):
     result = run(_tool(tmp_path))
     assert not result.ok
     assert "'path'" in result.error
+
+
+# --- every failure reason is visible to the MODEL, not only the UI -----------
+# The engine feeds only ToolResult.output back to the model (error is UI-facing).
+# A failure that leaves output empty hands the model a blank result to blind-
+# retry against; each branch must mirror its actionable reason into output too.
+
+
+def test_missing_file_reason_reaches_the_model(tmp_path):
+    result = run(_tool(tmp_path), path="ghost.png")
+    assert not result.ok
+    assert result.output  # not the empty string the model used to get
+    assert "file not found" in result.output
+    assert result.output == result.error  # same reason on both channels
+
+
+def test_unsupported_format_reason_reaches_the_model(tmp_path):
+    (tmp_path / "notes.txt").write_text("just text", encoding="utf-8")
+    result = run(_tool(tmp_path), path="notes.txt")
+    assert not result.ok
+    assert "not a supported image" in result.output
+    assert result.output == result.error
+
+
+def test_oversize_reason_reaches_the_model(tmp_path, monkeypatch):
+    (tmp_path / "big.png").write_bytes(PNG)
+    monkeypatch.setattr(image_mod, "MAX_IMAGE_BYTES", 10)
+    result = run(_tool(tmp_path), path="big.png")
+    assert not result.ok
+    assert f"{len(PNG):,} bytes" in result.output
+    assert "caps images" in result.output
+    assert result.output == result.error
+
+
+def test_missing_path_reason_reaches_the_model(tmp_path):
+    result = run(_tool(tmp_path))
+    assert not result.ok
+    assert "'path'" in result.output
+    assert result.output == result.error
