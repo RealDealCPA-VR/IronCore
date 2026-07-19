@@ -297,3 +297,44 @@ def test_factory_from_engine_inherits_role_routing(tmp_path):
     engine.roles = RoleRouter(engine.settings)
     made = _factory_from_engine(engine)()
     assert made.roles is engine.roles
+
+
+def test_factory_from_engine_isolates_goal_no_bleed(tmp_path):
+    """Regression (validator round 1): each subagent minted off the live engine
+    gets a FRESH SessionState, so the auto-pinned goal (engine M1) cannot bleed
+    from one fan-out subagent to the next through the shared workspace state.json.
+
+    Every subagent runs over the parent's ONE workspace. Before the fix
+    ``_factory_from_engine.make()`` passed no ``session=``, so each subagent
+    ``SessionState.load``ed that ONE ``<workspace>/state.json`` and every turn
+    ``SessionState.save``d back to it. The first subagent auto-pinned + persisted
+    its goal; the next LOADED it and re-presented the WRONG objective every turn —
+    a subagent whose real task was "review for SECURITY" was anchored to the
+    prior one's "review for BUGS". A fresh session per mint keeps each item's
+    goal its own.
+    """
+    from ironcore.commands.workflowcmd import _factory_from_engine
+
+    parent = _engine_over(tmp_path, MockProvider())
+    factory = _factory_from_engine(parent)
+
+    # Subagent A — real task "review for BUGS": auto-pins + persists that goal to
+    # the shared <workspace>/state.json at turn end.
+    parent.provider = MockProvider([_text("A done")])
+    a = factory()
+    asyncio.run(_drain(a.run_turn("review the diff for BUGS")))
+    assert a.state.goal == "review the diff for BUGS"
+
+    # Subagent B — DIFFERENT real task, minted identically. It must NOT inherit
+    # A's persisted goal at construction, and after its own turn it carries its
+    # OWN objective, not A's.
+    parent.provider = MockProvider([_text("B done")])
+    b = factory()
+    assert b.state.goal is None  # fresh session: did not load A's persisted goal
+    asyncio.run(_drain(b.run_turn("review the diff for SECURITY")))
+    assert b.state.goal == "review the diff for SECURITY"  # no bleed
+
+
+async def _drain(agen) -> None:
+    async for _ in agen:
+        pass

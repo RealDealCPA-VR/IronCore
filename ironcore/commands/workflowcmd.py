@@ -259,8 +259,20 @@ def _factory_from_engine(engine: Any) -> Callable[[], TurnEngine]:
     engine's provider/tools/settings/profile/workspace/mode but never its
     conversation. ``snapshots=None`` mirrors the orchestrator's own engines
     (tests/test_workflow_engine.py).
+
+    Each mint gets a FRESH, in-memory ``SessionState`` (``session=``). Every
+    subagent shares the parent's single workspace, so without this they would all
+    ``SessionState.load`` — and every turn ``SessionState.save`` — the ONE
+    ``<workspace>/state.json``. The auto-pinned goal (engine M1) then bleeds
+    across the fan-out: a subagent whose real task is "review for SECURITY" would
+    load the prior subagent's persisted goal ("review for BUGS") and re-present
+    that wrong objective in its anchor every turn. An isolated session per
+    subagent keeps each item's goal/turn_count/plan its own — matching the "many
+    small well-framed contexts" thesis (SPEC §10) and never touching the parent's
+    on-disk state.
     """
     from ironcore.core.engine import TurnEngine  # lazy: keep module import light
+    from ironcore.core.state import SessionState
 
     def make() -> TurnEngine:
         return TurnEngine(
@@ -271,6 +283,7 @@ def _factory_from_engine(engine: Any) -> Callable[[], TurnEngine]:
             engine.mode,
             workspace=engine.workspace,
             snapshots=None,
+            session=SessionState(),
             approvals=_unattended_broker(),
             # subagents inherit per-role routing (MS-3): a routed planner/coder
             # applies inside workflow engines too; None stays None (getattr
