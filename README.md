@@ -9,8 +9,8 @@
 [![CI](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml/badge.svg)](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE)
-[![Status: v0.2.1](https://img.shields.io/badge/status-v0.2.1-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
-[![Tests: 1797](https://img.shields.io/badge/tests-1797%20offline-brightgreen.svg)](#built--proven)
+[![Status: v0.3.0](https://img.shields.io/badge/status-v0.3.0-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
+[![Tests: 1903](https://img.shields.io/badge/tests-1903%20offline-brightgreen.svg)](#built--proven)
 
 </div>
 
@@ -471,7 +471,7 @@ exactly this way.
 
 ```bash
 git clone https://github.com/RealDealCPA-VR/IronCore.git && cd IronCore
-uv run --extra dev pytest -q   # 1797 tests, all offline — no model, no network
+uv run --extra dev pytest -q   # 1903 tests, all offline — no model, no network
 ```
 
 The suite sandboxes `HOME` itself, so running it cannot touch your own `~/.ironcore`. CI gates

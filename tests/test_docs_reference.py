@@ -543,4 +543,8 @@ def test_the_milestone_table_marks_the_shipped_version_shipped() -> None:
     row = next((line for line in table.splitlines() if line.startswith(f"| {series} ")), None)
     assert row is not None, f"docs/SPEC.md §15 has no row for the shipped {series}"
     assert "shipped" in row.lower(), f"{series} row does not say it shipped: {row!r}"
-    assert "moonshot" in row.lower(), f"{series} row does not describe what it shipped: {row!r}"
+    # The row must name the shipped version's *actual* signature content, not a stale
+    # copy of an earlier phase. Each series has a distinctive keyword; if a later series
+    # ships, add its keyword here (this test is the reminder to keep §15 honest).
+    signature = {"v0.1": "envelope", "v0.2": "moonshot", "v0.3": "skills"}.get(series, series)
+    assert signature in row.lower(), f"{series} row does not describe what it shipped: {row!r}"

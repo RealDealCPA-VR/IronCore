@@ -479,7 +479,7 @@ deps. CI publishes to PyPI on tag (IC-1102). Version single-sourced from `pyproj
 |---|---|---|
 | v0.1 | shipped | phases 1–11: the whole usable agent — providers, tools, safety kernel, turn engine, capability envelope, TUI, slash commands, workflows, sessions/resume + `/compact`, project memory (`IRONCORE.md`), packaging |
 | v0.2 | shipped | the eight **moonshots**: model-aware tokenization (`TOKEN-RATIO`), live `/model` swaps, a model per role each measured, best-of-N escape hatches, the self-improvement loop (outcome ledger + downgrade-only tuning), vision (`read_image`), MCP tool servers, entry-point plugins — plus instant-on profiling and real server-side guided decoding |
-| v0.3 | next | headless `ironcore exec` (§9), `web_search`, coverage/perf hardening, packaging polish |
+| v0.3 | shipped | **frontier parity**: skills (the `SKILL.md` open standard, envelope-aware, with per-workspace project-skill confirmation), headless `ironcore exec` (§9), `AGENTS.md`/`CLAUDE.md` compatibility + user-global memory, `web_search`; plus review fixes — auto-pinned objective, `/goal verify:` arms the engine, gated `verify:` execution, `/loop` actually runs, the `.ironcore`-gitignore undo trap, `/help <command>` |
 | v1.0 | later | envelope v2 (auto-reprobe on model updates), workflow library, docs site |
 
 Per-release detail, including what landed when, is in [CHANGELOG.md](../CHANGELOG.md).

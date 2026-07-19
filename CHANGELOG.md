@@ -3,7 +3,17 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] — 2026-07-19
+
+The frontier-parity release. A three-lens review measured IronCore against OpenAI
+Codex CLI and xAI grok-build: the engine, safety kernel and envelope stack came out
+frontier-grade (a dozen attempted jail/gate/injection bypasses all failed), but the
+2026 *platform* layer was missing. This release closes it — **skills (the `SKILL.md`
+open standard), headless `ironcore exec`, `AGENTS.md`/`CLAUDE.md` compatibility, and a
+`web_search` tool** — and fixes the concrete bugs the review surfaced (`/loop` never
+ran, gitignoring `.ironcore/` silently killed undo, `/goal verify:` didn't arm the
+engine, the task wasn't auto-pinned as durable state) plus a security finding (the
+`verify:` command now goes through the policy gate). 1903 offline tests.
 
 ### Added
 - **Headless exec — `ironcore exec "<prompt>"` (PKG-5).** IronCore is now
@@ -487,4 +497,5 @@ v0.2.1 is the first tag, and it ships everything in all three. Pushing a `v*` ta
 using the matching section above as its notes.
 -->
 
+[0.3.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.3.0
 [0.2.1]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.1
