@@ -3,6 +3,17 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.3] — 2026-07-19
+
+### Changed
+- **First release published to PyPI: `pip install ironcore-cli`.** No code
+  changed from 0.2.2 — this is a plumbing retry. 0.2.2's publish job ran the
+  moment its tag landed, which was before the PyPI Trusted Publisher had been
+  registered, so the OIDC exchange was rejected and PyPI never received the
+  artifact. A PyPI version cannot be re-uploaded once its release run has
+  failed in CI, so the retry ships under a new patch number. Everything else
+  about 0.2.2 stands, and its GitHub Release keeps its attached wheels.
+
 ## [0.2.2] — 2026-07-18
 
 ### Changed
@@ -12,8 +23,9 @@ All notable changes to IronCore are documented here. This project adheres to
   occupies the same slot. Only the distribution name moved: the console script
   is still `ironcore`, the import package is still `ironcore`, the repository is
   still `IronCore`, and no code changed. `pip install ironcore-cli` then
-  `ironcore doctor`. This is the first version published to PyPI; 0.2.1 and
-  earlier are installable from the GitHub releases and from source.
+  `ironcore doctor`. (This version never reached PyPI — its publish job ran
+  before the Trusted Publisher was registered and failed the OIDC exchange. See
+  0.2.3.)
 
 ## [0.2.1] — 2026-07-18
 
