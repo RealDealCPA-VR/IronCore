@@ -31,10 +31,26 @@ from textual.widgets import Button, Label, Static
 
 from ironcore.core.approvals import ApprovalAnswer, ApprovalRequest
 from ironcore.tui import theme
-from ironcore.tui.widgets.diffview import DiffView, looks_like_diff
+from ironcore.tui.widgets.diffview import DiffView, clean_edit_payload, looks_like_diff
 
 #: Risk classes for which Approve must not be the default-focused button.
 _HIGH_RISK = frozenset({"exec", "net"})
+
+def _presentable(preview: str) -> str:
+    """The engine's exact-effect preview, with an edit body made legible.
+
+    The edit_file preview is ``"edit_file <path> [<fmt>]\\n<payload>"``; this
+    keeps that heading verbatim (it says which file and format are at stake) and
+    only rewrites a SEARCH/REPLACE payload beneath it into ``-``/``+`` lines. A
+    write_file line, a shell command, a unified diff, or a URL has no such body
+    (or does not parse as one) and passes through untouched — the transform is
+    total and never invents an effect the engine did not describe.
+    """
+    head, sep, body = preview.partition("\n")
+    if not sep:
+        return preview
+    return f"{head}\n{clean_edit_payload(body)}"
+
 
 #: What each risk class means, in the words a stranger needs at the moment of
 #: deciding. The gate's own class names (SAFETY §2) are jargon on their own.
@@ -66,6 +82,9 @@ class ApprovalScreen(ModalScreen[ApprovalAnswer]):
         # title deliberately does NOT repeat the risk class — saying "WRITE"
         # in the frame AND in the chip one line below just read as a stutter.
         box.border_title = "Approval required"
+        # The verdict keys ride the frame's foot, so the buttons below can stay
+        # flat: the decision is always one keystroke away and the modal says so.
+        box.border_subtitle = "y approve · n deny · a all"
         with box:
             yield Label(self._title_text(), id="approval-title")
             yield self._preview_widget()
@@ -97,7 +116,7 @@ class ApprovalScreen(ModalScreen[ApprovalAnswer]):
         A preview whose body does not look like a diff still falls back to plain
         text, so an unexpected shape renders honestly instead of as noise.
         """
-        preview = self.request.preview
+        preview = _presentable(self.request.preview)
         if self.request.risk == "write" or looks_like_diff(preview):
             return DiffView(preview, id="approval-preview")
         return Static(Text(preview), id="approval-preview")

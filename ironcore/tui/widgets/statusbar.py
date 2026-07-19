@@ -52,6 +52,11 @@ _GAP = 2
 
 _SEP = "  ·  "
 
+#: The signature ember tick that opens the bar — the same left-bar the masthead,
+#: the tool cards, and the slash palette all lead with, so the status row reads
+#: as one more panel of the same forged instrument rather than a detached strip.
+_TICK = "▍ "
+
 #: The in-flight marker, matched back out of the fitted line to accent it.
 _BUSY = "working…"
 
@@ -103,16 +108,23 @@ class StatusBar(Static):
         with ``_plain``.
         """
         # Base: the meter, the separators and the keys hint are all supporting
-        # detail. The two things worth reading get lifted back out below.
+        # detail. The three things worth reading get lifted back out below.
         text = Text(line, style=theme.STYLE_MUTED, no_wrap=True)
+        # The ember tick is furniture, not data — style the bar itself, never
+        # its trailing space, so a single warm cell opens the row.
+        if line.startswith(_TICK):
+            text.stylize(f"bold {theme.ACCENT}", 0, 1)
+        # The chip is located (not assumed at index 0): the tick precedes it, and
+        # an ellipsized state may have shifted or dropped it entirely.
         chip = f"[{self._mode.value.upper()}]"
-        if not line.startswith(chip):  # squeezed past the chip: nothing to paint
+        idx = line.find(chip)
+        if idx == -1:  # squeezed past the chip: nothing more to paint
             return text
         # The autonomy posture is the one thing that must never be missed: PLAN
         # and MANUAL stay flat, accept-edits and auto fill (theme.MODE_STYLE).
-        text.stylize(theme.mode_style(self._mode.value), 0, len(chip))
-        start = len(chip) + len(_SEP)
-        if line[len(chip) :].startswith(_SEP):
+        text.stylize(theme.mode_style(self._mode.value), idx, idx + len(chip))
+        start = idx + len(chip) + len(_SEP)
+        if line[idx + len(chip) :].startswith(_SEP):
             end = line.find(_SEP, start)
             text.stylize(theme.FOREGROUND, start, end if end != -1 else len(line))
         busy = line.find(_BUSY)
@@ -162,12 +174,12 @@ class StatusBar(Static):
         return _KEY_TIERS[0]
 
     def _state(self, model: str) -> str:
-        """The left half: mode chip, model, meter, and the in-flight marker."""
+        """The left half: the ember tick, mode chip, model, meter, in-flight mark."""
         parts = [f"[{self._mode.value.upper()}]", model]
         parts.append(f"turn {self._turn} · {_humanize(self._tokens)} tok")
         if self._busy:
             parts.append(_BUSY)
-        return _SEP.join(parts)
+        return _TICK + _SEP.join(parts)
 
     def _fit(self, width: int) -> str:
         """The state on the left, the widest hint that fits on the right.

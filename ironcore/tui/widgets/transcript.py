@@ -32,7 +32,7 @@ from textual.widgets import Static
 from ironcore.providers.base import ToolCall
 from ironcore.tools.base import ToolResult
 from ironcore.tui import theme
-from ironcore.tui.widgets.diffview import diff_to_text, looks_like_diff
+from ironcore.tui.widgets.diffview import clean_edit_payload, diff_to_text, looks_like_diff
 
 #: Max characters of a tool's arg/result preview shown collapsed on the card.
 _PREVIEW_CHARS = 100
@@ -46,12 +46,56 @@ _CARD_DIFF_LINES = 16
 #: terminal; the card's own accent rule already supplies the left edge.
 _INDENT = "    "
 
+#: Lifecycle states that earn a place in the card header (see ``ToolCard._build``):
+#: the ones a reader must not miss. A ``requested``/``done`` card stays quiet.
+_LOUD_STATES = frozenset({"awaiting approval", "error", "denied"})
+
 
 def args_preview(arguments: dict) -> str:
     """Compact one-line ``k=v`` preview of tool arguments, truncated."""
     parts = [f"{k}={v!r}" for k, v in arguments.items()]
     text = ", ".join(parts)
     return text if len(text) <= _PREVIEW_CHARS else text[:_PREVIEW_CHARS] + " …"
+
+
+#: The masthead's one-line self-description and the keys a stranger needs.
+_TAGLINE = "a terminal coding agent that molds to your open & local models"
+#: Keycap chip → what it does. A chip is a key name padded on a raised-steel bed,
+#: so it reads as a physical key; the gloss beside it recedes to muted.
+_KEYCAPS: tuple[tuple[str, str], ...] = (
+    ("/", "commands"),
+    ("shift+tab", "safety"),
+    ("esc", "interrupt"),
+    ("ctrl+c", "quit"),
+)
+
+
+def build_masthead() -> Text:
+    """The IronCore lockup as one styled ``Text`` (see ``add_masthead``).
+
+    Pure and self-contained so a test — or the screenshot generator — can render
+    it without mounting the whole app. The ``▍`` bar and ``▔`` edge are block
+    elements (universally drawn); no glyph here risks tofu on a basic terminal.
+    """
+    keycap = f"bold {theme.FOREGROUND} on {theme.KEYCAP}"
+    text = Text(no_wrap=True)
+    # Wordmark: the ember bar leads, IRON glows, CORE stays cool steel.
+    text.append("▍ ", style=f"bold {theme.ACCENT}")
+    text.append("IRON", style=f"bold {theme.ACCENT}")
+    text.append("CORE", style=f"bold {theme.FOREGROUND}")
+    # Cooling hot-edge: four cells molten under IRON, four cooling to steel
+    # under CORE — the "forged, then quenched" signature, reused as a divider.
+    text.append("\n  ")
+    text.append("▔▔▔▔", style=theme.ACCENT)
+    text.append("▔▔▔▔", style=theme.MUTED)
+    text.append(f"\n  {_TAGLINE}", style=theme.STYLE_MUTED)
+    text.append("\n\n  ")
+    for i, (key, gloss) in enumerate(_KEYCAPS):
+        if i:
+            text.append("   ")
+        text.append(f" {key} ", style=keycap)
+        text.append(f" {gloss}", style=theme.STYLE_MUTED)
+    return text
 
 
 def _first_line(text: str) -> str:
@@ -193,8 +237,11 @@ class ToolCard(Static):
         if self._diff is None:
             return self._text
         # The header/summary plus the colored diff — SPEC §3.1 "tool cards ...
-        # diff views". The diff is indented to sit under the summary block.
-        return Group(self._text, diff_to_text(self._diff, max_lines=_CARD_DIFF_LINES))
+        # diff views". A SEARCH/REPLACE payload is shown as clean -/+ lines (the
+        # same form the offline demo narrates) rather than raw conflict markers;
+        # the diff is indented to sit under the summary block.
+        diff = diff_to_text(clean_edit_payload(self._diff), max_lines=_CARD_DIFF_LINES)
+        return Group(self._text, diff)
 
     def set_state(self, state: str) -> None:
         self.state = state
@@ -222,8 +269,15 @@ class ToolCard(Static):
         text.append(self.call.name, style=theme.STYLE_TOOL_NAME)
         text.append("  ")
         text.append(theme.risk_chip(self.risk), style=theme.risk_style(self.risk))
-        text.append("  ")
-        text.append(self.state, style=theme.state_style(self.state))
+        # The lifecycle word rides the header ONLY when it asks for attention: a
+        # done or just-requested card is already told by its result line (or the
+        # absence of one), so printing "done" beside the green tick below just
+        # doubled the ink on the calm, common case. "awaiting approval",
+        # "error", and "denied" still assert themselves — those are the states a
+        # reader must not miss, and they keep the colour that makes them jump.
+        if self.state in _LOUD_STATES:
+            text.append("  ")
+            text.append(self.state, style=theme.state_style(self.state))
         # When the diff is shown colored below, drop its raw payload from the
         # one-line arg preview so it isn't printed twice.
         display_args = self.call.arguments
@@ -280,27 +334,22 @@ class Transcript(VerticalScroll):
         self._current = None
 
     async def add_masthead(self) -> None:
-        """The first thing in an empty transcript: what this is, and the keys
-        that get a stranger out of trouble.
+        """The brand moment: the first thing a newcomer sees in an empty pane.
 
-        Three lines, IN the transcript rather than over it — it scrolls away
-        with the rest of the history instead of being a splash screen that has
-        to be dismissed. It replaces the old one-line "IronCore ready" note,
-        which said the same things with no hierarchy at all.
+        A designed lockup, IN the transcript rather than over it — it scrolls
+        away with the history instead of being a splash screen to dismiss:
+
+            ``▍ IRONCORE``           two-tone wordmark — molten IRON, steel CORE
+            ``  ▔▔▔▔▔▔▔▔``           a cooling hot-edge, ember fading to steel
+            ``  <tagline>``          what it is, in one muted line
+            ``  <keycaps>``          the keys that get a stranger out of trouble
+
+        The ``▍`` ember bar, the two-tone mark, and the keycap chips are the
+        product's signature furniture — the same rule and chip language the tool
+        cards, the mode chip, and the status tick all speak, so every screen
+        reads as one designed thing.
         """
-        text = Text()
-        text.append("IRONCORE", style=theme.STYLE_USER)
-        text.append("  a terminal coding agent for open-source models", style=theme.STYLE_MUTED)
-        text.append("\n\nType a message to start, or ", style=theme.STYLE_MUTED)
-        text.append("/", style=theme.FOREGROUND)
-        text.append(" for commands.\n", style=theme.STYLE_MUTED)
-        text.append("Shift+Tab", style=theme.FOREGROUND)
-        text.append(" cycles the safety mode · ", style=theme.STYLE_MUTED)
-        text.append("Esc", style=theme.FOREGROUND)
-        text.append(" interrupts · ", style=theme.STYLE_MUTED)
-        text.append("Ctrl+C", style=theme.FOREGROUND)
-        text.append(" quits.", style=theme.STYLE_MUTED)
-        await self._add(_Styled(text, classes="masthead"))
+        await self._add(_Styled(build_masthead(), classes="masthead"))
 
     async def add_mode_note(self, mode: str, description: str) -> None:
         """A mode change, with the mode NAME carrying its autonomy colour.

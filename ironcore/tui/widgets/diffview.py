@@ -71,6 +71,41 @@ def looks_like_diff(payload: str) -> bool:
     return False
 
 
+def search_replace_to_unified(payload: str) -> str | None:
+    """Rewrite an aider ``SEARCH``/``REPLACE`` block as ``-old`` / ``+new`` lines.
+
+    Returns ``None`` when the payload does not parse as one (a unified diff, a
+    prose blob) so the caller can fall back to rendering it verbatim. The result
+    is a plain diff-shaped string that :func:`diff_to_text` colours as
+    removed/added — the same exact effect the offline demo narrates, without the
+    ``<<<<<<<`` / ``=======`` / ``>>>>>>>`` conflict markers competing with the
+    change itself for the eye at the one moment a human is deciding.
+
+    The ``tools.patch`` parser is imported locally: this module stays a rendering
+    leaf whose import graph never reaches into the engine (docs/ARCHITECTURE.md
+    §4), and ``parse_search_replace`` is a pure, side-effect-free transform.
+    """
+    from ironcore.tools.patch import parse_search_replace
+
+    blocks, error = parse_search_replace(payload)
+    if error is not None or not blocks:
+        return None
+    lines: list[str] = []
+    for search, replace in blocks:
+        lines += [f"- {ln}" for ln in search.splitlines()]
+        lines += [f"+ {ln}" for ln in replace.splitlines()]
+    return "\n".join(lines)
+
+
+def clean_edit_payload(payload: str) -> str:
+    """A diff/edit payload made presentable: SEARCH/REPLACE blocks become
+    ``-``/``+`` lines, everything else is returned untouched. Idempotent and
+    total — a payload that is already a unified diff (or unparseable) passes
+    straight through, so the caller can always hand the result to
+    :func:`diff_to_text`."""
+    return search_replace_to_unified(payload) or payload
+
+
 def _classify(line: str, region: str | None) -> tuple[str, str | None]:
     """Style for one line + the next SEARCH/REPLACE region state.
 

@@ -100,7 +100,7 @@ from ironcore.tools.mcp import MCPManager
 from ironcore.tui import theme
 from ironcore.tui.screens.approval import ApprovalScreen
 from ironcore.tui.screens.sessions import SessionPicker
-from ironcore.tui.theme import IRONCORE_THEME, RISK_VARIABLES
+from ironcore.tui.theme import CSS_VARIABLES, IRONCORE_THEME
 from ironcore.tui.widgets import InputBar, StatusBar, Transcript
 
 if TYPE_CHECKING:
@@ -195,7 +195,7 @@ class IronCoreApp(App):
     /* `wide` (▎) rather than `outer` (▌): a slim rule reads as an accent, a
        fat one reads as a slab of colour competing with the risk chip. */
     #transcript .tool-card {
-        background: $panel 35%;
+        background: $panel 55%;
         border-left: wide $primary;
         padding: 0 1;
         margin: 0 0 1 0;
@@ -204,9 +204,10 @@ class IronCoreApp(App):
     #transcript .tool-card.risk-write { border-left: wide $risk-write; }
     #transcript .tool-card.risk-exec { border-left: wide $risk-exec; }
     #transcript .tool-card.risk-net { border-left: wide $risk-net; }
-    /* A card that wants a human, or that went wrong, earns a brighter bed. */
-    #transcript .tool-card.state-awaiting { background: $warning 12%; }
-    #transcript .tool-card.state-bad { background: $error 12%; }
+    /* A card that wants a human, or that went wrong, earns a brighter bed —
+       loud enough to pull the eye clean out of a column of calm read cards. */
+    #transcript .tool-card.state-awaiting { background: $warning 15%; }
+    #transcript .tool-card.state-bad { background: $error 15%; }
 
     /* -- slash palette ---------------------------------------------------- */
     #palette {
@@ -221,8 +222,10 @@ class IronCoreApp(App):
 
     /* -- input + status --------------------------------------------------- */
     /* `round` instead of `tall`: the tall variant paints thick blocks down
-       both sides, which is the single most dated thing on the old frame. */
-    InputBar { height: 3; border: round $panel; background: $surface; }
+       both sides, which is the single most dated thing on the old frame. The
+       resting border is $edge — a visible steel hairline, not the near-black
+       $panel that read as no frame at all — and focus lifts it to the accent. */
+    InputBar { height: 3; border: round $edge; background: $surface; }
     InputBar:focus { border: round $primary; }
     StatusBar { height: 1; background: $panel; padding: 0 1; }
 
@@ -236,16 +239,26 @@ class IronCoreApp(App):
         max-width: 100;
         height: auto;
         border: round $warning;
+        border-title-align: left;
+        border-title-color: $warning;
+        border-subtitle-align: right;
+        border-subtitle-color: $text-muted;
         background: $surface;
-        padding: 1 2;
+        padding: 1 3;
     }
     /* The border is the risk signal here too, so an EXEC/NET ask is red before
        it is read. Defaulting to $warning keeps an unknown class visible. */
-    #approval-box.risk-exec, #approval-box.risk-net { border: round $error; }
-    #approval-box.risk-read { border: round $primary; }
+    #approval-box.risk-exec, #approval-box.risk-net {
+        border: round $error;
+        border-title-color: $error;
+    }
+    #approval-box.risk-read {
+        border: round $primary;
+        border-title-color: $primary;
+    }
     #approval-title { width: 100%; }
     #approval-preview { height: auto; max-height: 20; margin: 1 0; }
-    #approval-buttons { height: auto; align: center middle; }
+    #approval-buttons { height: auto; align: center middle; margin: 1 0 0 0; }
     /* Flat one-row actions. The diff above is the evidence being judged; three
        saturated blocks used to shout louder than the thing they act on. */
     #approval-buttons Button {
@@ -258,10 +271,17 @@ class IronCoreApp(App):
         color: $text-muted;
         text-style: none;
     }
-    #approval-buttons Button:focus { background: $boost; text-style: bold; }
     #approval-buttons #approve { color: $success; }
     #approval-buttons #deny { color: $error; }
     #approval-buttons #approve-all { color: $warning; }
+    /* The unfocused verdicts stay flat coloured text — the diff above is the
+       evidence, not these. The one the keyboard will act on (Deny for EXEC/NET,
+       Approve otherwise) fills with its own colour, so what Enter does is never
+       in doubt without turning all three into competing blocks. */
+    #approval-buttons Button:focus { text-style: bold; }
+    #approval-buttons #approve:focus { background: $success; color: $background; }
+    #approval-buttons #deny:focus { background: $error; color: $background; }
+    #approval-buttons #approve-all:focus { background: $warning; color: $background; }
 
     SessionPicker { align: center middle; }
     #session-box {
@@ -270,6 +290,10 @@ class IronCoreApp(App):
         height: auto;
         max-height: 24;
         border: round $primary;
+        border-title-align: left;
+        border-title-color: $primary;
+        border-subtitle-align: right;
+        border-subtitle-color: $text-muted;
         background: $surface;
         padding: 1 2;
     }
@@ -376,7 +400,7 @@ class IronCoreApp(App):
         ``IRONCORE_THEME``. That also means switching to a stock Textual theme
         (the command palette can) still resolves them instead of failing.
         """
-        return dict(RISK_VARIABLES)
+        return dict(CSS_VARIABLES)
 
     def on_mount(self) -> None:
         self.transcript = self.query_one(Transcript)

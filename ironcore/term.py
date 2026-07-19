@@ -59,10 +59,11 @@ FOREGROUND = "#ced7e1"
 PRIMARY = "#6ea8d8"
 SECONDARY = "#8bb3cc"
 #: The one warm colour: the user's own lines, and anything asking for a human.
-ACCENT = "#e3a355"
+#: A hot amber-orange — molten iron, not sand (mirrors ``tui/theme.py``).
+ACCENT = "#ec9146"
 
 SUCCESS = "#57c08a"
-WARNING = "#e3a355"
+WARNING = "#ec9146"
 ERROR = "#e2606c"
 
 #: Supporting detail: args, labels, follow-up advice, system notes.
@@ -292,6 +293,22 @@ def heading(title: str, subtitle: str = "") -> Text:
     """A section title: the name asserts, the gloss recedes."""
     text = Text()
     text.append(title, style=f"bold {ACCENT}")
+    if subtitle:
+        text.append(f"  {subtitle}", style=STYLE_MUTED)
+    return text
+
+
+def wordmark(subtitle: str = "") -> Text:
+    """The IronCore logotype as two-tone ``Text`` — molten ``IRON``, steel
+    ``CORE`` — the same lockup the TUI masthead draws (``tui/widgets/transcript``),
+    so a ``demo`` transcript opens as the same product the app does.
+
+    Pure ASCII (the two halves are plain words in two styles), so it survives a
+    cp1252 pipe unchanged where a block-glyph wordmark would have to degrade.
+    """
+    text = Text()
+    text.append("IRON", style=f"bold {ACCENT}")
+    text.append("CORE", style=f"bold {FOREGROUND}")
     if subtitle:
         text.append(f"  {subtitle}", style=STYLE_MUTED)
     return text

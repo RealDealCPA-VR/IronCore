@@ -46,14 +46,24 @@ FOREGROUND = "#ced7e1"
 PRIMARY = "#6ea8d8"
 SECONDARY = "#8bb3cc"
 #: The one warm colour: the user's own lines, and anything asking for a human.
-ACCENT = "#e3a355"
+#: A hot amber-orange — molten iron, not sand — so the single accent on a wall
+#: of steel reads as the forge it is named for.
+ACCENT = "#ec9146"
 
 SUCCESS = "#57c08a"
-WARNING = "#e3a355"
+WARNING = "#ec9146"
 ERROR = "#e2606c"
 
 #: Supporting detail: args, timestamps, system notes, the keys hint.
 MUTED = "#77879a"
+
+#: A visible hairline steel for TUI frames — a step brighter than PANEL so a
+#: border reads as a crafted edge rather than a smudge that vanishes into the
+#: ground. (``term.py``'s DIVIDER is its sibling for the CLI surfaces.)
+EDGE = "#38475a"
+#: A raised-steel bed for keycap chips (the masthead legend, the status tick):
+#: light enough to sit proud of BACKGROUND, cool enough to stay furniture.
+KEYCAP = "#28323f"
 
 #: The selection band, and its dimmer form for an unfocused list. PRIMARY
 #: blended over SURFACE at ~28% / ~15% — pre-blended because Textual's
@@ -75,6 +85,12 @@ RISK_VARIABLES: dict[str, str] = {
     "risk-net": ERROR,
 }
 
+#: Every design token the app CSS spends that no built-in theme defines. Declared
+#: as fallbacks (``get_theme_variable_defaults``) too, because CSS is parsed
+#: before any theme is applied and a token resolving only inside IRONCORE_THEME
+#: would crash startup — or break a switch to a stock Textual theme.
+CSS_VARIABLES: dict[str, str] = {**RISK_VARIABLES, "edge": EDGE, "keycap": KEYCAP}
+
 IRONCORE_THEME = Theme(
     name="ironcore",
     dark=True,
@@ -90,7 +106,7 @@ IRONCORE_THEME = Theme(
     error=ERROR,
     variables={
         "text-muted": MUTED,
-        **RISK_VARIABLES,
+        **CSS_VARIABLES,
         # Input/scrollbar chrome, so no widget invents its own grey.
         "border-blurred": PANEL,
         "scrollbar": PANEL,
