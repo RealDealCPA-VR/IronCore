@@ -9,4 +9,4 @@ trusting recall. What is left for the model is the part it is actually good
 at: local reasoning over a well-framed context.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"

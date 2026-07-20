@@ -3,6 +3,17 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] — 2026-07-20
+
+First release published to PyPI: `pip install ironcore-cli`. No code change from
+0.3.0 — a plumbing retry. 0.3.0's publish job ran before the PyPI Trusted Publisher
+was fully configured, so it built and shipped a GitHub Release but never reached
+PyPI. A published PyPI version cannot be re-uploaded once its release run has
+failed, so the retry ships under a new patch number; 0.3.0's GitHub Release keeps
+its attached wheels. (The distribution is `ironcore-cli` because PyPI refused the
+bare name `ironcore` as too similar to the unrelated `iron-core`; the command and
+the import are still `ironcore`.)
+
 ## [0.3.0] — 2026-07-19
 
 The frontier-parity release. A three-lens review measured IronCore against OpenAI
@@ -497,5 +508,6 @@ v0.2.1 is the first tag, and it ships everything in all three. Pushing a `v*` ta
 using the matching section above as its notes.
 -->
 
+[0.3.1]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.3.1
 [0.3.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.3.0
 [0.2.1]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.1
