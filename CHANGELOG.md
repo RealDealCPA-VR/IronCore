@@ -3,7 +3,7 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.2] — 2026-07-20
 
 ### Added
 - **Update notifier — a gentle "a newer version is available" nudge.** A new
@@ -548,6 +548,7 @@ v0.2.1 is the first tag, and it ships everything in all three. Pushing a `v*` ta
 using the matching section above as its notes.
 -->
 
+[0.3.2]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.3.2
 [0.3.1]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.3.1
 [0.3.0]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.3.0
 [0.2.1]: https://github.com/RealDealCPA-VR/IronCore/releases/tag/v0.2.1

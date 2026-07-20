@@ -9,7 +9,7 @@
 [![CI](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml/badge.svg)](https://github.com/RealDealCPA-VR/IronCore/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/LICENSE)
-[![Status: v0.3.1](https://img.shields.io/badge/status-v0.3.1-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
+[![Status: v0.3.2](https://img.shields.io/badge/status-v0.3.2-brightgreen.svg)](https://github.com/RealDealCPA-VR/IronCore/blob/main/CHANGELOG.md)
 [![Tests: 1903](https://img.shields.io/badge/tests-1903%20offline-brightgreen.svg)](#built--proven)
 
 </div>
