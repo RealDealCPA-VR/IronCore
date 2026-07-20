@@ -95,15 +95,19 @@ def is_newer(current: str, latest: str) -> bool:
 
     Compared with ``packaging.version`` (PEP 440), so ``0.3.10 > 0.3.2`` and
     pre-releases order sensibly (``0.4.0rc1 > 0.3.1``; a final ``0.3.2`` beats
-    its own ``0.3.2rc1``). Fail-silent: an unparseable version on either side is
-    treated as "not newer" rather than raising — a garbage tag on PyPI must not
-    nag a working install.
+    its own ``0.3.2rc1``). Fail-silent: an unparseable version on either side —
+    or ``packaging`` somehow missing at runtime — is treated as "not newer"
+    rather than raising. A garbage tag on PyPI must not nag a working install,
+    and a maintenance ping must never crash a launch or turn ``ironcore doctor``
+    into a traceback. The import lives INSIDE the ``try`` so a future dependency
+    prune degrades to "no nudge", not a ``ModuleNotFoundError`` (``packaging`` is
+    a declared runtime dependency now — this is defense in depth).
     """
-    from packaging.version import InvalidVersion, parse
-
     try:
+        from packaging.version import parse
+
         return parse(latest) > parse(current)
-    except (InvalidVersion, TypeError):
+    except Exception:
         return False
 
 

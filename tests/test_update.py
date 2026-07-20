@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sys
+import tomllib
+from pathlib import Path
 
 import pytest
 
@@ -79,6 +83,24 @@ def test_default_cache_path_lives_under_home_dot_ironcore():
     path = default_cache_path()
     assert path.name == "update-check.json"
     assert path.parent.name == ".ironcore"
+
+
+def test_packaging_is_a_declared_runtime_dependency():
+    """Regression (validator round 1): ``is_newer`` imports ``packaging`` on both
+    the ``ironcore doctor`` and the TUI-boot paths, so it MUST be a declared
+    runtime dependency — not silently inherited from the dev-only ``pytest``.
+
+    The dev suite hid the gap: ``pytest`` pulls ``packaging`` into the dev env, so
+    every test had it. But a stock install (``pip``/``pipx``/``uv tool install
+    ironcore-cli`` into a clean env — the README's recommended methods) omitted
+    it, and ``ironcore doctor`` crashed with ``ModuleNotFoundError`` + exit 1.
+    Pin the declaration so a future dependency prune cannot drop it again.
+    """
+    root = Path(__file__).resolve().parent.parent
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    deps = data["project"]["dependencies"]
+    names = {re.split(r"[<>=!~ ]", d, maxsplit=1)[0].strip().lower() for d in deps}
+    assert "packaging" in names, f"packaging must be a runtime dep; saw {sorted(names)}"
 
 
 # --------------------------------------------------------------------------
@@ -145,6 +167,21 @@ def test_is_newer_orders_prereleases_sensibly():
 def test_is_newer_is_false_on_an_unparseable_version():
     assert is_newer("0.3.1", "not-a-version") is False
     assert is_newer("garbage", "0.3.2") is False
+
+
+def test_is_newer_is_false_when_packaging_is_missing(monkeypatch):
+    """Regression (validator round 1, defense in depth): ``packaging`` is a
+    declared runtime dep now, but ``is_newer`` must ALSO fail-silent if it ever
+    goes missing again. Its import lives inside the ``try``, so a pruned
+    dependency reads as "not newer" — never a ``ModuleNotFoundError`` that would
+    crash a launch or turn ``ironcore doctor`` into a traceback + exit 1.
+
+    Simulated by poisoning ``sys.modules`` so the lazy ``from packaging.version
+    import parse`` raises ``ImportError`` exactly as a stock install would.
+    """
+    monkeypatch.setitem(sys.modules, "packaging", None)
+    monkeypatch.setitem(sys.modules, "packaging.version", None)
+    assert is_newer("0.3.1", "9999.0.0") is False  # would be True if packaging loaded
 
 
 # --------------------------------------------------------------------------
@@ -313,6 +350,23 @@ def test_doctor_skips_the_check_entirely_when_disabled(tmp_path, capsys):
     assert calls == []  # [update] check = false means the fetch is never invoked
     assert "update:" not in out
     assert "up to date" not in out
+
+
+def test_doctor_survives_missing_packaging(tmp_path, capsys, monkeypatch):
+    """Regression (validator round 1): in a stock install ``packaging`` was
+    absent from the runtime closure, so the notifier's ``is_newer`` raised
+    ``ModuleNotFoundError`` and turned an ``ironcore doctor`` run into
+    ``ironcore: ModuleNotFoundError: No module named 'packaging'`` + exit 1 — a
+    doctor FAILURE caused solely by the notifier. Even with ``packaging`` gone,
+    doctor must stay green and traceback-free (offline/degraded is not a FAIL).
+    """
+    monkeypatch.setitem(sys.modules, "packaging", None)
+    monkeypatch.setitem(sys.modules, "packaging.version", None)
+    rc = _doctor(tmp_path, update_fetch=_returns(_pypi_json("9999.0.0")))
+    out = capsys.readouterr().out
+    assert rc == 0  # the notifier is never the reason doctor fails
+    assert "Traceback" not in out
+    assert "ModuleNotFoundError" not in out
 
 
 def test_doctor_does_not_dial_from_a_non_tty(tmp_path, monkeypatch):

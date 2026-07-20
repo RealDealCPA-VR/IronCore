@@ -27,6 +27,22 @@ All notable changes to IronCore are documented here. This project adheres to
   section. 31 new offline tests (`tests/test_update.py` + TUI/doctor additions),
   all inject the fetch so nothing dials.
 
+### Fixed
+- **Update notifier: declared its `packaging` dependency so a stock install's
+  `ironcore doctor` no longer crashes.** `ironcore/update.py`'s `is_newer` imports
+  `packaging.version`, but `packaging` was not in the runtime `dependencies` — it
+  was only reachable in the dev env because `pytest` pulls it in, so the whole
+  green suite hid the gap. In a stock install (`pip`/`pipx`/`uv tool install
+  ironcore-cli` into a clean env), `packaging` was absent, so `ironcore doctor`
+  raised `ModuleNotFoundError: No module named 'packaging'` and exited 1 — a
+  doctor failure caused solely by the notifier — and the TUI boot nudge was
+  silently dead. `packaging>=23.0` is now a declared runtime dependency.
+  Defense in depth: `is_newer`'s import moved inside its `try` (a future prune
+  degrades to "no nudge", not a crash) and `doctor`'s `_report_update` is wrapped
+  fail-silent, so the maintenance ping can never be the reason a doctor run ends
+  in a traceback. Three offline regression tests pin the declaration and both
+  guards.
+
 ## [0.3.1] — 2026-07-20
 
 First release published to PyPI: `pip install ironcore-cli`. No code change from

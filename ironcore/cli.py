@@ -533,20 +533,28 @@ def _report_update(update_fetch: Callable[[str, float], str] | None) -> None:
     interactive terminal — a piped or CI ``ironcore doctor`` must never dial
     PyPI (the check is absent from every non-interactive path). Being offline is
     not a doctor failure, so this never touches the exit code: it prints the
-    behind/up-to-date line when it has an answer and stays silent otherwise.
+    behind/up-to-date line when it has an answer and stays silent otherwise. The
+    whole body is wrapped fail-silent — a maintenance ping must never be the
+    reason a doctor run ends in a traceback + exit 1.
     """
     if update_fetch is None and not _stdout_is_tty():
         return  # never dial from a non-interactive doctor (a pipe, a redirect, CI)
 
-    from ironcore.update import DIST_NAME, is_newer, latest_version
+    try:
+        from ironcore.update import DIST_NAME, is_newer, latest_version
 
-    latest = latest_version(fetch=update_fetch)
-    if latest is None:
-        return  # could not reach PyPI -- offline is not a failure, so stay silent
-    if is_newer(__version__, latest):
-        _say(f"[--] update: {latest} available -- pip install -U {DIST_NAME}")
-    else:
-        _say(f"[ok] up to date ({__version__})")
+        latest = latest_version(fetch=update_fetch)
+        if latest is None:
+            return  # could not reach PyPI -- offline is not a failure, so stay silent
+        if is_newer(__version__, latest):
+            _say(f"[--] update: {latest} available -- pip install -U {DIST_NAME}")
+        else:
+            _say(f"[ok] up to date ({__version__})")
+    except Exception:
+        # Defense in depth alongside is_newer's own guard: any unexpected error
+        # (a pruned dependency, a surprise from httpx) stays silent rather than
+        # turning `ironcore doctor` into a traceback + exit 1.
+        return
 
 
 def _config_hint(user_path: Path, project_path: Path) -> str:

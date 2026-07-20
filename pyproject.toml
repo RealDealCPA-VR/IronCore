@@ -43,6 +43,10 @@ dependencies = [
   # 2.10 stopped warning on `model_` field names (envelope.profile.model_id)
   "pydantic>=2.10",
   "pyyaml>=6.0",
+  # imported directly by ironcore/update.py's is_newer (PEP 440 version compare);
+  # declared, not inherited -- a stock `pip install ironcore-cli` gets no packaging
+  # otherwise (only the dev extra's pytest pulls it, so the dev suite hid the gap).
+  "packaging>=23.0",
 ]
 
 [project.optional-dependencies]
