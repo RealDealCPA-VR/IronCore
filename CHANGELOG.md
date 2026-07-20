@@ -3,6 +3,30 @@
 All notable changes to IronCore are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Update notifier — a gentle "a newer version is available" nudge.** A new
+  `ironcore/update.py` checks PyPI for a newer release of the `ironcore-cli`
+  distribution and, when one exists, prints a **one-line** upgrade hint. It
+  **never auto-installs** — a CLI that runs shell commands and edits files leaves
+  the user in control of what version they run — so it only ever prints the
+  command (`pip install -U ironcore-cli` / `uv tool upgrade ironcore-cli` /
+  `pipx upgrade ironcore-cli`). The check is **fail-silent** (any network/DNS/
+  timeout/bad-JSON error reads as "no update", never a traceback), **cached** for
+  a day at `~/.ironcore/update-check.json` (an atomic write, so a normal launch
+  inside the window does not dial), **short-timeout**, and **opt-out** via a new
+  `[update] check` setting (default `true`). It surfaces in exactly two places,
+  and **neither runs in a non-interactive / headless / CI context**: `ironcore
+  doctor` prints `[--] update: <v> available …` / `[ok] up to date (<v>)` (only
+  when stdout is a real terminal; offline is never a `doctor` failure), and the
+  TUI posts a single boot-style note in the background at startup. Headless
+  `ironcore exec` and any non-TTY path never dial PyPI. Version comparison uses
+  `packaging.version` (PEP 440, pre-release aware). Documented in `docs/CONFIG.md`
+  §12, the `ironcore init` starter config, and the README's new "Updating"
+  section. 31 new offline tests (`tests/test_update.py` + TUI/doctor additions),
+  all inject the fetch so nothing dials.
+
 ## [0.3.1] — 2026-07-20
 
 First release published to PyPI: `pip install ironcore-cli`. No code change from

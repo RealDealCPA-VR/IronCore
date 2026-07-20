@@ -189,6 +189,16 @@ def _is_localhost(url: str) -> bool:
     return host == "localhost" or host == "::1" or host.startswith("127.")
 
 
+def _stdout_is_tty() -> bool:
+    """True only for a real interactive terminal. Gates the update notifier so a
+    piped, redirected or CI ``ironcore doctor`` never dials PyPI. A single seam,
+    so a test can force it either way without touching the capture machinery."""
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:  # pragma: no cover -- a broken stdout is not doctor's problem
+        return False
+
+
 def _which(command: str) -> str | None:
     """Indirection over :func:`shutil.which` so tests can make PATH deterministic."""
     return shutil.which(command)
@@ -357,13 +367,16 @@ def cmd_doctor(
     envelope_dir: Path | None = None,
     check_endpoint: bool = True,
     probe: Callable[[str], EndpointProbe] | None = None,
+    update_fetch: Callable[[str, float], str] | None = None,
 ) -> int:
     """Environment checks; 0 only if the setup would actually work.
 
     Parameters are injectable for tests (they mirror Settings.load); real runs
     pass nothing. ``check_endpoint=False`` skips the network probe entirely so
     tests stay offline; ``probe`` substitutes a scripted probe for the same
-    reason while still exercising the reporting branches.
+    reason while still exercising the reporting branches. ``update_fetch`` is the
+    same injection seam for the PyPI update check — a scripted fetch keeps the
+    test suite offline while still exercising the update line.
     """
     ok = True
 
@@ -506,7 +519,34 @@ def cmd_doctor(
             "factory; boot falls back to auto-selection"
         )
 
+    if settings.update.check:
+        _report_update(update_fetch)
+
     return 0 if ok else 1
+
+
+def _report_update(update_fetch: Callable[[str, float], str] | None) -> None:
+    """The gentle update nudge — one line, fail-silent, never a FAIL.
+
+    ``update_fetch`` is injectable exactly like ``probe``: a test passes a
+    scripted fetch and never dials. A real run checks ONLY when stdout is an
+    interactive terminal — a piped or CI ``ironcore doctor`` must never dial
+    PyPI (the check is absent from every non-interactive path). Being offline is
+    not a doctor failure, so this never touches the exit code: it prints the
+    behind/up-to-date line when it has an answer and stays silent otherwise.
+    """
+    if update_fetch is None and not _stdout_is_tty():
+        return  # never dial from a non-interactive doctor (a pipe, a redirect, CI)
+
+    from ironcore.update import DIST_NAME, is_newer, latest_version
+
+    latest = latest_version(fetch=update_fetch)
+    if latest is None:
+        return  # could not reach PyPI -- offline is not a failure, so stay silent
+    if is_newer(__version__, latest):
+        _say(f"[--] update: {latest} available -- pip install -U {DIST_NAME}")
+    else:
+        _say(f"[ok] up to date ({__version__})")
 
 
 def _config_hint(user_path: Path, project_path: Path) -> str:
@@ -712,6 +752,10 @@ mode = "manual"
 # [tools]
 # search_url = "https://html.duckduckgo.com/html/"  # web_search endpoint (needs network_tools);
 #                              # "" leaves web_search unregistered, fetch_url stays
+
+# [update]                     # the "a newer version is available" nudge
+# check = true                 # false = never check PyPI, never nudge; IronCore never
+#                              # auto-installs either way -- it only prints the upgrade command
 
 # [mcp.servers.example]        # EXAMPLE server -- none configured by default.
 #                              # Uncommenting registers one. stdio transport only in v0.x.

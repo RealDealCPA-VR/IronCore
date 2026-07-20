@@ -184,6 +184,22 @@ class ToolsSettings(BaseModel):
     search_url: str = "https://html.duckduckgo.com/html/"
 
 
+class UpdateSettings(BaseModel):
+    """The update notifier (the additive ``[update]`` section).
+
+    IronCore prints a one-line "a newer version is available" nudge — in
+    ``ironcore doctor`` and as a TUI boot note — when a newer release exists on
+    PyPI. It never auto-installs (a CLI that runs shell commands and edits files
+    leaves the user in control of what version they run), the check is cached so
+    a normal launch does not dial PyPI, it is short-timeout and fail-silent, and
+    it never runs in a non-interactive / headless / CI context. This is NOT an
+    autonomy control (it installs nothing), so it is not under the T8 ceiling."""
+
+    #: Check PyPI for a newer release. Off = never dial, never nudge — the
+    #: air-gapped / no-telemetry switch.
+    check: bool = True
+
+
 class SkillSettings(BaseModel):
     """Skills — the SKILL.md open standard (the additive ``[skills]`` section, PKG-4).
 
@@ -215,6 +231,7 @@ class Settings(BaseModel):
     plugins: PluginSettings = Field(default_factory=PluginSettings)
     skills: SkillSettings = Field(default_factory=SkillSettings)
     tools: ToolsSettings = Field(default_factory=ToolsSettings)
+    update: UpdateSettings = Field(default_factory=UpdateSettings)
 
     @classmethod
     def load(

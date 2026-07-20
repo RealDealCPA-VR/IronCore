@@ -52,8 +52,9 @@ carries exactly these keys — future handlers (IC-801..807) consume them:
 from __future__ import annotations
 
 import asyncio
+import sys
 import uuid
-from collections.abc import Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from datetime import datetime
 from difflib import get_close_matches
 from pathlib import Path
@@ -118,6 +119,17 @@ LOOP_POLL_S = 0.05
 #: 16+12+30+10+3+1+3 = 75; probes that short-circuit on failure issue fewer).
 #: Quoted in the first-run note so the burst is never a silent surprise.
 PROBE_CALL_ESTIMATE = 80
+
+
+def _stdout_is_tty() -> bool:
+    """True only for a real interactive terminal. Guards the update notifier so
+    it never dials PyPI from a pipe, a redirect, CI, or a test harness — the
+    launch path already gates the whole TUI on this, but ``from_settings`` is a
+    factory tests call directly, so the notifier re-checks rather than trust it."""
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:  # pragma: no cover -- a broken stdout is not the notifier's problem
+        return False
 
 
 def match_commands(registry: CommandRegistry, prefix: str) -> list[SlashCommand]:
@@ -327,6 +339,9 @@ class IronCoreApp(App):
         boot_notes: tuple[str, ...] = (),
         mcp_manager: MCPManager | None = None,
         plugin_probes: Sequence[object] = (),
+        check_updates: bool = False,
+        update_fetch: Callable[[str, float], str] | None = None,
+        update_cache: Path | None = None,
     ) -> None:
         super().__init__()
         # Before anything renders: the app ships its own palette (tui/theme.py)
@@ -357,6 +372,14 @@ class IronCoreApp(App):
         #: plugin probes (MS-5): appended to the default battery by the
         #: auto-probe path and exposed to /probe via ctx.extra["plugin_probes"].
         self._plugin_probes: tuple[object, ...] = tuple(plugin_probes)
+        #: update notifier: dial PyPI in the background on boot for a gentle
+        #: "newer version available" note. Off by default so an injected engine
+        #: (tests) never dials; ``from_settings`` turns it on only for a real TTY
+        #: session with ``[update] check`` set. ``update_fetch`` / ``update_cache``
+        #: are the test injection seams (a scripted fetch, a tmp cache path).
+        self._check_updates = check_updates
+        self._update_fetch = update_fetch
+        self._update_cache = update_cache
         self.provider_registry = provider_registry
         self.workspace: Path = Path(engine.workspace)
         self._goal: str | None = engine.state.goal
@@ -445,6 +468,36 @@ class IronCoreApp(App):
         # the next provider call; a note line reports each server's outcome.
         if self._mcp_manager is not None:
             self.run_worker(self._connect_mcp(), group="mcp")
+        # Update notifier: a background, cache-aware PyPI check that posts ONE
+        # boot-style note if a newer IronCore exists. Never blocks mount, never
+        # runs unless this is a real TTY session with the check enabled, and
+        # degrades to nothing offline. Beside the probe/mold worker on purpose.
+        if self._check_updates:
+            self.run_worker(self._check_update(), group="update")
+
+    async def _check_update(self) -> None:
+        """Post a single "newer version available" note, or nothing.
+
+        The check itself is synchronous and does network I/O, so it runs in a
+        thread — mount and the event loop never block on it. Fail-silent by
+        contract: any error (offline, corrupt cache, a bad payload) yields no
+        note, and IronCore NEVER auto-installs — the note prints the command."""
+        try:
+            from ironcore import __version__
+            from ironcore.update import DIST_NAME, check_for_update
+
+            info = await asyncio.to_thread(
+                check_for_update,
+                __version__,
+                cache_path=self._update_cache,
+                fetch=self._update_fetch,
+            )
+        except Exception:  # noqa: BLE001 -- a maintenance ping must never crash the app
+            return
+        if info is not None:
+            await self.transcript.add_note(
+                f"a newer IronCore is available ({info.latest}) -- pip install -U {DIST_NAME}"
+            )
 
     async def _connect_mcp(self) -> None:
         """Background MCP registration: post the manager's note lines. Never
@@ -1011,6 +1064,10 @@ class IronCoreApp(App):
             boot_notes.extend(
                 f"[plugins] skipped {s.group}:{s.name} - {s.reason}" for s in plugins.skipped
             )
+        # Update notifier: opt-out ([update] check), and only ever dials from a
+        # real interactive terminal — never in CI, a pipe, or a test harness, so
+        # a captured `from_settings` build (the tests) leaves it off.
+        check_updates = settings.update.check and _stdout_is_tty()
         return cls(
             engine,
             command_registry,
@@ -1024,6 +1081,7 @@ class IronCoreApp(App):
             boot_notes=tuple(boot_notes),
             mcp_manager=mcp_manager,
             plugin_probes=tuple(plugins.probes),
+            check_updates=check_updates,
         )
 
 

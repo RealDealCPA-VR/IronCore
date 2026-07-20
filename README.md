@@ -144,6 +144,19 @@ Prebuilt wheels are also attached to every
 [release](https://github.com/RealDealCPA-VR/IronCore/releases); copy a `.whl` asset URL and hand
 it straight to your installer (`uv tool install <wheel-url>` or `pip install <wheel-url>`).
 
+## Updating
+
+Upgrade with whichever installer you used:
+
+```bash
+pip install -U ironcore-cli        # or:  uv tool upgrade ironcore-cli  /  pipx upgrade ironcore-cli
+```
+
+When a newer version exists on PyPI, IronCore shows a one-line nudge (in `ironcore doctor` and as
+a boot note) — it **never auto-installs**, it only prints the command above, and being offline is
+never an error. The check is cached so a normal launch does not dial PyPI, and it never runs in a
+headless or CI context. Turn it off entirely with `[update] check = false` in your config.
+
 ## Try it with no model at all
 
 ```bash

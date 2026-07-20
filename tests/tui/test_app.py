@@ -709,3 +709,94 @@ def test_mcp_worker_registers_tools_and_unmount_closes(tmp_path):
 
     asyncio.run(scenario())
     assert client.closed  # on_unmount closed the server subprocess
+
+
+# --------------------------------------------------------------------------- #
+# update notifier: a background boot-note nudge, injected fetch, never dials
+# --------------------------------------------------------------------------- #
+
+
+def _pypi_json(version: str) -> str:
+    import json
+
+    return json.dumps({"info": {"version": version}})
+
+
+def test_boot_posts_an_update_note_when_a_newer_version_exists(tmp_path):
+    """The TUI surface: a cache-aware background check posts ONE boot-style note
+    when PyPI has a newer IronCore. The fetch is injected, so no network."""
+    engine = _engine(tmp_path, [_text("hi")])
+    app = IronCoreApp(
+        engine,
+        build_cmds(),
+        engine.settings,
+        check_updates=True,
+        update_fetch=lambda url, timeout: _pypi_json("9999.0.0"),
+        update_cache=tmp_path / "update-check.json",
+    )
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            posted = await _wait_for(
+                pilot, lambda: "newer IronCore is available" in app.transcript_text()
+            )
+            assert posted, "the update note never appeared"
+            text = app.transcript_text()
+            assert "9999.0.0" in text
+            assert "pip install -U ironcore-cli" in text
+
+    asyncio.run(scenario())
+
+
+def test_boot_update_check_is_silent_when_offline(tmp_path):
+    """Degrades to nothing: a fetch that raises leaves no note and no crash."""
+    engine = _engine(tmp_path, [_text("hi")])
+
+    def boom(url, timeout):
+        raise RuntimeError("offline")
+
+    app = IronCoreApp(
+        engine,
+        build_cmds(),
+        engine.settings,
+        check_updates=True,
+        update_fetch=boom,
+        update_cache=tmp_path / "update-check.json",
+    )
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "newer IronCore is available" not in app.transcript_text()
+
+    asyncio.run(scenario())
+
+
+def test_an_injected_app_never_dials_for_updates(tmp_path):
+    """check_updates defaults OFF, so a test-injected engine (and every existing
+    app test) never touches the network even with a fetch wired in."""
+    engine = _engine(tmp_path, [_text("hi")])
+    calls: list[str] = []
+
+    def fetch(url, timeout):
+        calls.append(url)
+        return _pypi_json("9999.0.0")
+
+    app = IronCoreApp(engine, build_cmds(), engine.settings, update_fetch=fetch)
+
+    async def scenario():
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.pause()
+            assert calls == []  # no worker scheduled, no dial
+
+    asyncio.run(scenario())
+
+
+def test_from_settings_leaves_the_update_check_off_in_a_non_tty(tmp_path, monkeypatch):
+    """from_settings gates the notifier on a real interactive terminal; under
+    pytest stdout is not a TTY, so a captured build never arms the dial."""
+    monkeypatch.setattr("ironcore.tui.app.default_envelope_dir", lambda: tmp_path / "env")
+    app = IronCoreApp.from_settings(Settings(), tmp_path)
+    assert app._check_updates is False

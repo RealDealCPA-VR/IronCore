@@ -154,7 +154,30 @@ either, because you see where each search goes before approving it.
 |---|---|---|---|
 | `search_url` | str | `"https://html.duckduckgo.com/html/"` | The HTML search endpoint `web_search` queries. The query is sent as `?q=…`; the response is parsed for `title`/`url`/`snippet` results, capped and secret-redacted. Point it at your own [SearXNG](https://searxng.org/) instance if you prefer. An **empty string** leaves `web_search` unregistered while `fetch_url` stays. |
 
-## 12. Environment variables
+## 12. `[update]` — the update notifier
+
+IronCore checks PyPI for a newer release and, when one exists, prints a **one-line** "a newer
+version is available" nudge — in `ironcore doctor` and as a TUI boot note. It **never
+auto-installs**: a CLI that runs shell commands and edits files leaves you in control of what
+version you run, so the nudge only prints the upgrade command. The check is **cached** (a normal
+launch inside a day reads `~/.ironcore/update-check.json` and does not dial PyPI),
+**short-timeout**, **fail-silent** (offline is a silent no-op, never a `doctor` failure), and it
+**never runs in a non-interactive / headless / CI context** — `ironcore exec` and any non-TTY
+path never dial. It installs nothing, so it is **not** under the autonomy ceiling (§6).
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `check` | bool | `true` | Check PyPI for a newer release and nudge when one exists. `false` = never dial, never nudge — the air-gapped / no-telemetry switch. IronCore never auto-installs either way. |
+
+Upgrade with whichever installer you used — IronCore only ever tells you to run one of these:
+
+```bash
+pip install -U ironcore-cli
+uv tool upgrade ironcore-cli
+pipx upgrade ironcore-cli
+```
+
+## 13. Environment variables
 
 All eight are read by `config/settings.py`; each overrides the same key in every file layer,
 and env is never clamped. An empty value is ignored (it does not blank the key).
@@ -182,7 +205,7 @@ only whether escape codes are written:
 Without either, colour follows the stream: on a terminal you get it, piped or redirected you
 do not, so `ironcore doctor > report.txt` is always plain text.
 
-## 13. A complete config.toml
+## 14. A complete config.toml
 
 Every key, every default, annotated. `ironcore init` writes a shorter commented version of
 this to `~/.ironcore/config.toml`.
@@ -226,6 +249,9 @@ compat_dirs = false                      # true also reads .claude/.codex/.grok 
 search_url = "https://html.duckduckgo.com/html/"   # web_search endpoint; needs network_tools;
                                          # "" = no web_search tool
 
+[update]
+check = true                             # false = never check PyPI; never auto-installs either way
+
 # [mcp.servers.filesystem]               # NET-risk: needs safety.network_tools = true,
 # command   = "npx"                      # and is SPAWNED AT LAUNCH (SAFETY.md §10)
 # args      = ["-y", "@modelcontextprotocol/server-filesystem", "."]
@@ -234,7 +260,7 @@ search_url = "https://html.duckduckgo.com/html/"   # web_search endpoint; needs 
 # enabled   = true
 ```
 
-## 14. Checking what actually loaded
+## 15. Checking what actually loaded
 
 ```
 ironcore doctor
